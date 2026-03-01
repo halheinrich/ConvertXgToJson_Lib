@@ -38,6 +38,10 @@ Thumbs.db
 ConvertXgToJson_Lib.Tests/TestData/Output/*.json
 ConvertXgToJson_Lib.Tests/TestData/Output/**/*.json
 
+# DecisionCsvTests writes generated CSV output here.
+ConvertXgToJson_Lib.Tests/TestData/Csv/*.csv
+ConvertXgToJson_Lib.Tests/TestData/Csv/**/*.csv
+
 # Publish the directories, but not the local binary fixtures.
 ConvertXgToJson_Lib.Tests/TestData/xg/*.xg
 ConvertXgToJson_Lib.Tests/TestData/xg/**/*.xg
