@@ -10,23 +10,24 @@ namespace ConvertXgToJson_Lib.Tests;
 /// </summary>
 public class RealFileTests
 {
-    private static string Peek(string path, long offset)
-    {
-        if (offset < 0 || offset >= new FileInfo(path).Length) return "(out of range)";
-        using var f = File.OpenRead(path);
-        f.Position = offset;
-        var buf = new byte[4];
-        f.Read(buf);
-        return string.Join(" ", buf.Select(b => b.ToString("X2")));
-    }
-    private static byte[] ReadBytesAt(string path, long offset, int count)
-    {
-        using var f = File.OpenRead(path);
-        f.Position = offset;
-        var buf = new byte[count];
-        f.Read(buf);
-        return buf;
-    }    // ------------------------------------------------------------------ //
+    //private static string Peek(string path, long offset)
+    //{
+    //    if (offset < 0 || offset >= new FileInfo(path).Length) return "(out of range)";
+    //    using var f = File.OpenRead(path);
+    //    f.Position = offset;
+    //    var buf = new byte[4];
+    //    f.ReadExactly(buf);
+    //    return string.Join(" ", buf.Select(b => b.ToString("X2")));
+    //}
+    //private static byte[] ReadBytesAt(string path, long offset, int count)
+    //{
+    //    using var f = File.OpenRead(path);
+    //    f.Position = offset;
+    //    var buf = new byte[count];
+    //    f.ReadExactly(buf);
+    //    return buf;
+    //}
+    // ------------------------------------------------------------------ //
     //  .xgp files
     // ------------------------------------------------------------------ //
 

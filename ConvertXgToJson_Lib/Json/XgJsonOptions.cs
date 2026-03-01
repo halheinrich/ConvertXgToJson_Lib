@@ -63,8 +63,34 @@ internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
         => typeof(SaveRecord).IsAssignableFrom(typeToConvert);
 
     public override SaveRecord Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        => throw new NotSupportedException("Deserialisation of SaveRecord is not supported.");
+    {
+        // Buffer the entire object so we can read $type then redeserialize
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
 
+        if (!root.TryGetProperty("$type", out var typeProp))
+            throw new JsonException("SaveRecord missing '$type' discriminator.");
+
+        string typeName = typeProp.GetString() ?? "";
+
+        // Build inner options without this converter to avoid recursion
+        var innerOptions = new JsonSerializerOptions(options);
+        innerOptions.Converters.Remove(
+            innerOptions.Converters.First(c => c is SaveRecordConverter));
+
+        string json = root.GetRawText();
+
+        return typeName switch
+        {
+            "HeaderMatch" => JsonSerializer.Deserialize<MatchHeaderRecord>(json, innerOptions)!,
+            "HeaderGame" => JsonSerializer.Deserialize<GameHeaderRecord>(json, innerOptions)!,
+            "Move" => JsonSerializer.Deserialize<MoveRecord>(json, innerOptions)!,
+            "Cube" => JsonSerializer.Deserialize<CubeRecord>(json, innerOptions)!,
+            "FooterGame" => JsonSerializer.Deserialize<GameFooterRecord>(json, innerOptions)!,
+            "FooterMatch" => JsonSerializer.Deserialize<MatchFooterRecord>(json, innerOptions)!,
+            _ => throw new JsonException($"Unknown SaveRecord type: '{typeName}'")
+        };
+    }
     public override void Write(Utf8JsonWriter writer, SaveRecord value, JsonSerializerOptions options)
     {
         writer.WriteStartObject();

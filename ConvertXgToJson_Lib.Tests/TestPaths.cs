@@ -14,4 +14,5 @@ internal static class TestPaths
 
     public static IEnumerable<string> XgFiles =>
         Directory.EnumerateFiles(XgDir, "*.xg");
+    public static string CsvDir => Path.Combine(_root, "Csv");
 }

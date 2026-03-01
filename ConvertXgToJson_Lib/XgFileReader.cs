@@ -102,4 +102,10 @@ public static class XgFileReader
         var xgFile = ReadFile(inputPath);
         await WriteJsonAsync(xgFile, outputPath, options, cancellationToken);
     }
+    public static XgFile ReadJson(string path)
+    {
+        string json = File.ReadAllText(path);
+        return JsonSerializer.Deserialize<XgFile>(json, XgJsonOptions.Default)
+               ?? throw new InvalidDataException($"Failed to deserialise XgFile from {path}");
+    }
 }

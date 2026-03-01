@@ -1,0 +1,149 @@
+using ConvertXgToJson_Lib;
+using ConvertXgToJson_Lib.Models;
+
+namespace ConvertXgToJson_Lib.Tests;
+
+/// <summary>
+/// Integration tests that iterate decisions from .xg files (direct) and
+/// from pre-exported JSON files, writing CSV output to TestData/Csv.
+/// </summary>
+public class DecisionCsvTests
+{
+    // -----------------------------------------------------------------------
+    //  Direct .xg iteration
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void XgDirect_WriteDecisionCsv()
+    {
+        var xgFiles = Directory.GetFiles(TestPaths.XgDir, "*.xg");
+        xgFiles.Should().NotBeEmpty("TestData/xg should contain at least one .xg file");
+
+        Directory.CreateDirectory(TestPaths.CsvDir);
+
+        foreach (var xgPath in xgFiles)
+        {
+            string matchId  = Path.GetFileNameWithoutExtension(xgPath);
+            string csvPath  = Path.Combine(TestPaths.CsvDir, matchId + ".csv");
+
+            var file = XgFileReader.ReadFile(xgPath);
+            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+
+            using var writer = new StreamWriter(csvPath);
+            writer.WriteLine(DecisionRow.CsvHeader);
+            foreach (var row in rows)
+                writer.WriteLine(row.ToCsvLine());
+
+            rows.Should().NotBeEmpty($"{matchId} should contain at least one analysed decision");
+            rows.Should().OnlyContain(r => r.Xgid.StartsWith("XGID="),
+                "every row should have a valid XGID");
+            rows.Should().OnlyContain(r => r.Error >= 0,
+                "error values should be non-negative");
+        }
+    }
+
+    [Fact]
+    public void XgDirect_AllDecisions_HaveNonEmptyPlayer()
+    {
+        foreach (var path in Directory.GetFiles(TestPaths.XgDir, "*.xg"))
+        {
+            string matchId = Path.GetFileNameWithoutExtension(path);
+            var file = XgFileReader.ReadFile(path);
+            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+
+            rows.Should().NotBeEmpty($"{matchId} should have decisions");
+            rows.Should().OnlyContain(r => !string.IsNullOrEmpty(r.Player),
+                $"all decisions in {matchId} should have a player name");
+        }
+    }
+
+    [Fact]
+    public void XgDirect_MoveDecisions_HaveNonZeroRoll()
+    {
+        foreach (var path in Directory.GetFiles(TestPaths.XgDir, "*.xg"))
+        {
+            string matchId = Path.GetFileNameWithoutExtension(path);
+            var file = XgFileReader.ReadFile(path);
+
+            foreach (var row in XgDecisionIterator.Iterate(file, matchId)
+                                                   .Where(r => !r.IsCube))
+            {
+                row.Roll.Should().NotBe(0,
+                    $"checker play in {matchId} game {row.Game} move {row.MoveNum} should have dice");
+            }
+        }
+    }
+
+    [Fact]
+    public void XgDirect_AllDecisions_XgidPositionIs26Chars()
+    {
+        foreach (var path in Directory.GetFiles(TestPaths.XgDir, "*.xg"))
+        {
+            string matchId = Path.GetFileNameWithoutExtension(path);
+            var file = XgFileReader.ReadFile(path);
+
+            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            {
+                // XGID=<26chars>:... — colon at index 31
+                int colonIndex = row.Xgid.IndexOf(':', 5);
+                colonIndex.Should().Be(31, $"position string should be 26 chars in {row.Xgid}");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    //  JSON-derived iteration
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void JsonDerived_WriteDecisionCsv()
+    {
+        var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
+            .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
+                Path.GetFileNameWithoutExtension(p) + ".xg")))
+            .ToArray();
+
+        jsonFiles.Should().NotBeEmpty("Output dir should have JSON from .xg files");
+
+        Directory.CreateDirectory(TestPaths.CsvDir);
+
+        foreach (var jsonPath in jsonFiles)
+        {
+            string matchId = Path.GetFileNameWithoutExtension(jsonPath);
+            string csvPath = Path.Combine(TestPaths.CsvDir, matchId + "-fromjson.csv");
+
+            var file = XgFileReader.ReadJson(jsonPath);
+            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+
+            using var writer = new StreamWriter(csvPath);
+            writer.WriteLine(DecisionRow.CsvHeader);
+            foreach (var row in rows)
+                writer.WriteLine(row.ToCsvLine());
+
+            rows.Should().NotBeEmpty($"{matchId} JSON should contain at least one decision");
+        }
+    }
+
+    [Fact]
+    public void BothSources_ProduceSameRowCount()
+    {
+        var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
+            .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
+                Path.GetFileNameWithoutExtension(p) + ".xg")))
+            .ToArray();
+
+        jsonFiles.Should().NotBeEmpty();
+
+        foreach (var jsonPath in jsonFiles)
+        {
+            string matchId = Path.GetFileNameWithoutExtension(jsonPath);
+            string xgPath  = Path.Combine(TestPaths.XgDir, matchId + ".xg");
+
+            var fromXg   = XgDecisionIterator.Iterate(XgFileReader.ReadFile(xgPath),   matchId).ToList();
+            var fromJson = XgDecisionIterator.Iterate(XgFileReader.ReadJson(jsonPath),  matchId).ToList();
+
+            fromJson.Count.Should().Be(fromXg.Count,
+                $"{matchId}: JSON and .xg sources should produce the same number of decisions");
+        }
+    }
+}
