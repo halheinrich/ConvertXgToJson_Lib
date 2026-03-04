@@ -12,26 +12,20 @@ namespace ConvertXgToJson_Lib.Tests;
 /// </summary>
 public class DecompressionTests
 {
-    /// <summary>
-    /// Compresses a known byte array as a single ZLib stream and verifies
-    /// that DecompressOneStream (via Decompress) round-trips it correctly.
-    /// </summary>
     [Fact]
     public void Decompress_RoundTripsGameRecordStream()
     {
-        // Build 2 save records (header + footer) = 5120 bytes
-        byte[] xg  = BuildTwoRecordXg();
+        byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
         byte[] xgr = [];
         byte[] xgc = "Test comment\r\n"u8.ToArray();
 
-        byte[] compressed = CompressAll(xg, xgi, xgr, xgc);
+        byte[] compressed = CompressAll(xg, xgr, xgi, xgc);
 
         using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
 
         streams.GameRecords.Length.Should().Be(xg.Length);
         streams.IndexRecords.Length.Should().Be(xgi.Length);
-        // xgr is empty so its ZLib stream decompresses to 0 bytes
         streams.RolloutContexts.Length.Should().Be(0);
         streams.Comments.Length.Should().Be(xgc.Length);
     }
@@ -39,9 +33,10 @@ public class DecompressionTests
     [Fact]
     public void Decompress_GameRecordsBytesMatchOriginal()
     {
-        byte[] xg  = BuildTwoRecordXg();
+        byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
-        byte[] compressed = CompressAll(xg, xgi, [], []);
+
+        byte[] compressed = CompressAll(xg, [], xgi, []);
 
         using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
 
@@ -53,10 +48,11 @@ public class DecompressionTests
     [Fact]
     public void Decompress_CommentStreamMatchesOriginal()
     {
-        byte[] xg  = BuildTwoRecordXg();
+        byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
         byte[] xgc = "Comment with embedded\x01\x02newline\r\n"u8.ToArray();
-        byte[] compressed = CompressAll(xg, xgi, [], xgc);
+
+        byte[] compressed = CompressAll(xg, [], xgi, xgc);
 
         using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
 
@@ -68,9 +64,10 @@ public class DecompressionTests
     [Fact]
     public void Decompress_AllStreamsPositionedAtZero()
     {
-        byte[] xg  = BuildTwoRecordXg();
+        byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
-        byte[] compressed = CompressAll(xg, xgi, [], []);
+
+        byte[] compressed = CompressAll(xg, [], xgi, []);
 
         using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
 
@@ -92,15 +89,24 @@ public class DecompressionTests
         return [.. rec0, .. rec1];
     }
 
-    private static byte[] CompressAll(params byte[][] sections)
+    /// <summary>
+    /// Compresses each section as its own ZLib stream and concatenates them —
+    /// matching the ZlibArchive multi-stream format used by XG.
+    /// Stream order must be: xg, xgr, xgi, xgc.
+    /// Empty sections produce a valid empty zlib stream so the stream count
+    /// stays predictable; the decompressor skips zero-length results.
+    /// </summary>
+    private static byte[] CompressAll(byte[] xg, byte[] xgr, byte[] xgi, byte[] xgc)
     {
+        // Each non-empty section gets its own zlib stream, in order: xg, xgr, xgi, xgc.
+        // Empty sections are omitted — the size-based classifier does not need placeholders.
         var ms = new MemoryStream();
-        using (var z = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true))
+        foreach (var section in new[] { xg, xgr, xgi, xgc })
         {
-            foreach (var section in sections)
-                z.Write(section);
+            if (section.Length == 0) continue;
+            using var z = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true);
+            z.Write(section);
         }
-        ms.Position = 0;
         return ms.ToArray();
     }
 }

@@ -1,52 +1,75 @@
-namespace ConvertXgToJson_Lib;
+﻿namespace ConvertXgToJson_Lib.Models;
 
 /// <summary>
-/// Represents a single checker-play or cube decision extracted from an XG file,
-/// ready for CSV export or analysis.
+/// A single analysed checker-play or cube decision, ready for CSV/JSON export.
 /// </summary>
 public sealed class DecisionRow
 {
-    /// <summary>Full XGID string including position and game state.</summary>
-    public string Xgid            { get; init; } = "";
+    /// <summary>XGID position string.</summary>
+    public string Xgid { get; init; } = string.Empty;
 
-    /// <summary>Equity error (cost of the played move/cube action vs best). 0 = best play.</summary>
-    public double Error           { get; init; }
+    /// <summary>Absolute error (positive = worse than best).</summary>
+    public double Error { get; init; }
 
-    /// <summary>Match score encoded as away-scores, e.g. "5a3a" = 5-away 3-away. "money" for money games.</summary>
-    public string MatchScore      { get; init; } = "";
+    /// <summary>Match score at the time of the decision, e.g. "3a5a" or "money".</summary>
+    public string MatchScore { get; init; } = string.Empty;
 
-    /// <summary>Match length (0 for money game).</summary>
-    public int MatchLength        { get; init; }
+    /// <summary>Match length (0 = unlimited/money).</summary>
+    public int MatchLength { get; init; }
 
-    /// <summary>Name of the player who made this decision.</summary>
-    public string Player          { get; init; } = "";
+    /// <summary>Name of the player who made the decision.</summary>
+    public string Player { get; init; } = string.Empty;
 
-    /// <summary>Match identifier (derived from file name).</summary>
-    public string Match           { get; init; } = "";
+    /// <summary>Match identifier (file name without extension).</summary>
+    public string Match { get; init; } = string.Empty;
 
-    /// <summary>Game number within the match.</summary>
-    public int Game               { get; init; }
+    /// <summary>Game number within the match (1-based).</summary>
+    public int Game { get; init; }
 
-    /// <summary>Sequential move number within the game.</summary>
-    public int MoveNum            { get; init; }
+    /// <summary>Move number within the game (1-based).</summary>
+    public int MoveNum { get; init; }
 
-    /// <summary>Dice roll as two-digit int (e.g. 62 for 6-2). 0 for cube decisions.</summary>
-    public int Roll               { get; init; }
+    /// <summary>Dice roll as a two-digit integer, e.g. 63, 11. 0 for cube decisions.</summary>
+    public int Roll { get; init; }
 
-    /// <summary>Analysis depth label (e.g. "XG Roller++", "3-ply", "1-ply").</summary>
-    public string AnalysisDepth   { get; init; } = "";
+    /// <summary>Human-readable analysis depth label, e.g. "3-ply", "Rollout: 1296 trials. 3-ply".</summary>
+    public string AnalysisDepth { get; init; } = string.Empty;
 
-    /// <summary>Best-play equity at this decision point.</summary>
-    public double Equity          { get; init; }
+    /// <summary>Best equity value from the analysis.</summary>
+    public double Equity { get; init; }
 
-    /// <summary>Whether this is a cube decision (true) or checker play (false).</summary>
-    public bool IsCube            { get; init; }
+    /// <summary>True if this is a cube decision (Roll == 0); false if a checker play.</summary>
+    public bool IsCube => Roll == 0;
 
-    /// <summary>Formats this row as a CSV line (no header).</summary>
-    public string ToCsvLine() =>
-        $"{Xgid},{Error:G4},{MatchScore},{MatchLength},{Player},{Match},{Game},{MoveNum},{Roll},{AnalysisDepth},{Equity:G4}";
+    // -----------------------------------------------------------------------
+    //  CSV support
+    // -----------------------------------------------------------------------
 
-    /// <summary>CSV header line.</summary>
+    /// <summary>CSV header row matching the column order of <see cref="ToCsvLine"/>.</summary>
     public static string CsvHeader =>
-        "XGID,Error,Match Score,Length,Player,Match,Game,Move Num,Roll,Analysis Depth,Equity";
+        "Xgid,Error,MatchScore,MatchLength,Player,Match,Game,MoveNum,Roll,AnalysisDepth,Equity";
+
+    /// <summary>Formats this row as a CSV line (no trailing newline).</summary>
+    public string ToCsvLine()
+    {
+        return string.Join(",",
+            CsvEscape(Xgid),
+            Error.ToString("G6"),
+            CsvEscape(MatchScore),
+            MatchLength,
+            CsvEscape(Player),
+            CsvEscape(Match),
+            Game,
+            MoveNum,
+            Roll,
+            CsvEscape(AnalysisDepth),
+            Equity.ToString("G6"));
+    }
+
+    private static string CsvEscape(string value)
+    {
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        return value;
+    }
 }

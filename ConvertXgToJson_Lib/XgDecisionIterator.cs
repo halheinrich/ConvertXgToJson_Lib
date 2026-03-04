@@ -14,8 +14,6 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
 
     /// <summary>Yields all decisions from a single already-parsed <see cref="XgFile"/>.</summary>
-    /// <param name="file">The parsed XG file.</param>
-    /// <param name="matchId">Identifier for this match (e.g. filename without extension).</param>
     public static IEnumerable<DecisionRow> Iterate(XgFile file, string matchId)
     {
         var context = new MatchContext(file.Records, matchId);
@@ -26,13 +24,13 @@ public static class XgDecisionIterator
 
             if (record is MoveRecord move && IsAnalysed(move))
             {
-                var row = BuildMoveRow(move, context);
+                var row = BuildMoveRow(move, context, file.Rollouts);
                 if (row != null) yield return row;
             }
             else if (record is CubeRecord cube && IsAnalysed(cube))
             {
-                var row = BuildCubeRow(cube, context);
-                if (row != null) yield return row;
+                foreach (var row in BuildCubeRows(cube, context, file.Rollouts))
+                    yield return row;
             }
         }
     }
@@ -41,10 +39,6 @@ public static class XgDecisionIterator
     //  Public API — directories
     // -----------------------------------------------------------------------
 
-    /// <summary>
-    /// Parses all .xg files in <paramref name="xgDir"/> directly and yields every decision.
-    /// Use this as the primary path — no intermediate JSON step required.
-    /// </summary>
     public static IEnumerable<DecisionRow> IterateXgDirectory(string xgDir)
     {
         foreach (var path in Directory.EnumerateFiles(xgDir, "*.xg"))
@@ -59,10 +53,6 @@ public static class XgDecisionIterator
         }
     }
 
-    /// <summary>
-    /// Reads pre-exported JSON files from <paramref name="jsonDir"/> and yields every decision.
-    /// Use this when you want to avoid re-parsing .xg files and have JSON already available.
-    /// </summary>
     public static IEnumerable<DecisionRow> IterateJsonDirectory(string jsonDir)
     {
         foreach (var path in Directory.EnumerateFiles(jsonDir, "*.json"))
@@ -81,42 +71,45 @@ public static class XgDecisionIterator
     //  Move record
     // -----------------------------------------------------------------------
 
-    private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx)
+    private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
     {
         var analysis = move.Analysis;
         if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
             return null;
 
-        var    bestEval = analysis.Evals[0];
-        int    dice     = DiceToInt(move.Dice);
-        string depth    = LevelLabel(analysis.EvalLevels.Length > 0
-                              ? analysis.EvalLevels[0].Level : (short)0);
+        var bestEval = analysis.Evals[0];
+        int dice = DiceToInt(move.Dice);
+
+        string depth = ResolveDepth(
+            evalLevel: analysis.EvalLevels.Length > 0 ? analysis.EvalLevels[0].Level : (short)0,
+            rolloutIndices: move.RolloutIndices,
+            rollouts: rollouts);
 
         string xgid = XgidEncoder.Encode(
-            position:       move.InitialPosition,
-            cubeValue:      ctx.CubeValue,
-            cubePos:        ctx.CubePosition,
-            turn:           move.ActivePlayer >= 0 ? 1 : -1,
-            dice:           dice,
-            score1:         ctx.Score1,
-            score2:         ctx.Score2,
+            position: move.InitialPosition,
+            cubeValue: ctx.CubeValue,
+            cubePos: ctx.CubePosition,
+            turn: move.ActivePlayer >= 0 ? 1 : -1,
+            dice: dice,
+            score1: ctx.Score1,
+            score2: ctx.Score2,
             crawfordJacoby: ctx.CrawfordJacoby,
-            matchLength:    ctx.MatchLength);
+            matchLength: ctx.MatchLength,
+            maxCubeLog2: ctx.MaxCubeLimit);
 
         return new DecisionRow
         {
-            Xgid          = xgid,
-            Error         = Math.Abs(move.ErrorMove),
-            MatchScore    = ctx.MatchScore,
-            MatchLength   = ctx.MatchLength,
-            Player        = ctx.PlayerName(move.ActivePlayer),
-            Match         = ctx.MatchId,
-            Game          = ctx.GameNumber,
-            MoveNum       = ctx.MoveNumber,
-            Roll          = dice,
+            Xgid = xgid,
+            Error = Math.Abs(move.MoveError),
+            MatchScore = ctx.MatchScore,
+            MatchLength = ctx.MatchLength,
+            Player = ctx.PlayerName(move.ActivePlayer),
+            Match = ctx.MatchId,
+            Game = ctx.GameNumber,
+            MoveNum = ctx.MoveNumber,
+            Roll = dice,
             AnalysisDepth = depth,
-            Equity        = bestEval.Equity,
-            IsCube        = false,
+            Equity = bestEval.Equity,
         };
     }
 
@@ -124,38 +117,75 @@ public static class XgDecisionIterator
     //  Cube record
     // -----------------------------------------------------------------------
 
-    private static DecisionRow? BuildCubeRow(CubeRecord cube, MatchContext ctx)
+    private static IEnumerable<DecisionRow> BuildCubeRows(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
     {
-        var    analysis   = cube.Analysis;
-        double bestEquity = BestCubeEquity(analysis);
-        string depth      = LevelLabel(analysis.LevelRequest);
+        var analysis = cube.Analysis;
+
+        string depth = ResolveDepth(
+            evalLevel: analysis.LevelRequest,
+            rolloutIndices: [cube.RolloutIndex],
+            rollouts: rollouts);
 
         string xgid = XgidEncoder.Encode(
-            position:       cube.Position,
-            cubeValue:      ctx.CubeValue,
-            cubePos:        ctx.CubePosition,
-            turn:           cube.ActivePlayer >= 0 ? 1 : -1,
-            dice:           0,   // 0 encodes as "00" = to roll / cube decision
-            score1:         ctx.Score1,
-            score2:         ctx.Score2,
+            position: cube.Position,
+            cubeValue: ctx.CubeValue,
+            cubePos: ctx.CubePosition,
+            turn: cube.ActivePlayer >= 0 ? 1 : -1,
+            dice: 0,
+            score1: ctx.Score1,
+            score2: ctx.Score2,
             crawfordJacoby: ctx.CrawfordJacoby,
-            matchLength:    ctx.MatchLength);
+            matchLength: ctx.MatchLength,
+            maxCubeLog2: ctx.MaxCubeLimit);
 
-        return new DecisionRow
+        // One row per cube decision. Double and take errors are both on this record;
+        // callers can read ErrorCube for the doubling decision and ErrorTake for the
+        // take decision from CubeRecord directly if needed.
+        yield return new DecisionRow
         {
-            Xgid          = xgid,
-            Error         = Math.Abs(cube.ErrorCube),
-            MatchScore    = ctx.MatchScore,
-            MatchLength   = ctx.MatchLength,
-            Player        = ctx.PlayerName(cube.ActivePlayer),
-            Match         = ctx.MatchId,
-            Game          = ctx.GameNumber,
-            MoveNum       = ctx.MoveNumber,
-            Roll          = 0,
+            Xgid = xgid,
+            Error = Math.Abs(cube.ErrorCube),
+            MatchScore = ctx.MatchScore,
+            MatchLength = ctx.MatchLength,
+            Player = ctx.PlayerName(cube.ActivePlayer),
+            Match = ctx.MatchId,
+            Game = ctx.GameNumber,
+            MoveNum = ctx.MoveNumber,
+            Roll = 0,
             AnalysisDepth = depth,
-            Equity        = bestEquity,
-            IsCube        = true,
+            Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
         };
+    }
+
+    // -----------------------------------------------------------------------
+    //  Depth resolution
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the analysis depth label.
+    /// Rollout detection is index-based: if any RolloutIndex points to a valid
+    /// RolloutContext, it's a rollout regardless of the eval level value.
+    /// </summary>
+    private static string ResolveDepth(
+        short evalLevel,
+        int[] rolloutIndices,
+        List<RolloutContext> rollouts)
+    {
+        // Find first valid rollout index
+        foreach (int i in rolloutIndices)
+        {
+            if (i >= 0 && i < rollouts.Count)
+            {
+                var ctx = rollouts[i];
+                int plyLevel = ctx.Level2 > 0 ? ctx.Level2
+                             : ctx.Level1 > 0 ? ctx.Level1
+                             : ctx.LevelTrunc;
+                return $"Rollout: {ctx.GamesRolled} trials. {LevelLabel((short)plyLevel)}";
+            }
+        }
+
+        // No valid rollout index → normal analysis
+        return LevelLabel(evalLevel);
     }
 
     // -----------------------------------------------------------------------
@@ -163,19 +193,22 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
 
     private static bool IsAnalysed(MoveRecord move) =>
-        move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;
+        move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0
+        && move.MoveError > -999.0;
+
 
     private static bool IsAnalysed(CubeRecord cube) =>
-        cube.Analysis.Level > 0 || cube.Analysis.LevelRequest > 0;
+        (cube.Analysis.Level > 0 || cube.Analysis.LevelRequest > 0)
+        && cube.ErrorCube > -999.0;
 
     private static int DiceToInt(int[] dice) =>
         dice.Length >= 2 ? dice[0] * 10 + dice[1] : 0;
 
     private static double BestCubeEquity(DoubleActionAnalysis a)
     {
-        double nd   = IsUsable(a.EquityNoDouble)   ? a.EquityNoDouble   : double.MinValue;
-        double dt   = IsUsable(a.EquityDoubleTake) ? a.EquityDoubleTake : double.MinValue;
-        double dd   = IsUsable(a.EquityDoubleDrop) ? a.EquityDoubleDrop : double.MinValue;
+        double nd = IsUsable(a.EquityNoDouble) ? a.EquityNoDouble : double.MinValue;
+        double dt = IsUsable(a.EquityDoubleTake) ? a.EquityDoubleTake : double.MinValue;
+        double dd = IsUsable(a.EquityDoubleDrop) ? a.EquityDoubleDrop : double.MinValue;
         double best = Math.Max(nd, Math.Max(dt, dd));
         return best == double.MinValue ? 0 : best;
     }
@@ -184,19 +217,30 @@ public static class XgDecisionIterator
         !float.IsNaN(v) && !float.IsInfinity(v) && v != 0f && v > -999f;
 
     /// <summary>
-    /// XG analysis levels: 0=1-ply, 1=2-ply, 2=3-ply, 3=XG Roller,
-    /// 4=XG Roller+, 5=XG Roller++, 6=Rollout
+    /// Maps XG analysis level codes to display labels.
+    /// PLAYERLEVEL TABLE from xg_format.pas:
+    ///   0=1-ply, 1=2-ply, 2=3-ply, 12=3-ply red
+    ///   3=4-ply, 4=5-ply, 5=6-ply, 6=7-ply
+    ///   100=Rollout, 1000=XGRoller, 1001=XGRoller+, 1002=XGRoller++
+    ///   999=Opening Book V1, 998=Opening Book V2
     /// </summary>
     private static string LevelLabel(short level) => level switch
     {
         0 => "1-ply",
         1 => "2-ply",
         2 => "3-ply",
-        3 => "XG Roller",
-        4 => "XG Roller+",
-        5 => "XG Roller++",
-        6 => "Rollout",
-        _ => $"{level}-ply",
+        12 => "3-ply red",
+        3 => "4-ply",
+        4 => "5-ply",
+        5 => "6-ply",
+        6 => "7-ply",
+        100 => "Rollout",
+        1000 => "XG Roller",
+        1001 => "XG Roller+",
+        1002 => "XG Roller++",
+        998 => "Book V1",
+        999 => "Book V2",
+        _ => $"level-{level}",
     };
 
     // -----------------------------------------------------------------------
@@ -205,15 +249,16 @@ public static class XgDecisionIterator
 
     private sealed class MatchContext
     {
-        public string MatchId        { get; }
-        public int    MatchLength    { get; private set; }
-        public int    Score1         { get; private set; }
-        public int    Score2         { get; private set; }
-        public int    CrawfordJacoby { get; private set; }
-        public int    CubeValue      { get; private set; } = 1;
-        public int    CubePosition   { get; private set; }
-        public int    GameNumber     { get; private set; }
-        public int    MoveNumber     { get; private set; }
+        public string MatchId { get; }
+        public int MatchLength { get; private set; }
+        public int Score1 { get; private set; }
+        public int Score2 { get; private set; }
+        public int CrawfordJacoby { get; private set; }
+        public int CubeValue { get; private set; } = 1;
+        public int CubePosition { get; private set; }
+        public int GameNumber { get; private set; }
+        public int MoveNumber { get; private set; }
+        public int MaxCubeLimit { get; private set; } = 6;
 
         private string _player1 = "Player 1";
         private string _player2 = "Player 2";
@@ -225,14 +270,13 @@ public static class XgDecisionIterator
             {
                 if (r is MatchHeaderRecord hm)
                 {
-                    _player1    = hm.Player1;
-                    _player2    = hm.Player2;
+                    _player1 = hm.Player1;
+                    _player2 = hm.Player2;
                     MatchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength;
-                    // Money game: Jacoby + 2×Beaver bitmask per XGID spec field 8
-                    // Match game: 0 until crawford game, then 1
                     CrawfordJacoby = MatchLength == 0
                         ? (hm.Jacoby ? 1 : 0) + (hm.Beaver ? 2 : 0)
                         : 0;
+                    MaxCubeLimit = hm.CubeLimit > 0 ? hm.CubeLimit : 6;
                     break;
                 }
             }
@@ -244,12 +288,12 @@ public static class XgDecisionIterator
             {
                 case GameHeaderRecord gh:
                     GameNumber++;
-                    MoveNumber   = 0;
-                    Score1       = gh.Score1;
-                    Score2       = gh.Score2;
+                    MoveNumber = 0;
+                    Score1 = gh.Score1;
+                    Score2 = gh.Score2;
                     if (MatchLength > 0 && gh.CrawfordApplies)
                         CrawfordJacoby = 1;
-                    CubeValue    = 1;
+                    CubeValue = 1;
                     CubePosition = 0;
                     break;
 
@@ -259,11 +303,17 @@ public static class XgDecisionIterator
                     break;
 
                 case CubeRecord cb:
-                    MoveNumber++;
-                    if (cb.Doubled == 1 && cb.Taken == 1)
+                    // Only count as a move if the player actually doubled.
+                    // A no-double decision (Doubled == 0) is a voluntary
+                    // pass and does not advance the move counter.
+                    if (cb.Doubled == 1)
                     {
-                        CubeValue    = Math.Max(1, cb.CubeValue) * 2;
-                        CubePosition = cb.ActivePlayer >= 0 ? 1 : -1;
+                        MoveNumber++;
+                        if (cb.Taken == 1)
+                        {
+                            CubeValue = Math.Max(1, cb.CubeValue) * 2;
+                            CubePosition = cb.ActivePlayer >= 0 ? 1 : -1;
+                        }
                     }
                     break;
             }
@@ -279,7 +329,8 @@ public static class XgDecisionIterator
                 if (MatchLength == 0) return "money";
                 int away1 = MatchLength - Score1;
                 int away2 = MatchLength - Score2;
-                return $"{away1}a{away2}a";
+                string crawford = CrawfordJacoby == 1 ? "C" : "";
+                return $"{away1}a{away2}a{crawford}";
             }
         }
     }

@@ -46,7 +46,10 @@ public static class XgFileReader
 
         // Step 2: Decompress the payload into the four sub-streams
         using var decompressed = XgDecompressor.Decompress(stream);
-
+        //var rolloutStreamLen = decompressed.RolloutContexts.Length;
+        //if (rolloutStreamLen != 0)
+        //    rolloutStreamLen += 0;
+        // set a breakpoint here or log it
         // Step 3: Parse each sub-stream
         var records  = SaveRecordParser.ReadAll(decompressed.GameRecords);
         var rollouts = RolloutContextParser.ReadAll(decompressed.RolloutContexts);

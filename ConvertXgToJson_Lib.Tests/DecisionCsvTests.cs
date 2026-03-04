@@ -1,5 +1,6 @@
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
+using System.Text.RegularExpressions;
 
 namespace ConvertXgToJson_Lib.Tests;
 
@@ -12,6 +13,36 @@ public class DecisionCsvTests
     // -----------------------------------------------------------------------
     //  Direct .xg iteration
     // -----------------------------------------------------------------------
+
+    [Fact]
+    public void XgDirect_WriteDecisionCsvToSingleFile()
+    {
+        var xgFiles = Directory.GetFiles(TestPaths.XgDir, "*.xg");
+        xgFiles.Should().NotBeEmpty("TestData/xg should contain at least one .xg file");
+
+        //Directory.CreateDirectory(TestPaths.CsvDir);
+        string currentDate = DateTime.Now.ToString("yyyyMMdd");
+        string csvPath = Path.Combine(TestPaths.outputFilePath, $@"DecisionAnalysis_{currentDate}.csv");
+
+        using var writer = new StreamWriter(csvPath);
+        writer.WriteLine(DecisionRow.CsvHeader);
+        foreach (var xgPath in xgFiles)
+        {
+            string matchId = Path.GetFileNameWithoutExtension(xgPath);
+
+            var file = XgFileReader.ReadFile(xgPath);
+            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+
+            foreach (var row in rows)
+                writer.WriteLine(row.ToCsvLine());
+
+            rows.Should().NotBeEmpty($"{matchId} should contain at least one analysed decision");
+            rows.Should().OnlyContain(r => r.Xgid.StartsWith("XGID="),
+                "every row should have a valid XGID");
+            rows.Should().OnlyContain(r => r.Error >= 0,
+                "error values should be non-negative");
+        }
+    }
 
     [Fact]
     public void XgDirect_WriteDecisionCsv()

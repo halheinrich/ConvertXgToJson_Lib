@@ -33,6 +33,13 @@ TestResults/
 .DS_Store
 Thumbs.db
 
+# Local scratch file
+/h.h
+h.h
+
+# Local scratch file accidentally created in repo root
+/h origin master
+
 # Repo-specific
 # RealFileTests writes JSON snapshots here; keep the repo clean.
 ConvertXgToJson_Lib.Tests/TestData/Output/*.json

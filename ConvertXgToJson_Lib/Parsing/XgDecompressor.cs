@@ -3,15 +3,17 @@ using System.IO.Compression;
 namespace ConvertXgToJson_Lib.Parsing;
 
 /// <summary>
-/// Decompresses the XG payload (single ZLib stream) and splits the result
-/// into the four constituent sub-streams by known fixed record sizes.
+/// Decompresses the XG payload, which is stored as multiple concatenated ZLib
+/// streams (one per sub-file), and splits them into the four constituent
+/// sub-streams.
 ///
 ///   temp.xg   - N x 2560 bytes  (TSaveRec records)
 ///   temp.xgi  - 2 x 2560 bytes  (first + last TSaveRec, always 5120 bytes)
-///   temp.xgr  - M x 2184 bytes  (TRolloutContext records, often empty)
-///   temp.xgc  - remainder        (RTF comments, variable length)
+///   temp.xgr  - M x 2184 bytes  (TRolloutContext records, may be absent)
+///   temp.xgc  - variable         (RTF comments, may be absent)
 ///
-/// Section order in decompressed blob: xg | xgi | xgr | xgc
+/// Real XG files emit streams in order: xg, xgr, xgi, xgc.
+/// Among the SaveRec-sized streams, xg always comes FIRST.
 /// </summary>
 internal static class XgDecompressor
 {
@@ -21,43 +23,147 @@ internal static class XgDecompressor
 
     public static XgDecompressedStreams Decompress(Stream compressedStream)
     {
-        byte[] data = DecompressAll(compressedStream);
+        byte[] raw = ReadAllBytes(compressedStream);
+        var streams = DecompressAllStreams(raw);
 
-        // xg+xgi together occupy the first multiple-of-2560 bytes.
-        // xgr follows as M*2184 bytes. xgc is the remainder.
-        int xgXgiEnd = FindXgXgiEnd(data);
-        int xgiStart = xgXgiEnd - XgiSize;
-        int xgrEnd = xgXgiEnd + ((data.Length - xgXgiEnd) / RolloutRecordSize) * RolloutRecordSize;
+        byte[]? xgData = null;
+        byte[]? xgiData = null;
+        byte[]? xgrData = null;
+        byte[]? xgcData = null;
+
+        foreach (byte[] s in streams)
+        {
+            int len = s.Length;
+            if (len == 0) continue;
+
+            bool isSaveRecMultiple = len % SaveRecordSize == 0;
+            bool isRolloutMultiple = len % RolloutRecordSize == 0;
+
+            if (isSaveRecMultiple)
+            {
+                // First SaveRec-sized stream = xg, second = xgi
+                if (xgData == null)
+                    xgData = s;
+                else if (xgiData == null)
+                    xgiData = s;
+            }
+            else if (isRolloutMultiple && xgrData == null)
+            {
+                xgrData = s;
+            }
+            else if (xgcData == null)
+            {
+                xgcData = s;
+            }
+        }
+
+        // Fallback: single-stream old format — split xgi off the end of xg
+        if (xgiData == null && xgData != null && xgData.Length > XgiSize)
+        {
+            int xgEnd = xgData.Length - XgiSize;
+            xgiData = xgData[xgEnd..];
+            xgData = xgData[..xgEnd];
+        }
 
         return new XgDecompressedStreams(
-            Slice(data, 0, xgiStart),
-            Slice(data, xgiStart, XgiSize),
-            Slice(data, xgXgiEnd, xgrEnd - xgXgiEnd),
-            Slice(data, xgrEnd, data.Length - xgrEnd));
+            ToStream(xgData),
+            ToStream(xgiData),
+            ToStream(xgrData),
+            ToStream(xgcData));
     }
 
-    private static byte[] DecompressAll(Stream source)
+    // -----------------------------------------------------------------------
+
+    private static byte[] ReadAllBytes(Stream source)
     {
-        var dest = new MemoryStream();
-        using var zlib = new ZLibStream(source, CompressionMode.Decompress, leaveOpen: true);
-        zlib.CopyTo(dest);
-        return dest.ToArray();
+        using var ms = new MemoryStream();
+        source.CopyTo(ms);
+        return ms.ToArray();
     }
 
-    private static int FindXgXgiEnd(byte[] data)
+    /// <summary>
+    /// Finds every concatenated zlib stream in <paramref name="raw"/> and
+    /// returns the decompressed bytes of each one in order.
+    ///
+    /// Boundary detection: after successfully decompressing a stream starting
+    /// at <c>pos</c>, we scan forward from <c>pos + 2</c> for the next valid
+    /// zlib header rather than relying on <c>MemoryStream.Position</c> (which
+    /// .NET's <see cref="ZLibStream"/> may not update accurately when
+    /// <c>leaveOpen</c> is true due to internal read-ahead buffering).
+    /// </summary>
+    internal static List<byte[]> DecompressAllStreams(byte[] raw)
     {
-        int candidate = (data.Length / SaveRecordSize) * SaveRecordSize;
-        if (candidate < XgiSize)
-            throw new InvalidDataException(
-                $"Decompressed XG payload ({data.Length} bytes) is too small " +
-                $"to contain the minimum xg+xgi block ({XgiSize} bytes).");
-        return candidate;
+        var results = new List<byte[]>();
+        int pos = 0;
+
+        while (pos < raw.Length - 1)
+        {
+            if (!IsZlibHeader(raw[pos], raw[pos + 1]))
+            {
+                pos++;
+                continue;
+            }
+
+            byte[]? decompressed = TryDecompress(raw, pos);
+            if (decompressed == null)
+            {
+                pos++;
+                continue;
+            }
+
+            results.Add(decompressed);
+
+            // Find the next zlib header after pos+2 to advance correctly.
+            // This is reliable regardless of how many bytes ZLibStream buffered.
+            int next = FindNextZlibHeader(raw, pos + 2);
+            pos = next >= 0 ? next : raw.Length;
+        }
+
+        return results;
     }
 
-    private static MemoryStream Slice(byte[] data, int offset, int length)
+    /// <summary>
+    /// Attempts to decompress a zlib stream starting at <paramref name="offset"/>.
+    /// Returns null if decompression fails.
+    /// </summary>
+    private static byte[]? TryDecompress(byte[] raw, int offset)
     {
-        var ms = new MemoryStream(length);
-        if (length > 0) ms.Write(data, offset, length);
+        try
+        {
+            using var input = new MemoryStream(raw, offset, raw.Length - offset);
+            using var output = new MemoryStream();
+            using var zlib = new ZLibStream(input, CompressionMode.Decompress);
+            zlib.CopyTo(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Scans <paramref name="raw"/> starting at <paramref name="fromPos"/> and
+    /// returns the index of the next valid zlib header, or -1 if none found.
+    /// </summary>
+    private static int FindNextZlibHeader(byte[] raw, int fromPos)
+    {
+        for (int i = fromPos; i < raw.Length - 1; i++)
+        {
+            if (IsZlibHeader(raw[i], raw[i + 1]))
+                return i;
+        }
+        return -1;
+    }
+
+    private static bool IsZlibHeader(byte b0, byte b1) =>
+        b0 == 0x78 && b1 is 0x01 or 0x5E or 0x9C or 0xDA;
+
+    private static MemoryStream ToStream(byte[]? data)
+    {
+        if (data == null || data.Length == 0) return new MemoryStream(0);
+        var ms = new MemoryStream(data.Length);
+        ms.Write(data, 0, data.Length);
         ms.Position = 0;
         return ms;
     }

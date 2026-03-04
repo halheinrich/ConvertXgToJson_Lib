@@ -186,7 +186,7 @@ internal static class XgFileBuilder
         byte[] xgrBytes = [];
         byte[] xgcBytes = Encoding.Latin1.GetBytes("Match comment\r\n");
 
-        byte[] compressed = CompressAll(xgBytes, xgiBytes, xgrBytes, xgcBytes);
+        byte[] compressed = CompressAll(xgBytes, xgrBytes, xgiBytes, xgcBytes);
 
         var guid = System.Guid.NewGuid();
         var header = new BinaryBuilder()
@@ -233,17 +233,19 @@ internal static class XgFileBuilder
         return [.. first, .. last];
     }
 
-    private static byte[] CompressAll(params byte[][] sections)
+    private static byte[] CompressAll(byte[] xg, byte[] xgr, byte[] xgi, byte[] xgc)
     {
+        // Each non-empty section gets its own zlib stream, in order: xg, xgr, xgi, xgc.
+        // This matches the ZlibArchive multi-stream format used by XG.
         var ms = new MemoryStream();
-        using (var zlib = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true))
+        foreach (var section in new[] { xg, xgr, xgi, xgc })
         {
-            foreach (byte[] section in sections)
-                zlib.Write(section);
+            if (section.Length == 0) continue;
+            using var z = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true);
+            z.Write(section);
         }
         return ms.ToArray();
-    }
-    // ------------------------------------------------------------------
+    }    // ------------------------------------------------------------------
     //  Record builders
     // ------------------------------------------------------------------
 
