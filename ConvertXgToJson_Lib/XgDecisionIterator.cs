@@ -142,9 +142,7 @@ public static class XgDecisionIterator
             matchLength: ctx.MatchLength,
             maxCubeLog2: ctx.MaxCubeLimit);
 
-        // One row per cube decision. Double and take errors are both on this record;
-        // callers can read ErrorCube for the doubling decision and ErrorTake for the
-        // take decision from CubeRecord directly if needed.
+        // Row 1: the doubling player's decision
         yield return new DecisionRow
         {
             Xgid = xgid,
@@ -159,6 +157,26 @@ public static class XgDecisionIterator
             AnalysisDepth = depth,
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
         };
+
+        // Row 2: the take/drop decision — only when player actually doubled
+        // and the take error is meaningful (not the sentinel -1000)
+        if (cube.Doubled == 1 && cube.ErrorTake > -999.0)
+        {
+            yield return new DecisionRow
+            {
+                Xgid = xgid,
+                Error = Math.Abs(cube.ErrorTake),
+                MatchScore = ctx.MatchScore,
+                MatchLength = ctx.MatchLength,
+                Player = ctx.PlayerName(-cube.ActivePlayer),
+                Match = ctx.MatchId,
+                Game = ctx.GameNumber,
+                MoveNum = ctx.MoveNumber,
+                Roll = 0,
+                AnalysisDepth = depth,
+                Equity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0f,
+            };
+        }
     }
 
     // -----------------------------------------------------------------------
