@@ -54,3 +54,4 @@ ConvertXgToJson_Lib.Tests/TestData/xg/*.xg
 ConvertXgToJson_Lib.Tests/TestData/xg/**/*.xg
 ConvertXgToJson_Lib.Tests/TestData/xgp/*.xgp
 ConvertXgToJson_Lib.Tests/TestData/xgp/**/*.xgp
+*.mat

@@ -5,7 +5,7 @@ namespace ConvertXgToJson_Lib;
 /// <summary>
 /// Iterates over XgFile records and yields a <see cref="DecisionRow"/> for
 /// every checker-play (MoveRecord) and cube decision (CubeRecord) that has
-/// been analysed by XG.
+/// been analysed by XG. Dummy change to test GitHub integrity.
 /// </summary>
 public static class XgDecisionIterator
 {
