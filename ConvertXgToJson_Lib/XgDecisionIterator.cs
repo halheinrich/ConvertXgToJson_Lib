@@ -110,6 +110,7 @@ public static class XgDecisionIterator
             Roll = dice,
             AnalysisDepth = depth,
             Equity = bestEval.Equity,
+            Board = ToBoard(move.InitialPosition.Points, move.ActivePlayer),
         };
     }
 
@@ -142,6 +143,8 @@ public static class XgDecisionIterator
             matchLength: ctx.MatchLength,
             maxCubeLog2: ctx.MaxCubeLimit);
 
+        int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
+
         // Row 1: the doubling player's decision
         yield return new DecisionRow
         {
@@ -156,6 +159,7 @@ public static class XgDecisionIterator
             Roll = 0,
             AnalysisDepth = depth,
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
+            Board = board,
         };
 
         // Row 2: the take/drop decision — only when player actually doubled
@@ -175,8 +179,52 @@ public static class XgDecisionIterator
                 Roll = 0,
                 AnalysisDepth = depth,
                 Equity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0f,
+                Board = FlipBoard(board),
             };
         }
+    }
+
+    // -----------------------------------------------------------------------
+    //  Board helpers
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Converts a raw sbyte[26] position (positive = bottom player) into an
+    /// int[26] normalized to the player on roll.
+    /// If the active player is the bottom player (activePlayer >= 0) the
+    /// array is used as-is; otherwise every element is negated and the array
+    /// is reversed so that positive always means "player on roll".
+    /// </summary>
+    private static int[] ToBoard(sbyte[] points, int activePlayer)
+    {
+        if (activePlayer >= 0)
+        {
+            // Bottom player is on roll — positive values already represent them
+            var board = new int[26];
+            for (int i = 0; i < 26; i++)
+                board[i] = points[i];
+            return board;
+        }
+        else
+        {
+            // Top player is on roll — negate and reverse so positive = on roll
+            var board = new int[26];
+            for (int i = 0; i < 26; i++)
+                board[i] = -points[25 - i];
+            return board;
+        }
+    }
+
+    /// <summary>
+    /// Flips a board from one player's perspective to the other's.
+    /// Used for the take/drop row where the responder is on roll.
+    /// </summary>
+    private static int[] FlipBoard(int[] board)
+    {
+        var flipped = new int[26];
+        for (int i = 0; i < 26; i++)
+            flipped[i] = -board[25 - i];
+        return flipped;
     }
 
     // -----------------------------------------------------------------------
@@ -217,7 +265,6 @@ public static class XgDecisionIterator
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0
         && move.MoveError > -999.0;
-
 
     private static bool IsAnalysed(CubeRecord cube) =>
         (cube.Analysis.Level > 0 || cube.Analysis.LevelRequest > 0)

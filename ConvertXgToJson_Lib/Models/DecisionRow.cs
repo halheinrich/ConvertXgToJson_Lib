@@ -40,7 +40,15 @@ public sealed class DecisionRow
 
     /// <summary>True if this is a cube decision (Roll == 0); false if a checker play.</summary>
     public bool IsCube => Roll == 0;
-
+    /// <summary>
+    /// Checker counts normalized to the player on roll.
+    /// board[0]    = opponent's bar (never positive)
+    /// board[1-24] = points 1-24 from player on roll's perspective
+    /// board[25]   = player on roll's bar (never negative)
+    /// Positive values = player on roll's checkers; negative = opponent's.
+    /// Not included in CSV output.
+    /// </summary>
+    public int[] Board { get; init; } = [];
     // -----------------------------------------------------------------------
     //  CSV support
     // -----------------------------------------------------------------------
