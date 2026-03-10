@@ -3,8 +3,7 @@
 internal static class TestPaths
 {
     private static readonly string _root =
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, @"..\..\..\TestData"));
-
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\TestData"));
     public static string XgpDir => Path.Combine(_root, "xgp");
     public static string XgDir => Path.Combine(_root, "xg");
     public static string OutputDir => Path.Combine(_root, "Output");

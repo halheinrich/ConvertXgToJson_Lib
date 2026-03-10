@@ -132,10 +132,24 @@ public static class XgDecisionIterator
         int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
 
         string xgid = XgidEncoder.Encode(
+                    position: cube.Position,
+                    cubeValue: cubeActual,
+                    cubePos: cubePos,
+                    turn: cube.ActivePlayer >= 0 ? 1 : -1,
+                    dice: 0,
+                    score1: ctx.Score1,
+                    score2: ctx.Score2,
+                    crawfordJacoby: ctx.CrawfordJacoby,
+                    matchLength: ctx.MatchLength,
+                    maxCubeLog2: ctx.MaxCubeLimit);
+
+        // Take/drop row: cube has been doubled (cubeActual*2), now owned by the
+        // doubler, and it is the RESPONDER's turn — so turn and cubePos flip.
+        string xgidTake = XgidEncoder.Encode(
             position: cube.Position,
-            cubeValue: cubeActual,
-            cubePos: cubePos,
-            turn: cube.ActivePlayer >= 0 ? 1 : -1,
+            cubeValue: cubeActual * 2,
+            cubePos: cube.ActivePlayer >= 0 ? 1 : -1,
+            turn: cube.ActivePlayer >= 0 ? -1 : 1,
             dice: 0,
             score1: ctx.Score1,
             score2: ctx.Score2,
@@ -168,7 +182,7 @@ public static class XgDecisionIterator
         {
             yield return new DecisionRow
             {
-                Xgid = xgid,
+                Xgid = xgidTake,
                 Error = Math.Abs(cube.ErrorTake),
                 MatchScore = ctx.MatchScore,
                 MatchLength = ctx.MatchLength,

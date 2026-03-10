@@ -5,6 +5,7 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <summary>
 /// Tests that DecisionRow.Board is correctly populated by XgDecisionIterator.
 /// </summary>
+[Collection("FileIO")]
 public class BoardTests
 {
     // -----------------------------------------------------------------------

@@ -8,6 +8,7 @@ namespace ConvertXgToJson_Lib.Tests;
 /// directories and write JSON output next to the source files.
 /// These tests validate that the full pipeline works end-to-end on real data.
 /// </summary>
+[Collection("FileIO")]
 public class RealFileTests
 {
     //private static string Peek(string path, long offset)
