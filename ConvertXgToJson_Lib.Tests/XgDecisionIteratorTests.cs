@@ -15,47 +15,31 @@ public class XgDecisionIteratorTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// When a cube decision produces two rows (doubler + taker), the take/drop
-    /// row's XGID must encode the RESPONDER's turn, not the doubler's.
-    ///
-    /// Bug: both rows currently share the same XGID (doubler's turn), so the
-    /// take/drop row has the wrong turn field.
+    /// ThisWay.xg and ThatWay.xg are the same match with top and bottom players
+    /// reversed. Every XGID produced must be identical between the two files —
+    /// XGID is always encoded from the bottom player's perspective regardless of
+    /// who is on roll.
     /// </summary>
     [Fact]
-    public void CubeTakeRow_Xgid_EncodedFromResponderPerspective()
+    public void ThisWayAndThatWay_ProduceIdenticalXgids()
     {
-        foreach (var path in TestPaths.XgFiles)
-        {
-            var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+        var thisWay = XgDecisionIterator
+            .Iterate(XgFileReader.ReadFile(TestPaths.ThisWayXg),
+                     Path.GetFileNameWithoutExtension(TestPaths.ThisWayXg))
+            .Select(r => r.Xgid)
+            .ToList();
 
-            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+        var thatWay = XgDecisionIterator
+            .Iterate(XgFileReader.ReadFile(TestPaths.ThatWayXg),
+                     Path.GetFileNameWithoutExtension(TestPaths.ThatWayXg))
+            .Select(r => r.Xgid)
+            .ToList();
 
-            // Find consecutive cube row pairs: same Game+MoveNum, Roll==0, different Player
-            for (int i = 0; i < rows.Count - 1; i++)
-            {
-                var r1 = rows[i];
-                var r2 = rows[i + 1];
-
-                bool isPair = r1.IsCube && r2.IsCube
-                    && r1.Game == r2.Game
-                    && r1.MoveNum == r2.MoveNum
-                    && r1.Player != r2.Player;
-
-                if (!isPair) continue;
-
-                // r1 = doubler's row, r2 = take/drop row
-                // Extract turn field from each XGID: "XGID=<pos>:cv:cp:TURN:..."
-                int turn1 = ExtractTurn(r1.Xgid);
-                int turn2 = ExtractTurn(r2.Xgid);
-
-                turn2.Should().NotBe(turn1,
-                    $"take/drop row XGID must flip turn relative to doubler row " +
-                    $"[{Path.GetFileName(path)} Game {r1.Game} Move {r1.MoveNum}]");
-            }
-        }
+        thisWay.Should().BeEquivalentTo(thatWay,
+            options => options.WithStrictOrdering(),
+            "ThisWay.xg and ThatWay.xg are the same match with perspectives " +
+            "reversed — XGIDs must be identical");
     }
-
     // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------

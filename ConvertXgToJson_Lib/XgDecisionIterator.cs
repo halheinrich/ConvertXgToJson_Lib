@@ -70,7 +70,6 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
     //  Move record
     // -----------------------------------------------------------------------
-
     private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
     {
         var analysis = move.Analysis;
@@ -85,14 +84,26 @@ public static class XgDecisionIterator
             rolloutIndices: move.RolloutIndices,
             rollouts: rollouts);
 
+        // XGID position is always bottom-player perspective.
+        // When the top player is on roll, XG stores InitialPosition from the top
+        // player's perspective, so flip it back to bottom-player perspective.
+        var xgidPosition = move.ActivePlayer >= 0
+            ? move.InitialPosition
+            : FlipPosition(move.InitialPosition);
+
+        // CubePos is stored relative to the active player; normalize to bottom-player.
+        int xgidCubePos = move.ActivePlayer >= 0
+            ? ctx.CubePosition
+            : -ctx.CubePosition;
+
         string xgid = XgidEncoder.Encode(
-            position: move.InitialPosition,
+            position: xgidPosition,
             cubeValue: ctx.CubeValue,
-            cubePos: ctx.CubePosition,
-            turn: move.ActivePlayer >= 0 ? 1 : -1,
+            cubePos: xgidCubePos,
+            turn: 1,
             dice: dice,
-            score1: ctx.Score1,
-            score2: ctx.Score2,
+            score1: move.ActivePlayer >= 0 ? ctx.Score1 : ctx.Score2,
+            score2: move.ActivePlayer >= 0 ? ctx.Score2 : ctx.Score1,
             crawfordJacoby: ctx.CrawfordJacoby,
             matchLength: ctx.MatchLength,
             maxCubeLog2: ctx.MaxCubeLimit);
@@ -117,7 +128,6 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
     //  Cube record
     // -----------------------------------------------------------------------
-
     private static IEnumerable<DecisionRow> BuildCubeRows(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
     {
         var analysis = cube.Analysis;
@@ -131,28 +141,26 @@ public static class XgDecisionIterator
         int cubeActual = cube.CubeValue == 0 ? 1 : (int)Math.Pow(2, Math.Abs(cube.CubeValue));
         int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
 
-        string xgid = XgidEncoder.Encode(
-                    position: cube.Position,
-                    cubeValue: cubeActual,
-                    cubePos: cubePos,
-                    turn: cube.ActivePlayer >= 0 ? 1 : -1,
-                    dice: 0,
-                    score1: ctx.Score1,
-                    score2: ctx.Score2,
-                    crawfordJacoby: ctx.CrawfordJacoby,
-                    matchLength: ctx.MatchLength,
-                    maxCubeLog2: ctx.MaxCubeLimit);
+        // XGID position is always bottom-player perspective.
+        // When the top player is on roll, XG stores Position from the top
+        // player's perspective, so flip it back to bottom-player perspective.
+        var xgidPosition = cube.ActivePlayer >= 0
+            ? cube.Position
+            : FlipPosition(cube.Position);
 
-        // Take/drop row: cube has been doubled (cubeActual*2), now owned by the
-        // doubler, and it is the RESPONDER's turn — so turn and cubePos flip.
-        string xgidTake = XgidEncoder.Encode(
-            position: cube.Position,
-            cubeValue: cubeActual * 2,
-            cubePos: cube.ActivePlayer >= 0 ? 1 : -1,
-            turn: cube.ActivePlayer >= 0 ? -1 : 1,
+        // CubePos is stored relative to the active player; normalize to bottom-player.
+        int xgidCubePos = cube.ActivePlayer >= 0
+            ? cubePos
+            : -cubePos;
+
+        string xgid = XgidEncoder.Encode(
+            position: xgidPosition,
+            cubeValue: cubeActual,
+            cubePos: xgidCubePos,
+            turn: 1,
             dice: 0,
-            score1: ctx.Score1,
-            score2: ctx.Score2,
+            score1: cube.ActivePlayer >= 0 ? ctx.Score1 : ctx.Score2,
+            score2: cube.ActivePlayer >= 0 ? ctx.Score2 : ctx.Score1,
             crawfordJacoby: ctx.CrawfordJacoby,
             matchLength: ctx.MatchLength,
             maxCubeLog2: ctx.MaxCubeLimit);
@@ -182,7 +190,7 @@ public static class XgDecisionIterator
         {
             yield return new DecisionRow
             {
-                Xgid = xgidTake,
+                Xgid = xgid,
                 Error = Math.Abs(cube.ErrorTake),
                 MatchScore = ctx.MatchScore,
                 MatchLength = ctx.MatchLength,
@@ -196,9 +204,7 @@ public static class XgDecisionIterator
                 Board = FlipBoard(board),
             };
         }
-    }
-
-    // -----------------------------------------------------------------------
+    }    // -----------------------------------------------------------------------
     //  Board helpers
     // -----------------------------------------------------------------------
 
@@ -240,7 +246,13 @@ public static class XgDecisionIterator
             flipped[i] = -board[25 - i];
         return flipped;
     }
-
+    private static PositionEngine FlipPosition(PositionEngine pos)
+    {
+        var flipped = new sbyte[26];
+        for (int i = 0; i < 26; i++)
+            flipped[i] = (sbyte)-pos.Points[25 - i];
+        return new PositionEngine { Points = flipped };
+    }
     // -----------------------------------------------------------------------
     //  Depth resolution
     // -----------------------------------------------------------------------

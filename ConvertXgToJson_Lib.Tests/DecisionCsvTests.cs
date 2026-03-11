@@ -1,6 +1,5 @@
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
-using System.Text.RegularExpressions;
 
 namespace ConvertXgToJson_Lib.Tests;
 
@@ -8,41 +7,12 @@ namespace ConvertXgToJson_Lib.Tests;
 /// Integration tests that iterate decisions from .xg files (direct) and
 /// from pre-exported JSON files, writing CSV output to TestData/Csv.
 /// </summary>
+[Collection("FileIO")]
 public class DecisionCsvTests
 {
     // -----------------------------------------------------------------------
     //  Direct .xg iteration
     // -----------------------------------------------------------------------
-
-    [Fact]
-    public void XgDirect_WriteDecisionCsvToSingleFile()
-    {
-        var xgFiles = Directory.GetFiles(TestPaths.XgDir, "*.xg");
-        xgFiles.Should().NotBeEmpty("TestData/xg should contain at least one .xg file");
-
-        //Directory.CreateDirectory(TestPaths.CsvDir);
-        string currentDate = DateTime.Now.ToString("yyyyMMdd");
-        string csvPath = Path.Combine(TestPaths.outputFilePath, $@"DecisionAnalysis_{currentDate}.csv");
-
-        using var writer = new StreamWriter(csvPath);
-        writer.WriteLine(DecisionRow.CsvHeader);
-        foreach (var xgPath in xgFiles)
-        {
-            string matchId = Path.GetFileNameWithoutExtension(xgPath);
-
-            var file = XgFileReader.ReadFile(xgPath);
-            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
-
-            foreach (var row in rows)
-                writer.WriteLine(row.ToCsvLine());
-
-            rows.Should().NotBeEmpty($"{matchId} should contain at least one analysed decision");
-            rows.Should().OnlyContain(r => r.Xgid.StartsWith("XGID="),
-                "every row should have a valid XGID");
-            rows.Should().OnlyContain(r => r.Error >= 0,
-                "error values should be non-negative");
-        }
-    }
 
     [Fact]
     public void XgDirect_WriteDecisionCsv()
@@ -54,8 +24,8 @@ public class DecisionCsvTests
 
         foreach (var xgPath in xgFiles)
         {
-            string matchId  = Path.GetFileNameWithoutExtension(xgPath);
-            string csvPath  = Path.Combine(TestPaths.CsvDir, matchId + ".csv");
+            string matchId = Path.GetFileNameWithoutExtension(xgPath);
+            string csvPath = Path.Combine(TestPaths.CsvDir, matchId + ".csv");
 
             var file = XgFileReader.ReadFile(xgPath);
             var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
@@ -129,6 +99,8 @@ public class DecisionCsvTests
     [Fact]
     public void JsonDerived_WriteDecisionCsv()
     {
+        EnsureJsonFilesExist();
+
         var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
             .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
                 Path.GetFileNameWithoutExtension(p) + ".xg")))
@@ -158,6 +130,8 @@ public class DecisionCsvTests
     [Fact]
     public void BothSources_ProduceSameRowCount()
     {
+        EnsureJsonFilesExist();
+
         var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
             .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
                 Path.GetFileNameWithoutExtension(p) + ".xg")))
@@ -168,13 +142,37 @@ public class DecisionCsvTests
         foreach (var jsonPath in jsonFiles)
         {
             string matchId = Path.GetFileNameWithoutExtension(jsonPath);
-            string xgPath  = Path.Combine(TestPaths.XgDir, matchId + ".xg");
+            string xgPath = Path.Combine(TestPaths.XgDir, matchId + ".xg");
 
-            var fromXg   = XgDecisionIterator.Iterate(XgFileReader.ReadFile(xgPath),   matchId).ToList();
-            var fromJson = XgDecisionIterator.Iterate(XgFileReader.ReadJson(jsonPath),  matchId).ToList();
+            var fromXg = XgDecisionIterator.Iterate(XgFileReader.ReadFile(xgPath), matchId).ToList();
+            var fromJson = XgDecisionIterator.Iterate(XgFileReader.ReadJson(jsonPath), matchId).ToList();
 
             fromJson.Count.Should().Be(fromXg.Count,
                 $"{matchId}: JSON and .xg sources should produce the same number of decisions");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    //  Helpers
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Ensures JSON files exist in the Output directory for every .xg file.
+    /// Writes them if missing so JSON-derived tests do not depend on
+    /// RealFileTests having run first.
+    /// </summary>
+    private static void EnsureJsonFilesExist()
+    {
+        Directory.CreateDirectory(TestPaths.OutputDir);
+        foreach (var xgPath in Directory.GetFiles(TestPaths.XgDir, "*.xg"))
+        {
+            string outPath = Path.Combine(TestPaths.OutputDir,
+                Path.GetFileNameWithoutExtension(xgPath) + ".json");
+            if (!File.Exists(outPath))
+            {
+                var xgFile = XgFileReader.ReadFile(xgPath);
+                File.WriteAllText(outPath, XgFileReader.ToJson(xgFile));
+            }
         }
     }
 }

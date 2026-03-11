@@ -15,4 +15,7 @@ internal static class TestPaths
         Directory.EnumerateFiles(XgDir, "*.xg");
     public static string CsvDir => Path.Combine(_root, "Csv");
     public static string outputFilePath = $@"D:\Users\Hal\Documents\Excel\Backgammon";
+    public static string BothWaysDir => Path.Combine(_root, "BothWays");
+    public static string ThisWayXg => Path.Combine(BothWaysDir, "ThisWay.xg");
+    public static string ThatWayXg => Path.Combine(BothWaysDir, "ThatWay.xg");
 }
