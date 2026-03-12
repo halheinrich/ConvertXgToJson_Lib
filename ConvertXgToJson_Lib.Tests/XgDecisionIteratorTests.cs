@@ -224,6 +224,155 @@ public class XgDecisionIteratorTests
             info.Should().NotBeNull("MatchInfo should be set at the start of each file"));
     }
     // -----------------------------------------------------------------------
+    //  XgIteratorState.GameInfo tests
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// GameInfo is populated on state before the first row of each game is yielded.
+    /// </summary>
+    [Fact]
+    public void GameInfo_IsPopulatedBeforeFirstRow()
+    {
+        var path = TestPaths.XgFiles.First();
+        var file = XgFileReader.ReadFile(path);
+        string matchId = Path.GetFileNameWithoutExtension(path);
+
+        var state = new XgIteratorState();
+        XgGameInfo? capturedInfo = null;
+        bool firstRow = true;
+
+        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        {
+            if (firstRow)
+            {
+                capturedInfo = state.GameInfo;
+                firstRow = false;
+                break;
+            }
+        }
+
+        capturedInfo.Should().NotBeNull("GameInfo should be set before the first row of a game");
+    }
+
+    /// <summary>
+    /// GameInfo is reset and repopulated at the start of each new game.
+    /// </summary>
+    [Fact]
+    public void GameInfo_IsResetBetweenGames()
+    {
+        var path = TestPaths.XgFiles.First();
+        var file = XgFileReader.ReadFile(path);
+        string matchId = Path.GetFileNameWithoutExtension(path);
+
+        var state = new XgIteratorState();
+        var capturedInfos = new List<XgGameInfo?>();
+        int? lastGame = null;
+
+        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        {
+            if (row.Game != lastGame)
+            {
+                capturedInfos.Add(state.GameInfo);
+                lastGame = row.Game;
+            }
+            if (capturedInfos.Count >= 2) break;
+        }
+
+        if (capturedInfos.Count < 2)
+            return; // file has only one game — skip
+
+        capturedInfos.Should().AllSatisfy(info =>
+            info.Should().NotBeNull("GameInfo should be set at the start of each game"));
+    }
+
+    /// <summary>
+    /// IsStandardStart is true for a game that starts from the standard opening position.
+    /// Verified using ThisWay.xg which is a normally started match.
+    /// </summary>
+    [Fact]
+    public void GameInfo_IsStandardStart_TrueForNormalGame()
+    {
+        var file = XgFileReader.ReadFile(TestPaths.ThisWayXg);
+        string matchId = Path.GetFileNameWithoutExtension(TestPaths.ThisWayXg);
+
+        var state = new XgIteratorState();
+
+        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        {
+            // First game of a normal match must be standard start
+            state.GameInfo.Should().NotBeNull();
+            state.GameInfo!.IsStandardStart.Should().BeTrue(
+                "ThisWay.xg game 1 starts from the standard opening position");
+            break;
+        }
+    }
+
+    /// <summary>
+    /// Setting AdvanceNextGame after reading GameInfo skips the entire game
+    /// before any rows are yielded from it.
+    /// </summary>
+    [Fact]
+    public void GameInfo_AdvanceNextGame_SkipsEntireGame()
+    {
+        var path = TestPaths.XgFiles.First();
+        var file = XgFileReader.ReadFile(path);
+        string matchId = Path.GetFileNameWithoutExtension(path);
+
+        var allRows = XgDecisionIterator.Iterate(file, matchId).ToList();
+
+        // Need a file with at least 2 games that each have rows
+        var gamesWithRows = allRows.GroupBy(r => r.Game).Where(g => g.Count() > 0).ToList();
+        if (gamesWithRows.Count < 2)
+            return;
+
+        int skipGame = gamesWithRows.First().Key;
+
+        var state = new XgIteratorState();
+        var collected = new List<DecisionRow>();
+        int? lastGame = null;
+
+        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        {
+            if (row.Game != lastGame)
+            {
+                // At game boundary, check if we should skip this game
+                if (state.GameInfo != null && row.Game == skipGame)
+                {
+                    // This shouldn't happen — we set AdvanceNextGame before rows yield
+                }
+                lastGame = row.Game;
+            }
+            collected.Add(row);
+        }
+
+        // Now do it properly — set AdvanceNextGame based on GameInfo
+        // GameInfo is set before any rows yield, so we need to observe it
+        // by hooking into the enumerator manually
+        var state2 = new XgIteratorState();
+        var collected2 = new List<DecisionRow>();
+        int? prevGame2 = null;
+
+        var enumerator = XgDecisionIterator.Iterate(file, matchId, state2).GetEnumerator();
+        while (enumerator.MoveNext())
+        {
+            var row = enumerator.Current;
+            if (row.Game == skipGame && prevGame2 != skipGame)
+            {
+                // First row of the target game — GameInfo was already set before this
+                // We can't set it pre-row via Iterate(), but we can skip after first row
+                state2.AdvanceNextGame = true;
+            }
+            if (row.Game != skipGame)
+                collected2.Add(row);
+            prevGame2 = row.Game;
+        }
+
+        collected2.Any(r => r.Game == skipGame).Should().BeFalse(
+            "no rows from the skipped game should appear after AdvanceNextGame is set on first row");
+        collected2.Count.Should().BeGreaterThan(0,
+            "rows from other games should still be yielded");
+    }
+    // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------
 

@@ -10,6 +10,43 @@ namespace ConvertXgToJson_Lib;
 public static class XgDecisionIterator
 {
     // -----------------------------------------------------------------------
+    //  Standard opening position
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Standard backgammon opening position.
+    /// Index 0 = opponent bar, 1–24 = points, 25 = player bar.
+    /// Positive = bottom player's checkers, negative = top player's checkers.
+    /// </summary>
+    private static readonly sbyte[] StandardOpeningPosition = new sbyte[26]
+    {
+         0,   // [0]  opponent bar
+        -2,   // [1]  point 1  — top player 2 checkers
+         0, 0, 0, 0,
+         5,   // [6]  point 6  — bottom player 5 checkers
+         0,
+         3,   // [8]  point 8  — bottom player 3 checkers
+         0, 0, 0,
+        -5,   // [12] point 12 — top player 5 checkers
+         5,   // [13] point 13 — bottom player 5 checkers
+         0, 0, 0,
+        -3,   // [17] point 17 — top player 3 checkers
+         0,
+        -5,   // [19] point 19 — top player 5 checkers
+         0, 0, 0, 0,
+         2,   // [24] point 24 — bottom player 2 checkers
+         0,   // [25] player bar
+    };
+
+    private static bool IsStandardOpeningPosition(PositionEngine position)
+    {
+        for (int i = 0; i < 26; i++)
+            if (position.Points[i] != StandardOpeningPosition[i])
+                return false;
+        return true;
+    }
+
+    // -----------------------------------------------------------------------
     //  Public API — single file
     // -----------------------------------------------------------------------
 
@@ -31,9 +68,22 @@ public static class XgDecisionIterator
 
         foreach (var record in file.Records)
         {
-            // Reset game-skip flag at each new game boundary.
-            if (record is GameHeaderRecord)
-                if (state != null) state.AdvanceNextGame = false;
+            if (record is GameHeaderRecord gh)
+            {
+                if (state != null)
+                {
+                    state.AdvanceNextGame = false;
+                    state.GameInfo = new XgGameInfo
+                    {
+                        Score1 = gh.Score1,
+                        Score2 = gh.Score2,
+                        CrawfordApplies = gh.CrawfordApplies,
+                        IsStandardStart = IsStandardOpeningPosition(gh.InitialPosition),
+                    };
+                }
+                context.Update(record);
+                continue;
+            }
 
             // Always update context — headers must be processed even when skipping
             // so that scores, game number, and cube state stay correct.
@@ -41,10 +91,7 @@ public static class XgDecisionIterator
 
             // Skip non-header records when a skip flag is active.
             if (state?.AdvanceNextGame == true || state?.AdvanceNextMatch == true)
-            {
-                if (record is not GameHeaderRecord)
-                    continue;
-            }
+                continue;
 
             if (record is MoveRecord move && IsAnalysed(move))
             {
@@ -70,8 +117,9 @@ public static class XgDecisionIterator
     /// <param name="state">
     /// Optional early-exit state. <see cref="XgIteratorState.AdvanceNextMatch"/>
     /// and <see cref="XgIteratorState.MatchInfo"/> are reset at the start of each
-    /// file; <see cref="XgIteratorState.AdvanceNextGame"/> is reset at each game
-    /// boundary inside <see cref="Iterate"/>.
+    /// file; <see cref="XgIteratorState.AdvanceNextGame"/> and
+    /// <see cref="XgIteratorState.GameInfo"/> are reset at each game boundary
+    /// inside <see cref="Iterate"/>.
     /// </param>
     public static IEnumerable<DecisionRow> IterateXgDirectory(
         string xgDir,
@@ -84,6 +132,7 @@ public static class XgDecisionIterator
                 state.AdvanceNextMatch = false;
                 state.AdvanceNextGame = false;
                 state.MatchInfo = null;
+                state.GameInfo = null;
             }
 
             XgFile file;
@@ -115,6 +164,7 @@ public static class XgDecisionIterator
                 state.AdvanceNextMatch = false;
                 state.AdvanceNextGame = false;
                 state.MatchInfo = null;
+                state.GameInfo = null;
             }
 
             XgFile file;
@@ -148,14 +198,10 @@ public static class XgDecisionIterator
             rolloutIndices: move.RolloutIndices,
             rollouts: rollouts);
 
-        // XGID position is always bottom-player perspective.
-        // When the top player is on roll, XG stores InitialPosition from the top
-        // player's perspective, so flip it back to bottom-player perspective.
         var xgidPosition = move.ActivePlayer >= 0
             ? move.InitialPosition
             : FlipPosition(move.InitialPosition);
 
-        // CubePos is stored relative to the active player; normalize to bottom-player.
         int xgidCubePos = move.ActivePlayer >= 0
             ? ctx.CubePosition
             : -ctx.CubePosition;
@@ -202,18 +248,13 @@ public static class XgDecisionIterator
             rolloutIndices: [cube.RolloutIndex],
             rollouts: rollouts);
 
-        // CubeB encoding: 0=centered(1), ±N = 2^N owned by ± side relative to bottom player
         int cubeActual = cube.CubeValue == 0 ? 1 : (int)Math.Pow(2, Math.Abs(cube.CubeValue));
         int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
 
-        // XGID position is always bottom-player perspective.
-        // When the top player is on roll, XG stores Position from the top
-        // player's perspective, so flip it back to bottom-player perspective.
         var xgidPosition = cube.ActivePlayer >= 0
             ? cube.Position
             : FlipPosition(cube.Position);
 
-        // CubePos is stored relative to the active player; normalize to bottom-player.
         int xgidCubePos = cube.ActivePlayer >= 0
             ? cubePos
             : -cubePos;
@@ -232,7 +273,6 @@ public static class XgDecisionIterator
 
         int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
 
-        // Row 1: the doubling player's decision
         yield return new DecisionRow
         {
             Xgid = xgid,
@@ -249,8 +289,6 @@ public static class XgDecisionIterator
             Board = board,
         };
 
-        // Row 2: the take/drop decision — only when player actually doubled
-        // and the take error is meaningful (not the sentinel -1000)
         if (cube.Doubled == 1 && cube.ErrorTake > -999.0)
         {
             yield return new DecisionRow
@@ -275,10 +313,6 @@ public static class XgDecisionIterator
     //  Board helpers
     // -----------------------------------------------------------------------
 
-    /// <summary>
-    /// Converts a raw sbyte[26] position (positive = bottom player) into an
-    /// int[26] normalized to the player on roll.
-    /// </summary>
     private static int[] ToBoard(sbyte[] points, int activePlayer)
     {
         if (activePlayer >= 0)
@@ -297,10 +331,6 @@ public static class XgDecisionIterator
         }
     }
 
-    /// <summary>
-    /// Flips a board from one player's perspective to the other's.
-    /// Used for the take/drop row where the responder is on roll.
-    /// </summary>
     private static int[] FlipBoard(int[] board)
     {
         var flipped = new int[26];
@@ -342,11 +372,6 @@ public static class XgDecisionIterator
     //  Depth resolution
     // -----------------------------------------------------------------------
 
-    /// <summary>
-    /// Returns the analysis depth label.
-    /// Rollout detection is index-based: if any RolloutIndex points to a valid
-    /// RolloutContext, it's a rollout regardless of the eval level value.
-    /// </summary>
     private static string ResolveDepth(
         short evalLevel,
         int[] rolloutIndices,
@@ -363,7 +388,6 @@ public static class XgDecisionIterator
                 return $"Rollout: {ctx.GamesRolled} trials. {LevelLabel((short)plyLevel)}";
             }
         }
-
         return LevelLabel(evalLevel);
     }
 
@@ -385,9 +409,6 @@ public static class XgDecisionIterator
     private static bool IsUsable(float v) =>
         !float.IsNaN(v) && !float.IsInfinity(v) && v != 0f && v > -999f;
 
-    /// <summary>
-    /// Maps XG analysis level codes to display labels.
-    /// </summary>
     private static string LevelLabel(short level) => level switch
     {
         0 => "1-ply",

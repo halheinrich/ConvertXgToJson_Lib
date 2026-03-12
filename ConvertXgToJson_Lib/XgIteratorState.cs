@@ -28,4 +28,12 @@ public sealed class XgIteratorState
     /// Reset to null at the start of each new .xg file.
     /// </summary>
     public XgMatchInfo? MatchInfo { get; set; }
+
+    /// <summary>
+    /// Populated by the iterator from <see cref="GameHeaderRecord"/> before
+    /// any rows are yielded from the game. The caller may read this and set
+    /// <see cref="AdvanceNextGame"/> = true to skip the game entirely.
+    /// Reset to null at the start of each new game.
+    /// </summary>
+    public XgGameInfo? GameInfo { get; set; }
 }
