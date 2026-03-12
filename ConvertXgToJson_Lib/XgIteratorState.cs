@@ -20,4 +20,12 @@ public sealed class XgIteratorState
     /// at each new .xg file.
     /// </summary>
     public bool AdvanceNextMatch { get; set; }
+
+    /// <summary>
+    /// Populated by the iterator from <see cref="MatchHeaderRecord"/> before
+    /// any rows are yielded from the match. The caller may read this and set
+    /// <see cref="AdvanceNextMatch"/> = true to skip the match entirely.
+    /// Reset to null at the start of each new .xg file.
+    /// </summary>
+    public XgMatchInfo? MatchInfo { get; set; }
 }

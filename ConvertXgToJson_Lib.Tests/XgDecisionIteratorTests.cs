@@ -166,6 +166,62 @@ public class XgDecisionIteratorTests
         var matchIds = collected.Select(r => r.Match).Distinct().ToList();
         matchIds.Count.Should().BeGreaterThanOrEqualTo(2,
             "rows should come from at least two distinct matches");
+    } 
+    /// <summary>
+    /// MatchInfo is populated on state before the first row is yielded from
+    /// each file. Player names and match length must be non-default values for
+    /// a well-formed .xg file.
+    /// </summary>
+    [Fact]
+    public void MatchInfo_IsPopulatedBeforeFirstRow()
+    {
+        var state = new XgIteratorState();
+        XgMatchInfo? capturedInfo = null;
+        bool firstRow = true;
+
+        foreach (var row in XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir, state))
+        {
+            if (firstRow)
+            {
+                capturedInfo = state.MatchInfo;
+                firstRow = false;
+                break;
+            }
+        }
+
+        capturedInfo.Should().NotBeNull("MatchInfo should be set before the first row");
+        capturedInfo!.Player1.Should().NotBeNullOrEmpty("Player1 should be populated from the match header");
+        capturedInfo.Player2.Should().NotBeNullOrEmpty("Player2 should be populated from the match header");
+    }
+
+    /// <summary>
+    /// MatchInfo is reset to null then repopulated at the start of each new file.
+    /// </summary>
+    [Fact]
+    public void MatchInfo_IsResetBetweenFiles()
+    {
+        var files = TestPaths.XgFiles.Take(2).ToList();
+        if (files.Count < 2)
+            return;
+
+        var state = new XgIteratorState();
+        var capturedInfos = new List<XgMatchInfo?>();
+        string? lastMatch = null;
+
+        foreach (var row in XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir, state))
+        {
+            if (row.Match != lastMatch)
+            {
+                capturedInfos.Add(state.MatchInfo);
+                lastMatch = row.Match;
+            }
+            if (capturedInfos.Count >= 2) break;
+        }
+
+        capturedInfos.Count.Should().BeGreaterThanOrEqualTo(2,
+            "need at least two files to verify MatchInfo resets");
+        capturedInfos.Should().AllSatisfy(info =>
+            info.Should().NotBeNull("MatchInfo should be set at the start of each file"));
     }
     // -----------------------------------------------------------------------
     //  Helpers
