@@ -14,13 +14,42 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
 
     /// <summary>Yields all decisions from a single already-parsed <see cref="XgFile"/>.</summary>
-    public static IEnumerable<DecisionRow> Iterate(XgFile file, string matchId)
+    // -----------------------------------------------------------------------
+    //  Public API — single file
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Yields all decisions from a single already-parsed <see cref="XgFile"/>.
+    /// </summary>
+    /// <param name="file">The parsed XG file.</param>
+    /// <param name="matchId">Match identifier (typically the filename without extension).</param>
+    /// <param name="state">
+    /// Optional early-exit state. The caller sets flags after each yielded row;
+    /// the iterator resets them at game boundaries. Pass null for no early-exit.
+    /// </param>
+    public static IEnumerable<DecisionRow> Iterate(
+        XgFile file,
+        string matchId,
+        XgIteratorState? state = null)
     {
         var context = new MatchContext(file.Records, matchId);
 
         foreach (var record in file.Records)
         {
+            // Reset game-skip flag at each new game boundary.
+            if (record is GameHeaderRecord)
+                if (state != null) state.AdvanceNextGame = false;
+
+            // Always update context — headers must be processed even when skipping
+            // so that scores, game number, and cube state stay correct.
             context.Update(record);
+
+            // Skip non-header records when a skip flag is active.
+            if (state?.AdvanceNextGame == true || state?.AdvanceNextMatch == true)
+            {
+                if (record is not GameHeaderRecord)
+                    continue;
+            }
 
             if (record is MoveRecord move && IsAnalysed(move))
             {
@@ -39,34 +68,65 @@ public static class XgDecisionIterator
     //  Public API — directories
     // -----------------------------------------------------------------------
 
-    public static IEnumerable<DecisionRow> IterateXgDirectory(string xgDir)
+    /// <summary>
+    /// Yields all decisions from every .xg file in <paramref name="xgDir"/>.
+    /// </summary>
+    /// <param name="xgDir">Directory containing .xg files.</param>
+    /// <param name="state">
+    /// Optional early-exit state. <see cref="XgIteratorState.AdvanceNextMatch"/>
+    /// is reset at the start of each file; <see cref="XgIteratorState.AdvanceNextGame"/>
+    /// is reset at each game boundary inside <see cref="Iterate"/>.
+    /// </param>
+    public static IEnumerable<DecisionRow> IterateXgDirectory(
+        string xgDir,
+        XgIteratorState? state = null)
     {
         foreach (var path in Directory.EnumerateFiles(xgDir, "*.xg"))
         {
+            // Reset both flags at each new file so a skip from a previous
+            // match does not bleed into the next.
+            if (state != null)
+            {
+                state.AdvanceNextMatch = false;
+                state.AdvanceNextGame = false;
+            }
+
             XgFile file;
             try { file = XgFileReader.ReadFile(path); }
             catch { continue; }
 
             string matchId = Path.GetFileNameWithoutExtension(path);
-            foreach (var row in Iterate(file, matchId))
+            foreach (var row in Iterate(file, matchId, state))
                 yield return row;
         }
     }
 
-    public static IEnumerable<DecisionRow> IterateJsonDirectory(string jsonDir)
+    /// <summary>
+    /// Yields all decisions from every .json file in <paramref name="jsonDir"/>.
+    /// </summary>
+    /// <param name="jsonDir">Directory containing .json files.</param>
+    /// <param name="state">Optional early-exit state. See <see cref="IterateXgDirectory"/>.</param>
+    public static IEnumerable<DecisionRow> IterateJsonDirectory(
+        string jsonDir,
+        XgIteratorState? state = null)
     {
         foreach (var path in Directory.EnumerateFiles(jsonDir, "*.json"))
         {
+            if (state != null)
+            {
+                state.AdvanceNextMatch = false;
+                state.AdvanceNextGame = false;
+            }
+
             XgFile file;
             try { file = XgFileReader.ReadJson(path); }
             catch { continue; }
 
             string matchId = Path.GetFileNameWithoutExtension(path);
-            foreach (var row in Iterate(file, matchId))
+            foreach (var row in Iterate(file, matchId, state))
                 yield return row;
         }
     }
-
     // -----------------------------------------------------------------------
     //  Move record
     // -----------------------------------------------------------------------
