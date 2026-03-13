@@ -229,6 +229,7 @@ public class XgDecisionIteratorTests
 
     /// <summary>
     /// GameInfo is populated on state before the first row of each game is yielded.
+    /// Away scores are non-negative and sum to less than or equal to match length.
     /// </summary>
     [Fact]
     public void GameInfo_IsPopulatedBeforeFirstRow()
@@ -238,20 +239,14 @@ public class XgDecisionIteratorTests
         string matchId = Path.GetFileNameWithoutExtension(path);
 
         var state = new XgIteratorState();
-        XgGameInfo? capturedInfo = null;
-        bool firstRow = true;
 
         foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
         {
-            if (firstRow)
-            {
-                capturedInfo = state.GameInfo;
-                firstRow = false;
-                break;
-            }
+            state.GameInfo.Should().NotBeNull("GameInfo should be set before the first row");
+            state.GameInfo!.Away1.Should().BeGreaterThanOrEqualTo(0);
+            state.GameInfo.Away2.Should().BeGreaterThanOrEqualTo(0);
+            break;
         }
-
-        capturedInfo.Should().NotBeNull("GameInfo should be set before the first row of a game");
     }
 
     /// <summary>
@@ -279,16 +274,15 @@ public class XgDecisionIteratorTests
         }
 
         if (capturedInfos.Count < 2)
-            return; // file has only one game — skip
+            return; // single-game file — skip
 
         capturedInfos.Should().AllSatisfy(info =>
             info.Should().NotBeNull("GameInfo should be set at the start of each game"));
     }
-
     /// <summary>
-    /// IsStandardStart is true for a game that starts from the standard opening position.
-    /// Verified using ThisWay.xg which is a normally started match.
-    /// </summary>
+         /// IsStandardStart is true for a game that starts from the standard opening position.
+         /// Verified using ThisWay.xg which is a normally started match.
+         /// </summary>
     [Fact]
     public void GameInfo_IsStandardStart_TrueForNormalGame()
     {
@@ -372,6 +366,44 @@ public class XgDecisionIteratorTests
         collected2.Count.Should().BeGreaterThan(0,
             "rows from other games should still be yielded");
     }
+    /// <summary>
+    /// GameInfo.Away scores are correct: MatchLength - Score at game start.
+    /// Verified against the first game of a match file where scores start at 0.
+    /// </summary>
+    [Fact]
+    public void GameInfo_AwayScores_CorrectForFirstGame()
+    {
+        var path = TestPaths.XgFiles.First();
+        var file = XgFileReader.ReadFile(path);
+        string matchId = Path.GetFileNameWithoutExtension(path);
+
+        // Get match length from the file
+        int matchLength = 0;
+        foreach (var r in file.Records)
+        {
+            if (r is MatchHeaderRecord hm)
+            {
+                matchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength;
+                break;
+            }
+        }
+
+        if (matchLength == 0)
+            return; // money session — skip
+
+        var state = new XgIteratorState();
+
+        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        {
+            // First game of a match always starts 0-0
+            state.GameInfo!.Away1.Should().Be(matchLength,
+                "first game starts at score 0, so away = matchLength");
+            state.GameInfo.Away2.Should().Be(matchLength,
+                "first game starts at score 0, so away = matchLength");
+            break;
+        }
+    }
+
     // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------

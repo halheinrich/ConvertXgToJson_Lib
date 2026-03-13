@@ -70,18 +70,21 @@ public static class XgDecisionIterator
         {
             if (record is GameHeaderRecord gh)
             {
+                context.Update(record); // must be before GameInfo so MatchLength is current
+
                 if (state != null)
                 {
                     state.AdvanceNextGame = false;
+
+                    bool isMoney = context.MatchLength == 0;
                     state.GameInfo = new XgGameInfo
                     {
-                        Score1 = gh.Score1,
-                        Score2 = gh.Score2,
-                        CrawfordApplies = gh.CrawfordApplies,
+                        Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
+                        Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
+                        IsCrawfordGame = gh.CrawfordApplies,
                         IsStandardStart = IsStandardOpeningPosition(gh.InitialPosition),
                     };
                 }
-                context.Update(record);
                 continue;
             }
 
