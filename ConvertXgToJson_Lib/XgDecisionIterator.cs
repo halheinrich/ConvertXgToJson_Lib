@@ -143,7 +143,7 @@ public static class XgDecisionIterator
             catch { continue; }
 
             if (state != null)
-                state.MatchInfo = ExtractMatchInfo(file.Records);
+                state.MatchInfo = ExtractMatchInfo(file);
 
             string matchId = Path.GetFileNameWithoutExtension(path);
             foreach (var row in Iterate(file, matchId, state))
@@ -175,7 +175,7 @@ public static class XgDecisionIterator
             catch { continue; }
 
             if (state != null)
-                state.MatchInfo = ExtractMatchInfo(file.Records);
+                state.MatchInfo = ExtractMatchInfo(file);
 
             string matchId = Path.GetFileNameWithoutExtension(path);
             foreach (var row in Iterate(file, matchId, state))
@@ -354,9 +354,9 @@ public static class XgDecisionIterator
     //  Match info helper
     // -----------------------------------------------------------------------
 
-    private static XgMatchInfo ExtractMatchInfo(List<SaveRecord> records)
+    public static XgMatchInfo ExtractMatchInfo(XgFile file)
     {
-        foreach (var r in records)
+        foreach (var r in file.Records)
         {
             if (r is MatchHeaderRecord hm)
             {
@@ -370,7 +370,6 @@ public static class XgDecisionIterator
         }
         return new XgMatchInfo();
     }
-
     // -----------------------------------------------------------------------
     //  Depth resolution
     // -----------------------------------------------------------------------
