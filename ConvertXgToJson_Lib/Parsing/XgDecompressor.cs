@@ -167,6 +167,24 @@ internal static class XgDecompressor
         ms.Position = 0;
         return ms;
     }
+    /// <summary>
+    /// Decompresses only the first zlib stream found in <paramref name="raw"/>.
+    /// Used by <see cref="XgFileReader.ReadMatchInfo"/> to avoid decompressing
+    /// the entire file.
+    /// </summary>
+    internal static byte[]? DecompressFirstStream(byte[] raw)
+    {
+        for (int pos = 0; pos < raw.Length - 1; pos++)
+        {
+            if (!IsZlibHeader(raw[pos], raw[pos + 1]))
+                continue;
+
+            byte[]? decompressed = TryDecompress(raw, pos);
+            if (decompressed != null)
+                return decompressed;
+        }
+        return null;
+    }
 }
 
 /// <summary>Holds the four decompressed XG sub-streams. Dispose when done.</summary>
