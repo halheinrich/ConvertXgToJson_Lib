@@ -175,10 +175,10 @@ public static class XgFileReader
         // Player1 unicode is at offset 1142 (after Event unicode at 884).
         // Fastest: seek directly.
         sub.Position = 1142;
-
-        // Player1: TShortUnicodeString = array[0..128] of WideChar = 258 bytes
-        string player1 = r.ReadShortUnicodeString();  // offset 1400
-        string player2 = r.ReadShortUnicodeString();  // offset 1658
+        // Player1 unicode is at offset 884 (after Event unicode at 626).
+        sub.Position = 880;
+        string player1 = r.ReadShortUnicodeString();  // AlignTo(2) → 880 already even → reads 258 bytes
+        string player2 = r.ReadShortUnicodeString();
 
         return new XgMatchInfo
         {
