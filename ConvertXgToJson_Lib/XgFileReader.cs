@@ -188,17 +188,24 @@ public static class XgFileReader
         };
     }
     /// <summary>
-    /// Reads only the game headers from a .xg file without fully parsing
-    /// the file. Use when only per-game scores and start position are needed.
-    /// Decompresses only the first zlib stream and skips all move/cube parsing.
+    /// Streaming overload of <see cref="ReadGameHeaders(string)"/>.
+    /// Yields one <see cref="XgGameInfo"/> per game in the file, populating
+    /// <see cref="XgIteratorState.MatchInfo"/> before the first yield.
+    /// The caller may set <see cref="XgIteratorState.AdvanceNextMatch"/> = true
+    /// to stop iteration early.
     /// </summary>
     /// <param name="path">Full path to the .xg file.</param>
-    /// <returns>
-    /// A list of <see cref="XgGameInfo"/> in game order, one per game in the file.
-    /// Returns an empty list if no game headers are found.
-    /// </returns>
-    public static IReadOnlyList<XgGameInfo> ReadGameHeaders(string path)
+    /// <param name="state">
+    /// Iterator state. <see cref="XgIteratorState.MatchInfo"/> is reset to null
+    /// at the start of each file and populated before the first yield.
+    /// <see cref="XgIteratorState.AdvanceNextMatch"/> is reset to false at the
+    /// start of each file.
+    /// </param>
+    public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state)
     {
+        state.MatchInfo = null;
+        state.AdvanceNextMatch = false;
+
         using var stream = File.OpenRead(path);
 
         var (_, contentOffset) = RichGameHeaderParser.Read(stream);
@@ -207,51 +214,35 @@ public static class XgFileReader
         byte[] raw = ReadAllCompressedBytes(stream);
         byte[]? data = XgDecompressor.DecompressFirstStream(raw);
         if (data == null || data.Length < SaveRecordParser.RecordSize)
-            return [];
+            yield break;
 
-        // We need match length to compute away scores — read it from the first record.
+        // Parse MatchInfo from the first record if it is a MatchHeaderRecord.
         int matchLength = 0;
         if (data[8] == (byte)RecordType.HeaderMatch)
-            matchLength = ParseMatchLengthFromRecord(data, 0);
+        {
+            state.MatchInfo = ParseMatchInfoFromRecord(data);
+            matchLength = state.MatchInfo.MatchLength;
+        }
 
-        var result = new List<XgGameInfo>();
         int stride = SaveRecordParser.RecordSize;
 
         for (int offset = 0; offset + stride <= data.Length; offset += stride)
         {
+            if (state.AdvanceNextMatch)
+                yield break;
+
             var entryType = (RecordType)data[offset + 8];
 
             if (entryType == RecordType.FooterMatch)
-                break;
+                yield break;
 
             if (entryType != RecordType.HeaderGame)
                 continue;
 
-            result.Add(ParseGameInfoFromRecord(data, offset, matchLength));
+            var gameInfo = ParseGameInfoFromRecord(data, offset, matchLength);
+            state.GameInfo = gameInfo;
+            yield return gameInfo;
         }
-
-        return result;
-    }
-
-    private static int ParseMatchLengthFromRecord(byte[] data, int offset)
-    {
-        using var ms = new MemoryStream(data, offset, SaveRecordParser.RecordSize);
-        using var sub = new SubStream(ms, 0, SaveRecordParser.RecordSize, leaveOpen: true);
-        using var r = new PascalBinaryReader(sub);
-
-        // Skip preamble: Previous(4) + Next(4) + EntryType(1) = 9 bytes
-        r.ReadDword();
-        r.ReadDword();
-        r.ReadByte();
-
-        // Player1Ansi: string[40] = 41 bytes
-        _ = r.ReadPascalAnsiString(40);
-        // Player2Ansi: string[40] = 41 bytes
-        _ = r.ReadPascalAnsiString(40);
-
-        // MatchLength: integer (4-byte align, offset 91 → pad 1 → 92)
-        int matchLength = r.ReadInteger();
-        return matchLength >= 99999 ? 0 : matchLength;
     }
 
     private static XgGameInfo ParseGameInfoFromRecord(byte[] data, int offset, int matchLength)

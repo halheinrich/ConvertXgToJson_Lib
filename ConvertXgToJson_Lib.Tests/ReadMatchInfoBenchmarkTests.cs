@@ -90,72 +90,7 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
         }
     }
     /// <summary>
-    /// Compares throughput of full decision iteration vs. game-header-only scan.
-    /// Game-header scan decompresses the xg stream but skips move/cube parsing.
-    /// </summary>
-    [Fact]
-    public void GameHeaderScan_IsFasterThanFullIteration()
-    {
-        var files = TestPaths.XgFiles.ToList();
-        if (files.Count < MinFiles)
-        {
-            output.WriteLine($"Skipping — fewer than {MinFiles} .xg files available.");
-            return;
-        }
-
-        // Warm up
-        foreach (var path in files.Take(2))
-        {
-            XgDecisionIterator.Iterate(XgFileReader.ReadFile(path),
-                Path.GetFileNameWithoutExtension(path)).ToList();
-            XgFileReader.ReadFile(path); // decompress only
-        }
-
-        // --- Full decision iteration ---
-        var sw = Stopwatch.StartNew();
-        int fullDecisions = 0;
-        int fullFiles = 0;
-        foreach (var path in files)
-        {
-            var file = XgFileReader.ReadFile(path);
-            fullDecisions += XgDecisionIterator
-                .Iterate(file, Path.GetFileNameWithoutExtension(path))
-                .Count();
-            fullFiles++;
-        }
-        sw.Stop();
-        double fullMs = sw.Elapsed.TotalMilliseconds;
-        double fullPerSec = fullFiles / (fullMs / 1000.0);
-
-        // --- Game-header-only scan ---
-        // ReadFile still decompresses everything, but we only look at GameHeaderRecords.
-        // This isolates the cost of move/cube parsing vs. header-only inspection.
-        sw.Restart();
-        int headerGames = 0;
-        int headerFiles = 0;
-        foreach (var path in files)
-        {
-            var file = XgFileReader.ReadFile(path);
-            headerGames += file.Records.OfType<GameHeaderRecord>().Count();
-            headerFiles++;
-        }
-        sw.Stop();
-        double headerMs = sw.Elapsed.TotalMilliseconds;
-        double headerPerSec = headerFiles / (headerMs / 1000.0);
-
-        double speedup = headerPerSec / fullPerSec;
-
-        output.WriteLine($"Files: {files.Count}");
-        output.WriteLine($"Full iteration:      {fullMs,8:F1} ms  ({fullPerSec,6:F1} files/sec)  {fullDecisions} decisions");
-        output.WriteLine($"Game-header scan:    {headerMs,8:F1} ms  ({headerPerSec,6:F1} files/sec)  {headerGames} games");
-        output.WriteLine($"Speedup:             {speedup:F1}x");
-
-        // No strict assertion — this is diagnostic. Just confirm it's not slower.
-        speedup.Should().BeGreaterThan(0.5,
-            "game-header scan should not be significantly slower than full iteration");
-    }
-    /// <summary>
-    /// Compares throughput of full decision iteration vs. ReadGameHeaders fast path.
+    /// Compares throughput of full decision iteration vs. ReadGameHeaders streaming fast path.
     /// </summary>
     [Fact]
     public void ReadGameHeaders_IsFasterThanFullIteration()
@@ -168,9 +103,10 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
         }
 
         // Warm up
+        var warmState = new XgIteratorState();
         foreach (var path in files.Take(2))
         {
-            XgFileReader.ReadGameHeaders(path);
+            XgFileReader.ReadGameHeaders(path, warmState).ToList();
             XgDecisionIterator.Iterate(XgFileReader.ReadFile(path),
                 Path.GetFileNameWithoutExtension(path)).ToList();
         }
@@ -189,13 +125,14 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
         double fullMs = sw.Elapsed.TotalMilliseconds;
         double fullPerSec = files.Count / (fullMs / 1000.0);
 
-        // --- ReadGameHeaders fast path ---
+        // --- ReadGameHeaders streaming fast path ---
+        var state = new XgIteratorState();
         sw.Restart();
         int totalGames = 0;
         foreach (var path in files)
         {
-            var headers = XgFileReader.ReadGameHeaders(path);
-            totalGames += headers.Count;
+            foreach (var game in XgFileReader.ReadGameHeaders(path, state))
+                totalGames++;
         }
         sw.Stop();
         double fastMs = sw.Elapsed.TotalMilliseconds;
@@ -211,10 +148,9 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
         speedup.Should().BeGreaterThan(MinSpeedupFactor,
             $"ReadGameHeaders should be at least {MinSpeedupFactor}x faster than full iteration");
     }
-
     /// <summary>
-    /// Verifies ReadGameHeaders returns correct away scores and IsStandardStart
-    /// against the full-parse path.
+    /// Verifies ReadGameHeaders streaming overload returns correct away scores,
+    /// IsCrawfordGame, and IsStandardStart against the full-parse path.
     /// </summary>
     [Fact]
     public void ReadGameHeaders_ReturnsCorrectData()
@@ -225,37 +161,144 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
 
         foreach (var path in files)
         {
-            var fast = XgFileReader.ReadGameHeaders(path);
-            var file = XgFileReader.ReadFile(path);
-
+            // --- Fast path ---
             var state = new XgIteratorState();
+            var fastInfos = XgFileReader.ReadGameHeaders(path, state).ToList();
+
+            // --- Full parse path ---
+            var file = XgFileReader.ReadFile(path);
+            var fullState = new XgIteratorState();
             var fullInfos = new List<XgGameInfo>();
             int? lastGame = null;
 
             foreach (var row in XgDecisionIterator.Iterate(
-                file, Path.GetFileNameWithoutExtension(path), state))
+                file, Path.GetFileNameWithoutExtension(path), fullState))
             {
                 if (row.Game != lastGame)
                 {
-                    fullInfos.Add(state.GameInfo!);
+                    fullInfos.Add(fullState.GameInfo!);
                     lastGame = row.Game;
                 }
             }
 
-            fast.Count.Should().Be(fullInfos.Count,
+            fastInfos.Count.Should().Be(fullInfos.Count,
                 $"game count mismatch in {Path.GetFileName(path)}");
 
-            for (int i = 0; i < fast.Count; i++)
+            for (int i = 0; i < fastInfos.Count; i++)
             {
-                fast[i].Away1.Should().Be(fullInfos[i].Away1,
+                fastInfos[i].Away1.Should().Be(fullInfos[i].Away1,
                     $"Away1 mismatch game {i + 1} in {Path.GetFileName(path)}");
-                fast[i].Away2.Should().Be(fullInfos[i].Away2,
+                fastInfos[i].Away2.Should().Be(fullInfos[i].Away2,
                     $"Away2 mismatch game {i + 1} in {Path.GetFileName(path)}");
-                fast[i].IsCrawfordGame.Should().Be(fullInfos[i].IsCrawfordGame,
+                fastInfos[i].IsCrawfordGame.Should().Be(fullInfos[i].IsCrawfordGame,
                     $"IsCrawfordGame mismatch game {i + 1} in {Path.GetFileName(path)}");
-                fast[i].IsStandardStart.Should().Be(fullInfos[i].IsStandardStart,
+                fastInfos[i].IsStandardStart.Should().Be(fullInfos[i].IsStandardStart,
                     $"IsStandardStart mismatch game {i + 1} in {Path.GetFileName(path)}");
             }
         }
+    }    /// <summary>
+         /// Verifies the streaming ReadGameHeaders overload populates MatchInfo before
+         /// the first yield and stops when AdvanceNextMatch is set.
+         /// </summary>
+    [Fact]
+    public void ReadGameHeaders_Streaming_PopulatesMatchInfoBeforeFirstYield()
+    {
+        var path = TestPaths.XgFiles.First();
+        var state = new XgIteratorState();
+        XgMatchInfo? capturedMatchInfo = null;
+
+        foreach (var game in XgFileReader.ReadGameHeaders(path, state))
+        {
+            capturedMatchInfo = state.MatchInfo;
+            break;
+        }
+
+        capturedMatchInfo.Should().NotBeNull("MatchInfo should be set before the first game is yielded");
+        capturedMatchInfo!.Player1.Should().NotBeNullOrEmpty();
+        capturedMatchInfo.Player2.Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// Verifies AdvanceNextMatch stops iteration after the current game.
+    /// </summary>
+    [Fact]
+    public void ReadGameHeaders_Streaming_StopsOnAdvanceNextMatch()
+    {
+        var files = TestPaths.XgFiles.ToList();
+        if (files.Count < 2)
+            return;
+
+        var state = new XgIteratorState();
+        int totalGames = 0;
+        int filesWithRows = 0;
+
+        foreach (var path in files)
+        {
+            int gamesThisFile = 0;
+            foreach (var game in XgFileReader.ReadGameHeaders(path, state))
+            {
+                gamesThisFile++;
+                totalGames++;
+                state.AdvanceNextMatch = true; // stop after first game of each file
+            }
+            if (gamesThisFile > 0) filesWithRows++;
+        }
+
+        totalGames.Should().Be(filesWithRows,
+            "each file should yield exactly one game when AdvanceNextMatch is set after the first");
+    }
+    /// <summary>
+    /// Compares throughput of iterating decisions from .xg vs pre-parsed .json files.
+    /// </summary>
+    [Fact]
+    public void JsonIteration_VsXgIteration()
+    {
+        var xgFiles = TestPaths.XgFiles.ToList();
+        if (xgFiles.Count < MinFiles)
+        {
+            output.WriteLine($"Skipping — fewer than {MinFiles} .xg files available.");
+            return;
+        }
+
+        // Ensure json files exist
+        Directory.CreateDirectory(TestPaths.OutputDir);
+        foreach (var path in xgFiles)
+        {
+            string jsonPath = Path.Combine(TestPaths.OutputDir,
+                Path.GetFileNameWithoutExtension(path) + ".json");
+            if (!File.Exists(jsonPath))
+            {
+                var file = XgFileReader.ReadFile(path);
+                File.WriteAllText(jsonPath, XgFileReader.ToJson(file));
+            }
+        }
+
+        // Warm up
+        XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).ToList();
+        XgDecisionIterator.IterateJsonDirectory(TestPaths.OutputDir).ToList();
+
+        // --- XG iteration ---
+        var sw = Stopwatch.StartNew();
+        int xgDecisions = XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).Count();
+        sw.Stop();
+        double xgMs = sw.Elapsed.TotalMilliseconds;
+        double xgPerSec = xgFiles.Count / (xgMs / 1000.0);
+
+        // --- JSON iteration ---
+        sw.Restart();
+        int jsonDecisions = XgDecisionIterator.IterateJsonDirectory(TestPaths.OutputDir).Count();
+        sw.Stop();
+        double jsonMs = sw.Elapsed.TotalMilliseconds;
+        double jsonPerSec = xgFiles.Count / (jsonMs / 1000.0);
+
+        double speedup = jsonPerSec / xgPerSec;
+
+        output.WriteLine($"Files: {xgFiles.Count}");
+        output.WriteLine($"XG iteration:   {xgMs,8:F1} ms  ({xgPerSec,6:F1} files/sec)  {xgDecisions} decisions");
+        output.WriteLine($"JSON iteration: {jsonMs,8:F1} ms  ({jsonPerSec,6:F1} files/sec)  {jsonDecisions} decisions");
+        output.WriteLine($"Speedup:        {speedup:F1}x");
+
+        jsonDecisions.Should().Be(xgDecisions,
+            "JSON and XG iteration should yield identical decision counts");
     }
 }
