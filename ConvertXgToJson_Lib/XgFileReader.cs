@@ -187,4 +187,104 @@ public static class XgFileReader
             MatchLength = matchLength >= 99999 ? 0 : matchLength,
         };
     }
+    /// <summary>
+    /// Reads only the game headers from a .xg file without fully parsing
+    /// the file. Use when only per-game scores and start position are needed.
+    /// Decompresses only the first zlib stream and skips all move/cube parsing.
+    /// </summary>
+    /// <param name="path">Full path to the .xg file.</param>
+    /// <returns>
+    /// A list of <see cref="XgGameInfo"/> in game order, one per game in the file.
+    /// Returns an empty list if no game headers are found.
+    /// </returns>
+    public static IReadOnlyList<XgGameInfo> ReadGameHeaders(string path)
+    {
+        using var stream = File.OpenRead(path);
+
+        var (_, contentOffset) = RichGameHeaderParser.Read(stream);
+        stream.Position = contentOffset;
+
+        byte[] raw = ReadAllCompressedBytes(stream);
+        byte[]? data = XgDecompressor.DecompressFirstStream(raw);
+        if (data == null || data.Length < SaveRecordParser.RecordSize)
+            return [];
+
+        // We need match length to compute away scores — read it from the first record.
+        int matchLength = 0;
+        if (data[8] == (byte)RecordType.HeaderMatch)
+            matchLength = ParseMatchLengthFromRecord(data, 0);
+
+        var result = new List<XgGameInfo>();
+        int stride = SaveRecordParser.RecordSize;
+
+        for (int offset = 0; offset + stride <= data.Length; offset += stride)
+        {
+            var entryType = (RecordType)data[offset + 8];
+
+            if (entryType == RecordType.FooterMatch)
+                break;
+
+            if (entryType != RecordType.HeaderGame)
+                continue;
+
+            result.Add(ParseGameInfoFromRecord(data, offset, matchLength));
+        }
+
+        return result;
+    }
+
+    private static int ParseMatchLengthFromRecord(byte[] data, int offset)
+    {
+        using var ms = new MemoryStream(data, offset, SaveRecordParser.RecordSize);
+        using var sub = new SubStream(ms, 0, SaveRecordParser.RecordSize, leaveOpen: true);
+        using var r = new PascalBinaryReader(sub);
+
+        // Skip preamble: Previous(4) + Next(4) + EntryType(1) = 9 bytes
+        r.ReadDword();
+        r.ReadDword();
+        r.ReadByte();
+
+        // Player1Ansi: string[40] = 41 bytes
+        _ = r.ReadPascalAnsiString(40);
+        // Player2Ansi: string[40] = 41 bytes
+        _ = r.ReadPascalAnsiString(40);
+
+        // MatchLength: integer (4-byte align, offset 91 → pad 1 → 92)
+        int matchLength = r.ReadInteger();
+        return matchLength >= 99999 ? 0 : matchLength;
+    }
+
+    private static XgGameInfo ParseGameInfoFromRecord(byte[] data, int offset, int matchLength)
+    {
+        using var ms = new MemoryStream(data, offset, SaveRecordParser.RecordSize);
+        using var sub = new SubStream(ms, 0, SaveRecordParser.RecordSize, leaveOpen: true);
+        using var r = new PascalBinaryReader(sub);
+
+        // Skip preamble: Previous(4) + Next(4) + EntryType(1) = 9 bytes
+        r.ReadDword();
+        r.ReadDword();
+        r.ReadByte();
+
+        // Score1, Score2: integers (4-byte align, offset 9 → pad 3 → 12)
+        int score1 = r.ReadInteger();
+        int score2 = r.ReadInteger();
+
+        // CrawfordApplies: bool (no align)
+        bool crawford = r.ReadBoolean();
+
+        // InitialPosition: array[0..25] of ShortInt = 26 bytes (no align)
+        var points = new sbyte[26];
+        for (int i = 0; i < 26; i++) points[i] = r.ReadShortInt();
+        var position = new PositionEngine { Points = points };
+
+        bool isMoney = matchLength == 0;
+
+        return new XgGameInfo
+        {
+            Away1 = isMoney ? 0 : matchLength - score1,
+            Away2 = isMoney ? 0 : matchLength - score2,
+            IsCrawfordGame = crawford,
+            IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(position),
+        };
+    }
 }
