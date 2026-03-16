@@ -248,7 +248,7 @@ public static class XgDecisionIterator
             Player = ctx.PlayerName(cube.ActivePlayer),
             Match = ctx.MatchId,
             Game = ctx.GameNumber,
-            MoveNum = ctx.MoveNumber,
+            MoveNum = ctx.MoveNumber + 1,
             Roll = 0,
             AnalysisDepth = depth,
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
@@ -266,7 +266,7 @@ public static class XgDecisionIterator
                 Player = ctx.PlayerName(-cube.ActivePlayer),
                 Match = ctx.MatchId,
                 Game = ctx.GameNumber,
-                MoveNum = ctx.MoveNumber,
+                MoveNum = ctx.MoveNumber + 1,
                 Roll = 0,
                 AnalysisDepth = depth,
                 Equity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0f,
@@ -412,7 +412,7 @@ public static class XgDecisionIterator
 
         private string _player1 = "Player 1";
         private string _player2 = "Player 2";
-
+        private bool _lastWasDoubleTake;
         public MatchContext(List<SaveRecord> records, string matchId)
         {
             MatchId = matchId;
@@ -454,20 +454,15 @@ public static class XgDecisionIterator
                     break;
 
                 case CubeRecord cb:
-                    if (cb.Doubled == 1)
+                    if (cb.Doubled == 1 && cb.Taken == 1)
                     {
-                        MoveNumber++;
-                        if (cb.Taken == 1)
-                        {
-                            int preCube = cb.CubeValue == 0 ? 1 : (int)Math.Pow(2, Math.Abs(cb.CubeValue));
-                            CubeValue = preCube * 2;
-                            CubePosition = cb.ActivePlayer >= 0 ? 1 : -1;
-                        }
+                        int preCube = cb.CubeValue == 0 ? 1 : (int)Math.Pow(2, Math.Abs(cb.CubeValue));
+                        CubeValue = preCube * 2;
+                        CubePosition = cb.ActivePlayer >= 0 ? 1 : -1;
                     }
                     break;
             }
         }
-
         public string PlayerName(int activePlayer) =>
             activePlayer >= 0 ? _player1 : _player2;
 
