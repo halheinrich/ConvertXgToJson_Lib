@@ -7,7 +7,7 @@ Part of the Backgammon tools ecosystem: https://github.com/halheinrich/backgammo
 
 https://github.com/halheinrich/ConvertXgToJson_Lib
 **Branch:** main
-**Current commit:** `f25850d`
+**Current commit:** `a160ed9`
 
 ## Stack
 
@@ -21,34 +21,34 @@ C# / .NET 10 / Class Library / Visual Studio 2026 / Windows
 
 Reads .xg and .xgp files; produces DecisionRow records consumed by XgFilter_Lib and ExtractFromXgToCsv.
 
-## Key files (commit f25850d)
+## Key files (commit a160ed9)
 
-* Models.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Models/Models.cs
-* DecisionRow.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Models/DecisionRow.cs
-* XgDecisionIterator.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/XgDecisionIterator.cs
-* XgIteratorState.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/XgIteratorState.cs
-* XgMatchInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/XgMatchInfo.cs
-* XgGameInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/XgGameInfo.cs
-* XgFileReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/XgFileReader.cs
-* BackgammonConstants.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/BackgammonConstants.cs
-* XgidEncoder.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/XgidEncoder.cs
-* XgJsonOptions.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Json/XgJsonOptions.cs
-* SaveRecordParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Parsing/SaveRecordParser.cs
-* PascalBinaryReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Parsing/PascalBinaryReader.cs
-* RichGameHeaderParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Parsing/RichGameHeaderParser.cs
-* RolloutContextParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Parsing/RolloutContextParser.cs
-* XgDecompressor.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Parsing/XgDecompressor.cs
-* CommentParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/Parsing/CommentParser.cs
-* ConvertXgToJson_Lib.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj
-* Tests.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/ConvertXgToJson_Lib.Tests.csproj
-* GlobalUsings.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/GlobalUsings.cs
-* TestPaths.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/TestPaths.cs
-* BoardTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/BoardTests.cs
-* RealFileTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/RealFileTests.cs
-* DecisionCsvTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/DecisionCsvTests.cs
-* XgDecisionIteratorTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/XgDecisionIteratorTests.cs
-* FileIOCollection.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/FileIOCollection.cs
-* ReadMatchInfoBenchmarkTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/f25850d/ConvertXgToJson_Lib.Tests/ReadMatchInfoBenchmarkTests.cs
+* Models.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Models/Models.cs
+* DecisionRow.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Models/DecisionRow.cs
+* XgDecisionIterator.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/XgDecisionIterator.cs
+* XgIteratorState.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/XgIteratorState.cs
+* XgMatchInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/XgMatchInfo.cs
+* XgGameInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/XgGameInfo.cs
+* XgFileReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/XgFileReader.cs
+* BackgammonConstants.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/BackgammonConstants.cs
+* XgidEncoder.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/XgidEncoder.cs
+* XgJsonOptions.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Json/XgJsonOptions.cs
+* SaveRecordParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Parsing/SaveRecordParser.cs
+* PascalBinaryReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Parsing/PascalBinaryReader.cs
+* RichGameHeaderParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Parsing/RichGameHeaderParser.cs
+* RolloutContextParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Parsing/RolloutContextParser.cs
+* XgDecompressor.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Parsing/XgDecompressor.cs
+* CommentParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/Parsing/CommentParser.cs
+* ConvertXgToJson_Lib.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj
+* Tests.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/ConvertXgToJson_Lib.Tests.csproj
+* GlobalUsings.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/GlobalUsings.cs
+* TestPaths.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/TestPaths.cs
+* BoardTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/BoardTests.cs
+* RealFileTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/RealFileTests.cs
+* DecisionCsvTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/DecisionCsvTests.cs
+* XgDecisionIteratorTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/XgDecisionIteratorTests.cs
+* FileIOCollection.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/FileIOCollection.cs
+* ReadMatchInfoBenchmarkTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/a160ed9/ConvertXgToJson_Lib.Tests/ReadMatchInfoBenchmarkTests.cs
 
 ## Architecture
 
@@ -118,6 +118,7 @@ Benchmark: JSON iteration is 1.5x faster than XG iteration.
 * All file-touching test classes share `[Collection("FileIO")]`
 * TestData lives at solution root (`backgammon\TestData`)
 * Cube decisions use `MoveNumber + 1` in BuildCubeRows
+* Taker cube row Board is always doubler's POV (same as doubler row) — FlipBoard removed
 
 ## Shared rules
 
