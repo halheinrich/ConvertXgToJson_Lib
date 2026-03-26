@@ -403,6 +403,45 @@ public class XgDecisionIteratorTests
             break;
         }
     }
+    /// <summary>
+    /// For every non-money decision, MatchScore is expressed from the on-roll
+    /// player's perspective: away1 = MatchLength - onRollScore, away2 = MatchLength - opponentScore.
+    /// Scores are cross-checked against the XGID score fields (field indices 5 and 6).
+    /// </summary>
+    [Fact]
+    public void MatchScore_Away1_IsOnRollPlayersAwayScore()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            string matchId = Path.GetFileNameWithoutExtension(path);
+            var file = XgFileReader.ReadFile(path);
+
+            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            {
+                if (row.MatchLength == 0) continue; // money — no away scores
+
+                // XGID format: XGID=<pos>:<cv>:<cp>:<turn>:<dice>:<score1>:<score2>:<cj>:<ml>:<maxcube>
+                var parts = row.Xgid.Split(':');
+                int xgidScore1 = int.Parse(parts[5]); // on-roll player's score
+                int xgidScore2 = int.Parse(parts[6]); // opponent's score
+
+                // MatchScore format: "{away1}a{away2}a[C]"
+                var scoreParts = row.MatchScore.TrimEnd('C').Split('a', StringSplitOptions.RemoveEmptyEntries);
+                int msAway1 = int.Parse(scoreParts[0]);
+                int msAway2 = int.Parse(scoreParts[1]);
+
+                int expectedAway1 = row.MatchLength - xgidScore1;
+                int expectedAway2 = row.MatchLength - xgidScore2;
+
+                msAway1.Should().Be(expectedAway1,
+                    $"away1 should be on-roll player's away score in {Path.GetFileName(path)} " +
+                    $"game {row.Game} move {row.MoveNum} (XGID score1={xgidScore1})");
+                msAway2.Should().Be(expectedAway2,
+                    $"away2 should be opponent's away score in {Path.GetFileName(path)} " +
+                    $"game {row.Game} move {row.MoveNum} (XGID score2={xgidScore2})");
+            }
+        }
+    }
 
     // -----------------------------------------------------------------------
     //  Helpers

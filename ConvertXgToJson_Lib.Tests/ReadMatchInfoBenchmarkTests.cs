@@ -260,45 +260,50 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
             return;
         }
 
-        // Ensure json files exist
-        Directory.CreateDirectory(TestPaths.OutputDir);
-        foreach (var path in xgFiles)
+        // Write JSONs to a fresh temp dir so stale files from prior runs can't inflate the count.
+        string tempJsonDir = Path.Combine(Path.GetTempPath(), $"xg_bench_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempJsonDir);
+        try
         {
-            string jsonPath = Path.Combine(TestPaths.OutputDir,
-                Path.GetFileNameWithoutExtension(path) + ".json");
-            if (!File.Exists(jsonPath))
+            foreach (var path in xgFiles)
             {
+                string jsonPath = Path.Combine(tempJsonDir,
+                    Path.GetFileNameWithoutExtension(path) + ".json");
                 var file = XgFileReader.ReadFile(path);
                 File.WriteAllText(jsonPath, XgFileReader.ToJson(file));
             }
+
+            // Warm up
+            XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).ToList();
+            XgDecisionIterator.IterateJsonDirectory(tempJsonDir).ToList();
+
+            // --- XG iteration ---
+            var sw = Stopwatch.StartNew();
+            int xgDecisions = XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).Count();
+            sw.Stop();
+            double xgMs = sw.Elapsed.TotalMilliseconds;
+            double xgPerSec = xgFiles.Count / (xgMs / 1000.0);
+
+            // --- JSON iteration ---
+            sw.Restart();
+            int jsonDecisions = XgDecisionIterator.IterateJsonDirectory(tempJsonDir).Count();
+            sw.Stop();
+            double jsonMs = sw.Elapsed.TotalMilliseconds;
+            double jsonPerSec = xgFiles.Count / (jsonMs / 1000.0);
+
+            double speedup = jsonPerSec / xgPerSec;
+
+            output.WriteLine($"Files: {xgFiles.Count}");
+            output.WriteLine($"XG iteration:   {xgMs,8:F1} ms  ({xgPerSec,6:F1} files/sec)  {xgDecisions} decisions");
+            output.WriteLine($"JSON iteration: {jsonMs,8:F1} ms  ({jsonPerSec,6:F1} files/sec)  {jsonDecisions} decisions");
+            output.WriteLine($"Speedup:        {speedup:F1}x");
+
+            jsonDecisions.Should().Be(xgDecisions,
+                "JSON and XG iteration should yield identical decision counts");
         }
-
-        // Warm up
-        XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).ToList();
-        XgDecisionIterator.IterateJsonDirectory(TestPaths.OutputDir).ToList();
-
-        // --- XG iteration ---
-        var sw = Stopwatch.StartNew();
-        int xgDecisions = XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).Count();
-        sw.Stop();
-        double xgMs = sw.Elapsed.TotalMilliseconds;
-        double xgPerSec = xgFiles.Count / (xgMs / 1000.0);
-
-        // --- JSON iteration ---
-        sw.Restart();
-        int jsonDecisions = XgDecisionIterator.IterateJsonDirectory(TestPaths.OutputDir).Count();
-        sw.Stop();
-        double jsonMs = sw.Elapsed.TotalMilliseconds;
-        double jsonPerSec = xgFiles.Count / (jsonMs / 1000.0);
-
-        double speedup = jsonPerSec / xgPerSec;
-
-        output.WriteLine($"Files: {xgFiles.Count}");
-        output.WriteLine($"XG iteration:   {xgMs,8:F1} ms  ({xgPerSec,6:F1} files/sec)  {xgDecisions} decisions");
-        output.WriteLine($"JSON iteration: {jsonMs,8:F1} ms  ({jsonPerSec,6:F1} files/sec)  {jsonDecisions} decisions");
-        output.WriteLine($"Speedup:        {speedup:F1}x");
-
-        jsonDecisions.Should().Be(xgDecisions,
-            "JSON and XG iteration should yield identical decision counts");
+        finally
+        {
+            Directory.Delete(tempJsonDir, recursive: true);
+        }
     }
 }

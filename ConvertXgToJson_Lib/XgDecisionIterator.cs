@@ -188,7 +188,7 @@ public static class XgDecisionIterator
         {
             Xgid = xgid,
             Error = Math.Abs(move.MoveError),
-            MatchScore = ctx.MatchScore,
+            MatchScore = ctx.MatchScoreFor(move.ActivePlayer),
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(move.ActivePlayer),
             Match = ctx.MatchId,
@@ -243,7 +243,7 @@ public static class XgDecisionIterator
         {
             Xgid = xgid,
             Error = Math.Abs(cube.ErrorCube),
-            MatchScore = ctx.MatchScore,
+            MatchScore = ctx.MatchScoreFor(cube.ActivePlayer),
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(cube.ActivePlayer),
             Match = ctx.MatchId,
@@ -261,7 +261,7 @@ public static class XgDecisionIterator
             {
                 Xgid = xgid,
                 Error = Math.Abs(cube.ErrorTake),
-                MatchScore = ctx.MatchScore,
+                MatchScore = ctx.MatchScoreFor(cube.ActivePlayer),
                 MatchLength = ctx.MatchLength,
                 Player = ctx.PlayerName(-cube.ActivePlayer),
                 Match = ctx.MatchId,
@@ -466,16 +466,16 @@ public static class XgDecisionIterator
         public string PlayerName(int activePlayer) =>
             activePlayer >= 0 ? _player1 : _player2;
 
-        public string MatchScore
+        // NEW
+        public string MatchScoreFor(int activePlayer)
         {
-            get
-            {
-                if (MatchLength == 0) return "money";
-                int away1 = MatchLength - Score1;
-                int away2 = MatchLength - Score2;
-                string crawford = CrawfordJacoby == 1 ? "C" : "";
-                return $"{away1}a{away2}a{crawford}";
-            }
+            if (MatchLength == 0) return "money";
+            int onRollScore = activePlayer >= 0 ? Score1 : Score2;
+            int opponentScore = activePlayer >= 0 ? Score2 : Score1;
+            int away1 = MatchLength - onRollScore;
+            int away2 = MatchLength - opponentScore;
+            string crawford = CrawfordJacoby == 1 ? "C" : "";
+            return $"{away1}a{away2}a{crawford}";
         }
     }
 }

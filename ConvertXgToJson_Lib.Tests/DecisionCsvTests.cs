@@ -152,6 +152,50 @@ public class DecisionCsvTests
         }
     }
 
+    /// <summary>
+    /// Same perspective invariant verified over JSON-derived rows:
+    /// away1 = MatchLength - onRollScore, away2 = MatchLength - opponentScore,
+    /// cross-checked against XGID score fields.
+    /// </summary>
+    [Fact]
+    public void JsonDerived_MatchScore_Away1_IsOnRollPlayersAwayScore()
+    {
+        EnsureJsonFilesExist();
+
+        var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
+            .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
+                Path.GetFileNameWithoutExtension(p) + ".xg")))
+            .ToArray();
+
+        jsonFiles.Should().NotBeEmpty();
+
+        foreach (var jsonPath in jsonFiles)
+        {
+            string matchId = Path.GetFileNameWithoutExtension(jsonPath);
+            var file = XgFileReader.ReadJson(jsonPath);
+
+            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            {
+                if (row.MatchLength == 0) continue; // money — no away scores
+
+                var parts = row.Xgid.Split(':');
+                int xgidScore1 = int.Parse(parts[5]);
+                int xgidScore2 = int.Parse(parts[6]);
+
+                var scoreParts = row.MatchScore.TrimEnd('C').Split('a', StringSplitOptions.RemoveEmptyEntries);
+                int msAway1 = int.Parse(scoreParts[0]);
+                int msAway2 = int.Parse(scoreParts[1]);
+
+                msAway1.Should().Be(row.MatchLength - xgidScore1,
+                    $"away1 should be on-roll player's away score in {matchId} " +
+                    $"game {row.Game} move {row.MoveNum} (XGID score1={xgidScore1})");
+                msAway2.Should().Be(row.MatchLength - xgidScore2,
+                    $"away2 should be opponent's away score in {matchId} " +
+                    $"game {row.Game} move {row.MoveNum} (XGID score2={xgidScore2})");
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------
