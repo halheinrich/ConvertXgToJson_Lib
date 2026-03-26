@@ -270,7 +270,7 @@ public static class XgDecisionIterator
                 Roll = 0,
                 AnalysisDepth = depth,
                 Equity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0f,
-                Board = FlipBoard(board),
+                Board = board,
             };
         }
     }
@@ -295,14 +295,6 @@ public static class XgDecisionIterator
                 board[i] = -points[25 - i];
             return board;
         }
-    }
-
-    private static int[] FlipBoard(int[] board)
-    {
-        var flipped = new int[26];
-        for (int i = 0; i < 26; i++)
-            flipped[i] = -board[25 - i];
-        return flipped;
     }
 
     private static PositionEngine FlipPosition(PositionEngine pos)
