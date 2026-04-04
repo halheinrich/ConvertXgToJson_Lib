@@ -321,27 +321,6 @@ public class XgDecisionIteratorTests
 
         int skipGame = gamesWithRows.First().Key;
 
-        var state = new XgIteratorState();
-        var collected = new List<DecisionRow>();
-        int? lastGame = null;
-
-        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
-        {
-            if (row.Game != lastGame)
-            {
-                // At game boundary, check if we should skip this game
-                if (state.GameInfo != null && row.Game == skipGame)
-                {
-                    // This shouldn't happen — we set AdvanceNextGame before rows yield
-                }
-                lastGame = row.Game;
-            }
-            collected.Add(row);
-        }
-
-        // Now do it properly — set AdvanceNextGame based on GameInfo
-        // GameInfo is set before any rows yield, so we need to observe it
-        // by hooking into the enumerator manually
         var state2 = new XgIteratorState();
         var collected2 = new List<DecisionRow>();
         int? prevGame2 = null;

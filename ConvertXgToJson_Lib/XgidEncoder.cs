@@ -52,9 +52,9 @@ public static class XgidEncoder
         int matchLength,
         int maxCubeLog2 = 6)
     {
-        string pos      = EncodePosition(position.Points);
-        int    cubeLog  = CubeLog2(cubeValue);
-        string diceStr  = EncodeDice(dice);
+        string pos = EncodePosition(position.Points);
+        int cubeLog = CubeLog2(cubeValue);
+        string diceStr = EncodeDice(dice);
 
         return $"XGID={pos}:{cubeLog}:{cubePos}:{turn}:{diceStr}:{score1}:{score2}:{crawfordJacoby}:{matchLength}:{maxCubeLog2}";
     }
@@ -80,13 +80,13 @@ public static class XgidEncoder
     };
     private static string EncodeDice(int dice) => dice switch
     {
-        -2   => "R",   // raccoon
-        -1   => "B",   // beaver
-        0    => "00",  // to roll / cube decision
-        > 0  => dice.ToString(),
-        _    => "D",   // doubled, waiting for response
+        -2 => "R",   // raccoon
+        -1 => "B",   // beaver
+        0 => "00",  // to roll / cube decision
+        > 0 => dice.ToString(),
+        _ => "D",   // doubled, waiting for response
     };
 
     private static int CubeLog2(int cubeValue) =>
-        cubeValue <= 1 ? 0 : (int)Math.Round(Math.Log2(Math.Max(1, cubeValue)));
+        cubeValue <= 1 ? 0 : System.Numerics.BitOperations.Log2((uint)cubeValue);
 }

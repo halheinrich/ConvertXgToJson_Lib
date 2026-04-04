@@ -214,7 +214,7 @@ public static class XgDecisionIterator
             rolloutIndices: [cube.RolloutIndex],
             rollouts: rollouts);
 
-        int cubeActual = cube.CubeValue == 0 ? 1 : (int)Math.Pow(2, Math.Abs(cube.CubeValue));
+        int cubeActual = DecodeCubeValue(cube.CubeValue);
         int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
 
         var xgidPosition = cube.ActivePlayer >= 0
@@ -364,7 +364,7 @@ public static class XgDecisionIterator
         dice.Length >= 2 ? dice[0] * 10 + dice[1] : 0;
 
     private static bool IsUsable(float v) =>
-        !float.IsNaN(v) && !float.IsInfinity(v) && v != 0f && v > -999f;
+        !float.IsNaN(v) && !float.IsInfinity(v) && v > -999f;
 
     private static string LevelLabel(short level) => level switch
     {
@@ -384,6 +384,9 @@ public static class XgDecisionIterator
         999 => "Book V2",
         _ => $"level-{level}",
     };
+
+    private static int DecodeCubeValue(int raw) =>
+            raw == 0 ? 1 : (int)Math.Pow(2, Math.Abs(raw));
 
     // -----------------------------------------------------------------------
     //  Match context tracker
@@ -408,20 +411,15 @@ public static class XgDecisionIterator
         public MatchContext(List<SaveRecord> records, string matchId)
         {
             MatchId = matchId;
-            foreach (var r in records)
-            {
-                if (r is MatchHeaderRecord hm)
-                {
-                    _player1 = hm.Player1;
-                    _player2 = hm.Player2;
-                    MatchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength;
-                    CrawfordJacoby = MatchLength == 0
-                        ? (hm.Jacoby ? 1 : 0) + (hm.Beaver ? 2 : 0)
-                        : 0;
-                    MaxCubeLimit = hm.CubeLimit > 0 ? hm.CubeLimit : 6;
-                    break;
-                }
-            }
+            if (records.Count == 0 || records[0] is not MatchHeaderRecord hm)
+                throw new InvalidDataException("XG file must begin with a MatchHeaderRecord.");
+            _player1 = hm.Player1;
+            _player2 = hm.Player2;
+            MatchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength;
+            CrawfordJacoby = MatchLength == 0
+                ? (hm.Jacoby ? 1 : 0) + (hm.Beaver ? 2 : 0)
+                : 0;
+            MaxCubeLimit = hm.CubeLimit > 0 ? hm.CubeLimit : 6;
         }
 
         public void Update(SaveRecord record)
@@ -441,14 +439,14 @@ public static class XgDecisionIterator
 
                 case MoveRecord mv:
                     MoveNumber++;
-                    CubeValue = mv.CubeValue == 0 ? 1 : (int)Math.Pow(2, Math.Abs(mv.CubeValue));
+                    CubeValue = XgDecisionIterator.DecodeCubeValue(mv.CubeValue);
                     CubePosition = mv.CubeValue == 0 ? 0 : (mv.CubeValue > 0 ? 1 : -1);
                     break;
 
                 case CubeRecord cb:
                     if (cb.Doubled == 1 && cb.Taken == 1)
                     {
-                        int preCube = cb.CubeValue == 0 ? 1 : (int)Math.Pow(2, Math.Abs(cb.CubeValue));
+                        int preCube = XgDecisionIterator.DecodeCubeValue(cb.CubeValue);
                         CubeValue = preCube * 2;
                         CubePosition = cb.ActivePlayer >= 0 ? 1 : -1;
                     }

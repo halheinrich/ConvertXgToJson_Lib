@@ -46,10 +46,6 @@ public static class XgFileReader
 
         // Step 2: Decompress the payload into the four sub-streams
         using var decompressed = XgDecompressor.Decompress(stream);
-        //var rolloutStreamLen = decompressed.RolloutContexts.Length;
-        //if (rolloutStreamLen != 0)
-        //    rolloutStreamLen += 0;
-        // set a breakpoint here or log it
         // Step 3: Parse each sub-stream
         var records  = SaveRecordParser.ReadAll(decompressed.GameRecords);
         var rollouts = RolloutContextParser.ReadAll(decompressed.RolloutContexts);
@@ -171,11 +167,6 @@ public static class XgFileReader
         // MatchLength: integer (4-byte align, offset 91 → pad 1 → 92)
         int matchLength = r.ReadInteger();  // offset 96
 
-        // Skip everything up to unicode Player1 at offset 1142.
-        // Player1 unicode is at offset 1142 (after Event unicode at 884).
-        // Fastest: seek directly.
-        sub.Position = 1142;
-        // Player1 unicode is at offset 884 (after Event unicode at 626).
         sub.Position = 880;
         string player1 = r.ReadShortUnicodeString();  // AlignTo(2) → 880 already even → reads 258 bytes
         string player2 = r.ReadShortUnicodeString();
@@ -239,6 +230,7 @@ public static class XgFileReader
             if (entryType != RecordType.HeaderGame)
                 continue;
 
+            state.GameInfo = null;
             var gameInfo = ParseGameInfoFromRecord(data, offset, matchLength);
             state.GameInfo = gameInfo;
             yield return gameInfo;

@@ -18,10 +18,9 @@ namespace ConvertXgToJson_Lib.Parsing;
 internal static class SaveRecordParser
 {
     internal const int RecordSize = 2560;  // already exists — just confirm it's internal, not private
-    public static List<SaveRecord> ReadAll(Stream stream)
+    internal static List<SaveRecord> ReadAll(Stream stream)
     {
         var records = new List<SaveRecord>();
-        long start = stream.Position;
 
         while (stream.Length - stream.Position >= RecordSize)
         {
