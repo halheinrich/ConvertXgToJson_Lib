@@ -6,7 +6,7 @@ internal static class TestPaths
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\TestData"));
     public static string XgpDir => Path.Combine(_root, "xgp");
     public static string XgDir => Path.Combine(_root, "xg");
-    public static string OutputDir => Path.Combine(_root, "Output");
+    public static string JsonDir => Path.Combine(_root, "json");
 
     public static IEnumerable<string> XgpFiles =>
         Directory.EnumerateFiles(XgpDir, "*.xgp");

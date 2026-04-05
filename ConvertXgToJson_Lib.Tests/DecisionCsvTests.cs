@@ -101,7 +101,7 @@ public class DecisionCsvTests
     {
         EnsureJsonFilesExist();
 
-        var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
+        var jsonFiles = Directory.GetFiles(TestPaths.JsonDir, "*.json")
             .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
                 Path.GetFileNameWithoutExtension(p) + ".xg")))
             .ToArray();
@@ -132,7 +132,7 @@ public class DecisionCsvTests
     {
         EnsureJsonFilesExist();
 
-        var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
+        var jsonFiles = Directory.GetFiles(TestPaths.JsonDir, "*.json")
             .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
                 Path.GetFileNameWithoutExtension(p) + ".xg")))
             .ToArray();
@@ -162,7 +162,7 @@ public class DecisionCsvTests
     {
         EnsureJsonFilesExist();
 
-        var jsonFiles = Directory.GetFiles(TestPaths.OutputDir, "*.json")
+        var jsonFiles = Directory.GetFiles(TestPaths.JsonDir, "*.json")
             .Where(p => File.Exists(Path.Combine(TestPaths.XgDir,
                 Path.GetFileNameWithoutExtension(p) + ".xg")))
             .ToArray();
@@ -207,10 +207,10 @@ public class DecisionCsvTests
     /// </summary>
     private static void EnsureJsonFilesExist()
     {
-        Directory.CreateDirectory(TestPaths.OutputDir);
+        Directory.CreateDirectory(TestPaths.JsonDir);
         foreach (var xgPath in Directory.GetFiles(TestPaths.XgDir, "*.xg"))
         {
-            string outPath = Path.Combine(TestPaths.OutputDir,
+            string outPath = Path.Combine(TestPaths.JsonDir,
                 Path.GetFileNameWithoutExtension(xgPath) + ".json");
             if (!File.Exists(outPath))
             {

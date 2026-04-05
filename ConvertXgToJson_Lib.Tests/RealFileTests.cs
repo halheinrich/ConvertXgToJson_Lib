@@ -11,23 +11,6 @@ namespace ConvertXgToJson_Lib.Tests;
 [Collection("FileIO")]
 public class RealFileTests
 {
-    //private static string Peek(string path, long offset)
-    //{
-    //    if (offset < 0 || offset >= new FileInfo(path).Length) return "(out of range)";
-    //    using var f = File.OpenRead(path);
-    //    f.Position = offset;
-    //    var buf = new byte[4];
-    //    f.ReadExactly(buf);
-    //    return string.Join(" ", buf.Select(b => b.ToString("X2")));
-    //}
-    //private static byte[] ReadBytesAt(string path, long offset, int count)
-    //{
-    //    using var f = File.OpenRead(path);
-    //    f.Position = offset;
-    //    var buf = new byte[count];
-    //    f.ReadExactly(buf);
-    //    return buf;
-    //}
     // ------------------------------------------------------------------ //
     //  .xgp files
     // ------------------------------------------------------------------ //
@@ -59,14 +42,14 @@ public class RealFileTests
         if (files.Length == 0)
             return;
 
-        Directory.CreateDirectory(TestPaths.OutputDir);
+        Directory.CreateDirectory(TestPaths.JsonDir);
 
         foreach (var path in files)
         {
             var xgFile = XgFileReader.ReadFile(path);
             string json = XgFileReader.ToJson(xgFile);
 
-            string outPath = Path.Combine(TestPaths.OutputDir, Path.GetFileNameWithoutExtension(path) + ".json");
+            string outPath = Path.Combine(TestPaths.JsonDir, Path.GetFileNameWithoutExtension(path) + ".json");
             File.WriteAllText(outPath, json);
 
             // Basic sanity checks on the JSON
@@ -129,6 +112,46 @@ public class RealFileTests
         }
     }
 
+    [Fact]
+    public void XgpFiles_IterateYieldsMoveRows()
+    {
+        var files = Directory.Exists(TestPaths.XgpDir)
+            ? Directory.GetFiles(TestPaths.XgpDir, "*.xgp")
+            : [];
+
+        if (files.Length == 0)
+            return;
+
+        var anyMoveRows = files.Any(path =>
+        {
+            var xgFile = XgFileReader.ReadFile(path);
+            return XgDecisionIterator.Iterate(xgFile, Path.GetFileNameWithoutExtension(path))
+                .Any(r => !r.IsCube);
+        });
+
+        anyMoveRows.Should().BeTrue("at least one .xgp file should contain analysed checker-play rows");
+    }
+
+    [Fact]
+    public void XgpFiles_IterateYieldsCubeRows()
+    {
+        var files = Directory.Exists(TestPaths.XgpDir)
+            ? Directory.GetFiles(TestPaths.XgpDir, "*.xgp")
+            : [];
+
+        if (files.Length == 0)
+            return;
+
+        var anyCubeRows = files.Any(path =>
+        {
+            var xgFile = XgFileReader.ReadFile(path);
+            return XgDecisionIterator.Iterate(xgFile, Path.GetFileNameWithoutExtension(path))
+                .Any(r => r.IsCube);
+        });
+
+        anyCubeRows.Should().BeTrue("at least one .xgp file should contain analysed cube-decision rows");
+    }
+    
     // ------------------------------------------------------------------ //
     //  .xg files
     // ------------------------------------------------------------------ //
@@ -160,14 +183,14 @@ public class RealFileTests
         if (files.Length == 0)
             return;
 
-        Directory.CreateDirectory(TestPaths.OutputDir);
+        Directory.CreateDirectory(TestPaths.JsonDir);
 
         foreach (var path in files)
         {
             var xgFile = XgFileReader.ReadFile(path);
             string json = XgFileReader.ToJson(xgFile);
 
-            string outPath = Path.Combine(TestPaths.OutputDir, Path.GetFileNameWithoutExtension(path) + ".json"); 
+            string outPath = Path.Combine(TestPaths.JsonDir, Path.GetFileNameWithoutExtension(path) + ".json"); 
             File.WriteAllText(outPath, json);
 
             json.Should().StartWith("{", $"{Path.GetFileName(path)} JSON should be an object");
