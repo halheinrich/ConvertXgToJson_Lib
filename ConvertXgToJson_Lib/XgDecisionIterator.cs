@@ -1,3 +1,4 @@
+using BackgammonDiagram_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
@@ -68,6 +69,62 @@ public static class XgDecisionIterator
             {
                 foreach (var row in BuildCubeRows(cube, context, file.Rollouts))
                     yield return row;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Yields a <see cref="DiagramRequest"/> for every analysed checker-play and
+    /// cube decision in <paramref name="file"/>. Analogous to <see cref="Iterate"/>
+    /// but produces diagram data directly from the raw parse records rather than
+    /// converting from <see cref="DecisionRow"/>.
+    /// </summary>
+    /// <param name="file">The parsed XG file.</param>
+    /// <param name="state">
+    /// Optional early-exit state. Behaves identically to <see cref="Iterate"/>.
+    /// </param>
+    public static IEnumerable<DiagramRequest> IterateDiagramRequests(
+        XgFile file,
+        XgIteratorState? state = null)
+    {
+        var context = new MatchContext(file.Records, matchId: string.Empty);
+
+        foreach (var record in file.Records)
+        {
+            if (record is GameHeaderRecord gh)
+            {
+                context.Update(record);
+
+                if (state != null)
+                {
+                    state.AdvanceNextGame = false;
+
+                    bool isMoney = context.MatchLength == 0;
+                    state.GameInfo = new XgGameInfo
+                    {
+                        Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
+                        Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
+                        IsCrawfordGame = gh.CrawfordApplies,
+                        IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition),
+                    };
+                }
+                continue;
+            }
+
+            context.Update(record);
+
+            if (state?.AdvanceNextGame == true || state?.AdvanceNextMatch == true)
+                continue;
+
+            if (record is MoveRecord move && IsAnalysed(move))
+            {
+                var req = BuildMoveDiagramRequest(move, context, file.Rollouts);
+                if (req != null) yield return req;
+            }
+            else if (record is CubeRecord cube && IsAnalysed(cube))
+            {
+                foreach (var req in BuildCubeDiagramRequests(cube, context, file.Rollouts))
+                    yield return req;
             }
         }
     }
@@ -147,7 +204,7 @@ public static class XgDecisionIterator
     }
 
     // -----------------------------------------------------------------------
-    //  Move record
+    //  Move record — DecisionRow
     // -----------------------------------------------------------------------
 
     private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
@@ -202,7 +259,71 @@ public static class XgDecisionIterator
     }
 
     // -----------------------------------------------------------------------
-    //  Cube record
+    //  Move record — DiagramRequest
+    // -----------------------------------------------------------------------
+
+    private static DiagramRequest? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
+    {
+        var analysis = move.Analysis;
+        if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
+            return null;
+
+        string depth = ResolveDepth(
+            evalLevel: analysis.EvalLevels.Length > 0 ? analysis.EvalLevels[0].Level : (short)0,
+            rolloutIndices: move.RolloutIndices,
+            rollouts: rollouts);
+
+        int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
+        ComputePipCounts(board, out int onRollPips, out int opponentPips);
+
+        // Identify which analysis candidate matches the move actually played.
+        int userPlayIndex = -1;
+        for (int i = 0; i < analysis.PositionsPlayed.Length && i < analysis.MoveCount; i++)
+        {
+            if (PositionsEqual(analysis.PositionsPlayed[i], move.FinalPosition))
+            {
+                userPlayIndex = i;
+                break;
+            }
+        }
+
+        var plays = new List<PlayCandidate>(analysis.MoveCount);
+        double bestEquity = analysis.Evals.Length > 0 ? analysis.Evals[0].Equity : 0.0;
+        for (int i = 0; i < analysis.MoveCount && i < analysis.Evals.Length; i++)
+        {
+            double equity = analysis.Evals[i].Equity;
+            plays.Add(new PlayCandidate
+            {
+                MoveNotation = string.Empty, // notation reconstruction is a rendering concern
+                Equity = equity,
+                EquityLoss = i == 0 ? null : bestEquity - equity,
+                IsUserPlay = i == userPlayIndex,
+            });
+        }
+
+        return new DiagramRequest.Builder
+        {
+            Mop = board,
+            OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
+            OpponentNeeds = ctx.NeedsFor(-move.ActivePlayer),
+            OnRollPipCount = onRollPips,
+            OpponentPipCount = opponentPips,
+            OnRollName = ctx.PlayerName(move.ActivePlayer),
+            OpponentName = ctx.PlayerName(-move.ActivePlayer),
+            CubeSize = ctx.CubeValue,
+            CubeOwner = CubeOwnerFor(ctx.CubePosition, move.ActivePlayer),
+            IsCube = false,
+            Dice = [move.Dice[0], move.Dice[1]],
+            Mode = DiagramMode.Solution,
+            BestPlayIndex = 0,
+            UserPlayIndex = userPlayIndex,
+            Plays = plays,
+            AnalysisDepths = [new AnalysisDepthEntry { Label = depth }],
+        }.Build();
+    }
+
+    // -----------------------------------------------------------------------
+    //  Cube record — DecisionRow
     // -----------------------------------------------------------------------
 
     private static IEnumerable<DecisionRow> BuildCubeRows(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
@@ -214,7 +335,7 @@ public static class XgDecisionIterator
             rolloutIndices: [cube.RolloutIndex],
             rollouts: rollouts);
 
-        int cubeActual = DecodeCubeValue(cube.CubeValue);
+        int cubeActual = CubeValueActual(cube.CubeValue);
         int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
 
         var xgidPosition = cube.ActivePlayer >= 0
@@ -270,9 +391,63 @@ public static class XgDecisionIterator
                 Roll = 0,
                 AnalysisDepth = depth,
                 Equity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0f,
-                Board = board,
+                Board = FlipBoard(board),
             };
         }
+    }
+
+    // -----------------------------------------------------------------------
+    //  Cube record — DiagramRequest
+    // -----------------------------------------------------------------------
+
+    private static IEnumerable<DiagramRequest> BuildCubeDiagramRequests(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
+    {
+        var analysis = cube.Analysis;
+
+        string depth = ResolveDepth(
+            evalLevel: analysis.LevelRequest,
+            rolloutIndices: [cube.RolloutIndex],
+            rollouts: rollouts);
+
+        int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
+
+        int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
+        ComputePipCounts(board, out int onRollPips, out int opponentPips);
+
+        var depthEntries = new List<AnalysisDepthEntry> { new() { Label = depth } };
+
+        // Doubler row
+        yield return new DiagramRequest.Builder
+        {
+            Mop = board,
+            OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
+            OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
+            OnRollPipCount = onRollPips,
+            OpponentPipCount = opponentPips,
+            OnRollName = ctx.PlayerName(cube.ActivePlayer),
+            OpponentName = ctx.PlayerName(-cube.ActivePlayer),
+            CubeSize = CubeValueActual(cube.CubeValue),
+            CubeOwner = CubeOwnerFor(cubePos, cube.ActivePlayer),
+            IsCube = true,
+            Dice = [0, 0],
+            Mode = DiagramMode.Solution,
+            NoDoubleEquity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0.0,
+            DoubleTakeEquity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0.0,
+            WinPctAfterNoDouble = analysis.EvalNoDouble.WinSingle,
+            GammonPctAfterNoDouble = analysis.EvalNoDouble.WinGammon,
+            BgPctAfterNoDouble = analysis.EvalNoDouble.WinBackgammon,
+            LosePctAfterNoDouble = analysis.EvalNoDouble.LoseSingle,
+            LoseGammonPctAfterNoDouble = analysis.EvalNoDouble.LoseGammon,
+            LoseBgPctAfterNoDouble = analysis.EvalNoDouble.LoseBackgammon,
+            WinPctAfterDoubleTake = analysis.EvalDoubleTake.WinSingle,
+            GammonPctAfterDoubleTake = analysis.EvalDoubleTake.WinGammon,
+            BgPctAfterDoubleTake = analysis.EvalDoubleTake.WinBackgammon,
+            LosePctAfterDoubleTake = analysis.EvalDoubleTake.LoseSingle,
+            LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
+            LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
+            AnalysisDepths = depthEntries,
+        }.Build();
+
     }
 
     // -----------------------------------------------------------------------
@@ -297,12 +472,58 @@ public static class XgDecisionIterator
         }
     }
 
+    private static int[] FlipBoard(int[] board)
+    {
+        var flipped = new int[26];
+        for (int i = 0; i < 26; i++)
+            flipped[i] = -board[25 - i];
+        return flipped;
+    }
+
     private static PositionEngine FlipPosition(PositionEngine pos)
     {
         var flipped = new sbyte[26];
         for (int i = 0; i < 26; i++)
             flipped[i] = (sbyte)-pos.Points[25 - i];
         return new PositionEngine { Points = flipped };
+    }
+
+    /// <summary>
+    /// Computes pip counts from a board array already normalised to on-roll perspective.
+    /// Points 1–24 only; bar checkers do not contribute to pip count.
+    /// </summary>
+    private static void ComputePipCounts(int[] board, out int onRollPips, out int opponentPips)
+    {
+        int onRoll = 0, opponent = 0;
+        for (int i = 1; i <= 24; i++)
+        {
+            int v = board[i];
+            if (v > 0) onRoll += v * i;
+            else if (v < 0) opponent += -v * (25 - i);
+        }
+        onRollPips = onRoll;
+        opponentPips = opponent;
+    }
+
+    /// <summary>
+    /// Returns the <see cref="CubeOwner"/> from the on-roll player's perspective.
+    /// <paramref name="cubePosition"/> uses the raw XG sign convention (+1 = player1 owns,
+    /// -1 = player2 owns, 0 = centred); <paramref name="activePlayer"/> is +1 or -1.
+    /// </summary>
+    private static CubeOwner CubeOwnerFor(int cubePosition, int activePlayer)
+    {
+        if (cubePosition == 0) return CubeOwner.Centered;
+        return cubePosition == activePlayer ? CubeOwner.OnRoll : CubeOwner.Opponent;
+    }
+
+    /// <summary>
+    /// Returns true if two <see cref="PositionEngine"/> instances have identical Points arrays.
+    /// </summary>
+    private static bool PositionsEqual(PositionEngine a, PositionEngine b)
+    {
+        for (int i = 0; i < 26; i++)
+            if (a.Points[i] != b.Points[i]) return false;
+        return true;
     }
 
     // -----------------------------------------------------------------------
@@ -325,6 +546,7 @@ public static class XgDecisionIterator
         }
         return new XgMatchInfo();
     }
+
     // -----------------------------------------------------------------------
     //  Depth resolution
     // -----------------------------------------------------------------------
@@ -355,13 +577,22 @@ public static class XgDecisionIterator
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;
 
-    private static bool IsAnalysed(CubeRecord cube) => cube.Analysis.Level > 0 || cube.Analysis.LevelRequest > 0;
+    private static bool IsAnalysed(CubeRecord cube) =>
+        cube.Analysis.Level > 0 || cube.Analysis.LevelRequest > 0;
 
     private static int DiceToInt(int[] dice) =>
         dice.Length >= 2 ? dice[0] * 10 + dice[1] : 0;
 
     private static bool IsUsable(float v) =>
         !float.IsNaN(v) && !float.IsInfinity(v) && v > -999f;
+
+    /// <summary>
+    /// Converts a raw XG cube value (signed log2 encoding) to the actual cube size.
+    /// Raw value 0 means the cube is centred at 1. Positive/negative values encode
+    /// which player owns the cube; the magnitude is log2 of the cube size.
+    /// </summary>
+    internal static int CubeValueActual(int raw) =>
+        raw == 0 ? 1 : (int)Math.Pow(2, Math.Abs(raw));
 
     private static string LevelLabel(short level) => level switch
     {
@@ -381,8 +612,5 @@ public static class XgDecisionIterator
         999 => "Book V2",
         _ => $"level-{level}",
     };
-
-    internal static int DecodeCubeValue(int raw) =>
-             raw == 0 ? 1 : (int)Math.Pow(2, Math.Abs(raw));
 
 }

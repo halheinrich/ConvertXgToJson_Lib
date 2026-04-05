@@ -50,14 +50,14 @@ internal sealed class MatchContext
 
             case MoveRecord mv:
                 MoveNumber++;
-                CubeValue = XgDecisionIterator.DecodeCubeValue(mv.CubeValue);
+                CubeValue = XgDecisionIterator.CubeValueActual(mv.CubeValue);
                 CubePosition = mv.CubeValue == 0 ? 0 : (mv.CubeValue > 0 ? 1 : -1);
                 break;
 
             case CubeRecord cb:
                 if (cb.Doubled == 1 && cb.Taken == 1)
                 {
-                    int preCube = XgDecisionIterator.DecodeCubeValue(cb.CubeValue);
+                    int preCube = XgDecisionIterator.CubeValueActual(cb.CubeValue);
                     CubeValue = preCube * 2;
                     CubePosition = cb.ActivePlayer >= 0 ? 1 : -1;
                 }
@@ -67,6 +67,13 @@ internal sealed class MatchContext
 
     public string PlayerName(int activePlayer) =>
         activePlayer >= 0 ? _player1 : _player2;
+
+    /// <summary>
+    /// Returns the "away" score (points needed to win) from the perspective of
+    /// <paramref name="activePlayer"/>. Returns 0 for money games.
+    /// </summary>
+    public int NeedsFor(int activePlayer) =>
+        MatchLength == 0 ? 0 : MatchLength - (activePlayer >= 0 ? Score1 : Score2);
 
     public string MatchScoreFor(int activePlayer)
     {
