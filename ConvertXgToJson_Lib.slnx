@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="../BackgammonDiagram_Lib/BackgammonDiagram_Lib/BackgammonDiagram_Lib.csproj" />
+  <Project Path="../BgDataTypes_Lib/BgDataTypes_Lib/BgDataTypes_Lib.csproj" />
   <Project Path="ConvertXgToJson_Lib.Tests/ConvertXgToJson_Lib.Tests.csproj" />
   <Project Path="ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj" />
 </Solution>

@@ -17,7 +17,7 @@ internal sealed class MatchContext
 
     private string _player1 = "Player 1";
     private string _player2 = "Player 2";
-    private bool _lastWasDoubleTake;
+//    private bool _lastWasDoubleTake;
 
     public MatchContext(List<SaveRecord> records, string matchId)
     {

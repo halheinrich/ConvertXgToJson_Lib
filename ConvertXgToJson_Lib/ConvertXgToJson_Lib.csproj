@@ -14,6 +14,6 @@
     </AssemblyAttribute>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\BackgammonDiagram_Lib\BackgammonDiagram_Lib\BackgammonDiagram_Lib.csproj" />
+    <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib\BgDataTypes_Lib.csproj" />
   </ItemGroup>
 </Project>

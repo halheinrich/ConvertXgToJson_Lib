@@ -1,5 +1,5 @@
 ﻿// DiagramRequestIteratorTests.cs
-using BackgammonDiagram_Lib;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
 
@@ -85,7 +85,7 @@ public class DiagramRequestIteratorTests
                 .ToList();
 
             var moveRequests = XgDecisionIterator.IterateDiagramRequests(file)
-                .Where(r => !r.IsCube)
+                .Where(r => !r.Decision.IsCube)
                 .ToList();
 
             moveRequests.Count.Should().Be(moveRows.Count,
@@ -96,27 +96,27 @@ public class DiagramRequestIteratorTests
                 var row = moveRows[i];
                 var req = moveRequests[i];
 
-                req.IsCube.Should().BeFalse($"move request [{i}] should have IsCube=false");
+                req.Decision.IsCube.Should().BeFalse($"move request [{i}] should have IsCube=false");
 
                 // Board / Mop agreement
-                req.Mop.Count.Should().Be(26, "Mop must be 26 elements");
+                req.Position.Mop.Count.Should().Be(26, "Mop must be 26 elements");
                 for (int p = 0; p < 26; p++)
-                    req.Mop[p].Should().Be(row.Board[p],
+                    req.Position.Mop[p].Should().Be(row.Board[p],
                         $"{Path.GetFileName(path)} move [{i}] Mop[{p}] should match Board[{p}]");
 
                 // Player name
-                req.OnRollName.Should().Be(row.Player,
+                req.Descriptive.OnRollName.Should().Be(row.Player,
                     $"{Path.GetFileName(path)} move [{i}] OnRollName should match Player");
 
                 // Dice: Roll is d1*10+d2; Dice[0] and Dice[1] are the individual dice
-                int expectedRoll = req.Dice[0] * 10 + req.Dice[1];
+                int expectedRoll = req.Decision.Dice[0] * 10 + req.Decision.Dice[1];
                 expectedRoll.Should().Be(row.Roll,
                     $"{Path.GetFileName(path)} move [{i}] Dice should reconstruct Roll");
 
                 // Needs are non-negative
-                req.OnRollNeeds.Should().BeGreaterThanOrEqualTo(0,
+                req.Position.OnRollNeeds.Should().BeGreaterThanOrEqualTo(0,
                     $"{Path.GetFileName(path)} move [{i}] OnRollNeeds should be >= 0");
-                req.OpponentNeeds.Should().BeGreaterThanOrEqualTo(0,
+                req.Position.OpponentNeeds.Should().BeGreaterThanOrEqualTo(0,
                     $"{Path.GetFileName(path)} move [{i}] OpponentNeeds should be >= 0");
             }
         }
@@ -140,24 +140,24 @@ public class DiagramRequestIteratorTests
             var file = XgFileReader.ReadFile(path);
 
             foreach (var req in XgDecisionIterator.IterateDiagramRequests(file)
-                                                   .Where(r => r.IsCube))
+                                                   .Where(r => r.Decision.IsCube))
             {
                 foundCube = true;
 
-                req.IsCube.Should().BeTrue("cube request must have IsCube=true");
-                req.Dice[0].Should().Be(0, "cube request Dice[0] must be 0");
-                req.Dice[1].Should().Be(0, "cube request Dice[1] must be 0");
+                req.Decision.IsCube.Should().BeTrue("cube request must have IsCube=true");
+                req.Decision.Dice[0].Should().Be(0, "cube request Dice[0] must be 0");
+                req.Decision.Dice[1].Should().Be(0, "cube request Dice[1] must be 0");
 
                 // At least one of the equity fields should be non-zero —
                 // a fully-analysed cube position will have meaningful values.
-                bool hasEquity = req.NoDoubleEquity != 0.0 || req.DoubleTakeEquity != 0.0;
+                bool hasEquity = req.Decision.NoDoubleEquity != 0.0 || req.Decision.DoubleTakeEquity != 0.0;
                 hasEquity.Should().BeTrue(
                     $"cube request in {Path.GetFileName(path)} should have non-zero equity fields");
 
                 // Win percentages should be in [0, 1]
-                req.WinPctAfterNoDouble.Should().BeInRange(0f, 1f,
+                req.Decision.WinPctAfterNoDouble.Should().BeInRange(0f, 1f,
                     "WinPctAfterNoDouble should be a probability");
-                req.WinPctAfterDoubleTake.Should().BeInRange(0f, 1f,
+                req.Decision.WinPctAfterDoubleTake.Should().BeInRange(0f, 1f,
                     "WinPctAfterDoubleTake should be a probability");
             }
         }
@@ -188,20 +188,20 @@ public class DiagramRequestIteratorTests
                 // would mean at most one checker on point 6 or fewer remaining).
                 // This is a conservative threshold that avoids false failures on
                 // late-game positions.
-                if (req.OnRollPipCount < 7 || req.OpponentPipCount < 7)
+                if (req.Position.OnRollPipCount < 7 || req.Position.OpponentPipCount < 7)
                     continue;
 
-                req.OnRollPipCount.Should().BeGreaterThan(0,
+                req.Position.OnRollPipCount.Should().BeGreaterThan(0,
                     $"OnRollPipCount should be positive in {Path.GetFileName(path)}");
-                req.OpponentPipCount.Should().BeGreaterThan(0,
+                req.Position.OpponentPipCount.Should().BeGreaterThan(0,
                     $"OpponentPipCount should be positive in {Path.GetFileName(path)}");
 
                 // Sanity: pip counts should be plausible for a backgammon position.
                 // Starting pip count is 167; maximum possible is 15*24 = 360.
-                req.OnRollPipCount.Should().BeLessThanOrEqualTo(360,
-                    $"OnRollPipCount={req.OnRollPipCount} is implausibly large");
-                req.OpponentPipCount.Should().BeLessThanOrEqualTo(360,
-                    $"OpponentPipCount={req.OpponentPipCount} is implausibly large");
+                req.Position.OnRollPipCount.Should().BeLessThanOrEqualTo(360,
+                    $"OnRollPipCount={req.Position.OnRollPipCount} is implausibly large");
+                req.Position.OpponentPipCount.Should().BeLessThanOrEqualTo(360,
+                    $"OpponentPipCount={req.Position.OpponentPipCount} is implausibly large");
             }
         }
     }

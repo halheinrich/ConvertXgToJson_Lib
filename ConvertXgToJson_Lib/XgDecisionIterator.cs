@@ -1,4 +1,4 @@
-using BackgammonDiagram_Lib;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
@@ -74,7 +74,7 @@ public static class XgDecisionIterator
     }
 
     /// <summary>
-    /// Yields a <see cref="DiagramRequest"/> for every analysed checker-play and
+    /// Yields a <see cref="BgDecisionData"/> for every analysed checker-play and
     /// cube decision in <paramref name="file"/>. Analogous to <see cref="Iterate"/>
     /// but produces diagram data directly from the raw parse records rather than
     /// converting from <see cref="DecisionRow"/>.
@@ -83,7 +83,7 @@ public static class XgDecisionIterator
     /// <param name="state">
     /// Optional early-exit state. Behaves identically to <see cref="Iterate"/>.
     /// </param>
-    public static IEnumerable<DiagramRequest> IterateDiagramRequests(
+    public static IEnumerable<BgDecisionData> IterateDiagramRequests(
         XgFile file,
         XgIteratorState? state = null)
     {
@@ -262,11 +262,13 @@ public static class XgDecisionIterator
     //  Move record — DiagramRequest
     // -----------------------------------------------------------------------
 
-    private static DiagramRequest? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
+    private static BgDecisionData? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
     {
         var analysis = move.Analysis;
         if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
             return null;
+        int dice = DiceToInt(move.Dice);
+        if (dice == 0) return null;
 
         string depth = ResolveDepth(
             evalLevel: analysis.EvalLevels.Length > 0 ? analysis.EvalLevels[0].Level : (short)0,
@@ -301,25 +303,34 @@ public static class XgDecisionIterator
             });
         }
 
-        return new DiagramRequest.Builder
+        return new BgDecisionData
         {
-            Mop = board,
-            OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
-            OpponentNeeds = ctx.NeedsFor(-move.ActivePlayer),
-            OnRollPipCount = onRollPips,
-            OpponentPipCount = opponentPips,
-            OnRollName = ctx.PlayerName(move.ActivePlayer),
-            OpponentName = ctx.PlayerName(-move.ActivePlayer),
-            CubeSize = ctx.CubeValue,
-            CubeOwner = CubeOwnerFor(ctx.CubePosition, move.ActivePlayer),
-            IsCube = false,
-            Dice = [move.Dice[0], move.Dice[1]],
-            Mode = DiagramMode.Solution,
-            BestPlayIndex = 0,
-            UserPlayIndex = userPlayIndex,
-            Plays = plays,
-            AnalysisDepths = [new AnalysisDepthEntry { Label = depth }],
-        }.Build();
+            Position = new PositionData
+            {
+                Mop = board,
+                OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
+                OpponentNeeds = ctx.NeedsFor(-move.ActivePlayer),
+                OnRollPipCount = onRollPips,
+                OpponentPipCount = opponentPips,
+                CubeSize = ctx.CubeValue,
+                CubeOwner = CubeOwnerFor(ctx.CubePosition, move.ActivePlayer),
+            },
+            Decision = new DecisionData
+            {
+                IsCube = false,
+                Dice = [move.Dice[0], move.Dice[1]],
+                BestPlayIndex = 0,
+                UserPlayIndex = userPlayIndex,
+                Plays = plays,
+                AnalysisDepths = [new AnalysisDepthEntry { Label = depth }],
+            },
+            Descriptive = new DescriptiveData
+            {
+                MatchLength = ctx.MatchLength,
+                OnRollName = ctx.PlayerName(move.ActivePlayer),
+                OpponentName = ctx.PlayerName(-move.ActivePlayer),
+            },
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -375,32 +386,13 @@ public static class XgDecisionIterator
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
             Board = board,
         };
-
-        if (cube.Doubled == 1 && cube.ErrorTake > -999.0)
-        {
-            yield return new DecisionRow
-            {
-                Xgid = xgid,
-                Error = Math.Abs(cube.ErrorTake),
-                MatchScore = ctx.MatchScoreFor(cube.ActivePlayer),
-                MatchLength = ctx.MatchLength,
-                Player = ctx.PlayerName(-cube.ActivePlayer),
-                Match = ctx.MatchId,
-                Game = ctx.GameNumber,
-                MoveNum = ctx.MoveNumber + 1,
-                Roll = 0,
-                AnalysisDepth = depth,
-                Equity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0f,
-                Board = FlipBoard(board),
-            };
-        }
     }
 
     // -----------------------------------------------------------------------
     //  Cube record — DiagramRequest
     // -----------------------------------------------------------------------
 
-    private static IEnumerable<DiagramRequest> BuildCubeDiagramRequests(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
+    private static IEnumerable<BgDecisionData> BuildCubeDiagramRequests(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
     {
         var analysis = cube.Analysis;
 
@@ -417,37 +409,45 @@ public static class XgDecisionIterator
         var depthEntries = new List<AnalysisDepthEntry> { new() { Label = depth } };
 
         // Doubler row
-        yield return new DiagramRequest.Builder
+        yield return new BgDecisionData
         {
-            Mop = board,
-            OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
-            OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
-            OnRollPipCount = onRollPips,
-            OpponentPipCount = opponentPips,
-            OnRollName = ctx.PlayerName(cube.ActivePlayer),
-            OpponentName = ctx.PlayerName(-cube.ActivePlayer),
-            CubeSize = CubeValueActual(cube.CubeValue),
-            CubeOwner = CubeOwnerFor(cubePos, cube.ActivePlayer),
-            IsCube = true,
-            Dice = [0, 0],
-            Mode = DiagramMode.Solution,
-            NoDoubleEquity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0.0,
-            DoubleTakeEquity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0.0,
-            WinPctAfterNoDouble = analysis.EvalNoDouble.WinSingle,
-            GammonPctAfterNoDouble = analysis.EvalNoDouble.WinGammon,
-            BgPctAfterNoDouble = analysis.EvalNoDouble.WinBackgammon,
-            LosePctAfterNoDouble = analysis.EvalNoDouble.LoseSingle,
-            LoseGammonPctAfterNoDouble = analysis.EvalNoDouble.LoseGammon,
-            LoseBgPctAfterNoDouble = analysis.EvalNoDouble.LoseBackgammon,
-            WinPctAfterDoubleTake = analysis.EvalDoubleTake.WinSingle,
-            GammonPctAfterDoubleTake = analysis.EvalDoubleTake.WinGammon,
-            BgPctAfterDoubleTake = analysis.EvalDoubleTake.WinBackgammon,
-            LosePctAfterDoubleTake = analysis.EvalDoubleTake.LoseSingle,
-            LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
-            LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
-            AnalysisDepths = depthEntries,
-        }.Build();
-
+            Position = new PositionData
+            {
+                Mop = board,
+                OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
+                OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
+                OnRollPipCount = onRollPips,
+                OpponentPipCount = opponentPips,
+                CubeSize = CubeValueActual(cube.CubeValue),
+                CubeOwner = CubeOwnerFor(cubePos, cube.ActivePlayer),
+            },
+            Decision = new DecisionData
+            {
+                IsCube = true,
+                Dice = [0, 0],
+                NoDoubleEquity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0.0,
+                DoubleTakeEquity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0.0,
+                WinPctAfterNoDouble = analysis.EvalNoDouble.WinSingle,
+                GammonPctAfterNoDouble = analysis.EvalNoDouble.WinGammon,
+                BgPctAfterNoDouble = analysis.EvalNoDouble.WinBackgammon,
+                LosePctAfterNoDouble = analysis.EvalNoDouble.LoseSingle,
+                LoseGammonPctAfterNoDouble = analysis.EvalNoDouble.LoseGammon,
+                LoseBgPctAfterNoDouble = analysis.EvalNoDouble.LoseBackgammon,
+                WinPctAfterDoubleTake = analysis.EvalDoubleTake.WinSingle,
+                GammonPctAfterDoubleTake = analysis.EvalDoubleTake.WinGammon,
+                BgPctAfterDoubleTake = analysis.EvalDoubleTake.WinBackgammon,
+                LosePctAfterDoubleTake = analysis.EvalDoubleTake.LoseSingle,
+                LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
+                LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
+                AnalysisDepths = depthEntries,
+            },
+            Descriptive = new DescriptiveData
+            {
+                MatchLength = ctx.MatchLength,
+                OnRollName = ctx.PlayerName(cube.ActivePlayer),
+                OpponentName = ctx.PlayerName(-cube.ActivePlayer),
+            },
+        };
     }
 
     // -----------------------------------------------------------------------
