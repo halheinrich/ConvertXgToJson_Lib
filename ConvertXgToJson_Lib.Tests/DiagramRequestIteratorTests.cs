@@ -2,6 +2,8 @@
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ConvertXgToJson_Lib.Tests;
 
@@ -205,4 +207,182 @@ public class DiagramRequestIteratorTests
             }
         }
     }
+    // -----------------------------------------------------------------------
+    //  User error fields
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// UserPlayError is non-negative when present.
+    /// For .xgp files (sentinel MoveError == -1000) it must be null.
+    /// </summary>
+    [Fact]
+    public void MoveRequest_UserPlayError_NonNegativeWhenPresent()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            bool isXgp = path.EndsWith(".xgp", StringComparison.OrdinalIgnoreCase);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file)
+                                                   .Where(r => !r.Decision.IsCube))
+            {
+                if (isXgp)
+                {
+                    req.Decision.UserPlayError.Should().BeNull(
+                        $".xgp file {Path.GetFileName(path)}: UserPlayError should be null (sentinel)");
+                }
+                else if (req.Decision.UserPlayError.HasValue)
+                {
+                    req.Decision.UserPlayError.Value.Should().BeGreaterThanOrEqualTo(0,
+                        $"{Path.GetFileName(path)}: UserPlayError must be non-negative");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// UserDoubleError is non-negative when present; null for sentinel values.
+    /// IsCube must be false for move requests (guard).
+    /// </summary>
+    [Fact]
+    public void CubeRequest_UserDoubleError_NonNegativeWhenPresent()
+    {
+        bool foundCube = false;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file)
+                                                   .Where(r => r.Decision.IsCube))
+            {
+                foundCube = true;
+
+                if (req.Decision.UserDoubleError.HasValue)
+                {
+                    req.Decision.UserDoubleError.Value.Should().BeGreaterThanOrEqualTo(0,
+                        $"{Path.GetFileName(path)}: UserDoubleError must be non-negative");
+                }
+            }
+        }
+
+        foundCube.Should().BeTrue("test data should contain at least one cube decision");
+    }
+
+    /// <summary>
+    /// UserTakeError is null when the cube was not offered (Doubled != 1).
+    /// When present it is non-negative.
+    /// </summary>
+    [Fact]
+    public void CubeRequest_UserTakeError_NullWhenNotDoubled()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+
+            // Pair raw CubeRecords with their diagram requests to check Doubled flag.
+            var cubeRecords = file.Records.OfType<CubeRecord>()
+                .Where(c => c.Analysis.Level > 0 || c.Analysis.LevelRequest > 0)
+                .ToList();
+
+            var cubeRequests = XgDecisionIterator.IterateDiagramRequests(file)
+                .Where(r => r.Decision.IsCube)
+                .ToList();
+
+            cubeRecords.Count.Should().Be(cubeRequests.Count,
+                $"{Path.GetFileName(path)}: cube record count should match cube request count");
+
+            for (int i = 0; i < cubeRecords.Count; i++)
+            {
+                var rec = cubeRecords[i];
+                var req = cubeRequests[i];
+
+                if (rec.Doubled != 1)
+                {
+                    req.Decision.UserTakeError.Should().BeNull(
+                        $"{Path.GetFileName(path)} cube[{i}]: UserTakeError must be null when not doubled");
+                }
+                else if (req.Decision.UserTakeError.HasValue)
+                {
+                    req.Decision.UserTakeError.Value.Should().BeGreaterThanOrEqualTo(0,
+                        $"{Path.GetFileName(path)} cube[{i}]: UserTakeError must be non-negative");
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    //  BgDecisionData sample output
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Writes a JSON sample of BgDecisionData records to TestData/BgDecisionData/:
+    /// - First match: up to 5 records with non-zero UserPlayError, UserDoubleError,
+    ///   and UserTakeError respectively (up to 15 records total)
+    /// - Each subsequent match: up to 1 record per error type (up to 3 total)
+    /// One file per match, only written when the match contributes at least one record.
+    /// </summary>
+    [Fact]
+    public void BgDecisionData_WriteSampleJson()
+    {
+        var opts = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+        };
+
+        Directory.CreateDirectory(TestPaths.BgDecisionDataDir);
+        File.WriteAllText(Path.Combine(TestPaths.BgDecisionDataDir, "GotHere.txt"), "ok");
+
+        bool isFirstMatch = true;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string matchId = Path.GetFileNameWithoutExtension(path);
+
+            int quota = isFirstMatch ? 5 : 1;
+
+            var playErrors = new List<BgDecisionData>();
+            var doubleErrors = new List<BgDecisionData>();
+            var takeErrors = new List<BgDecisionData>();
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file))
+            {
+                if (playErrors.Count < quota && req.Decision.UserPlayError > 0)
+                    playErrors.Add(req);
+                if (doubleErrors.Count < quota && req.Decision.UserDoubleError > 0)
+                    doubleErrors.Add(req);
+                if (takeErrors.Count < quota && req.Decision.UserTakeError > 0)
+                    takeErrors.Add(req);
+
+                if (playErrors.Count >= quota && doubleErrors.Count >= quota && takeErrors.Count >= quota)
+                    break;
+            }
+
+            var sample = playErrors
+                .Concat(doubleErrors)
+                .Concat(takeErrors)
+                .Distinct()
+                .ToList();
+
+            if (sample.Count == 0) continue;
+
+            var output = new
+            {
+                matchId,
+                playErrorSamples = playErrors,
+                doubleErrorSamples = doubleErrors,
+                takeErrorSamples = takeErrors,
+            };
+
+            string outPath = Path.Combine(TestPaths.BgDecisionDataDir, matchId + ".json");
+            File.WriteAllText(outPath, JsonSerializer.Serialize(output, opts));
+
+            isFirstMatch = false;
+        }
+    }
+
 }

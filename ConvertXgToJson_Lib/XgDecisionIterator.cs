@@ -294,12 +294,19 @@ public static class XgDecisionIterator
         for (int i = 0; i < analysis.MoveCount && i < analysis.Evals.Length; i++)
         {
             double equity = analysis.Evals[i].Equity;
+            var eval = analysis.Evals[i];
             plays.Add(new PlayCandidate
             {
                 MoveNotation = string.Empty, // notation reconstruction is a rendering concern
                 Equity = equity,
                 EquityLoss = i == 0 ? null : bestEquity - equity,
                 IsUserPlay = i == userPlayIndex,
+                WinPct = eval.WinSingle,
+                WinGammonPct = eval.WinGammon,
+                WinBgPct = eval.WinBackgammon,
+                LosePct = eval.LoseSingle,
+                LoseGammonPct = eval.LoseGammon,
+                LoseBgPct = eval.LoseBackgammon,
             });
         }
 
@@ -321,6 +328,7 @@ public static class XgDecisionIterator
                 Dice = [move.Dice[0], move.Dice[1]],
                 BestPlayIndex = 0,
                 UserPlayIndex = userPlayIndex,
+                UserPlayError = move.MoveError > -999.0 ? Math.Abs(move.MoveError) : (double?)null,
                 Plays = plays,
                 AnalysisDepths = [new AnalysisDepthEntry { Label = depth }],
             },
@@ -440,6 +448,8 @@ public static class XgDecisionIterator
                 LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
                 LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
                 AnalysisDepths = depthEntries,
+                UserDoubleError = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : (double?)null,
+                UserTakeError = (cube.Doubled == 1 && cube.ErrorTake > -999.0) ? Math.Abs(cube.ErrorTake) : (double?)null,
             },
             Descriptive = new DescriptiveData
             {

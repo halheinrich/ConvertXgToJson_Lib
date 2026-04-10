@@ -7,10 +7,9 @@ internal static class TestPaths
     public static string XgpDir => Path.Combine(_root, "xgp");
     public static string XgDir => Path.Combine(_root, "xg");
     public static string JsonDir => Path.Combine(_root, "json");
-
+    public static string BgDecisionDataDir => Path.Combine(_root, "BgDecisionData");
     public static IEnumerable<string> XgpFiles =>
         Directory.EnumerateFiles(XgpDir, "*.xgp");
-
     public static IEnumerable<string> XgFiles =>
         Directory.EnumerateFiles(XgDir, "*.xg");
     public static string CsvDir => Path.Combine(_root, "Csv");
