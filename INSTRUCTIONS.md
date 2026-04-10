@@ -7,7 +7,7 @@ Part of the Backgammon tools ecosystem: https://github.com/halheinrich/backgammo
 
 https://github.com/halheinrich/ConvertXgToJson_Lib
 **Branch:** main
-**Current commit:** `968b0be`
+**Current commit:** `d61da8b`
 
 ## Stack
 
@@ -62,35 +62,34 @@ INSTRUCTIONS.md
 
 ## Key files
 
-* ConvertXgToJson_Lib.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj
-* Models/DecisionRow.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Models/DecisionRow.cs
-* Models/Models.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Models/Models.cs
-* XgDecisionIterator.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/XgDecisionIterator.cs
-* XgIteratorState.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/XgIteratorState.cs
-* XgMatchInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/XgMatchInfo.cs
-* XgGameInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/XgGameInfo.cs
-* XgFileReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/XgFileReader.cs
-* BackgammonConstants.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/BackgammonConstants.cs
-* XgidEncoder.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/XgidEncoder.cs
-* MatchContext.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/MatchContext.cs
-* VersionInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/VersionInfo.cs
-* Json/XgJsonOptions.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Json/XgJsonOptions.cs
-* Parsing/SaveRecordParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Parsing/SaveRecordParser.cs
-* Parsing/PascalBinaryReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Parsing/PascalBinaryReader.cs
-* Parsing/RichGameHeaderParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Parsing/RichGameHeaderParser.cs
-* Parsing/RolloutContextParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Parsing/RolloutContextParser.cs
-* Parsing/XgDecompressor.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Parsing/XgDecompressor.cs
-* Parsing/CommentParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib/Parsing/CommentParser.cs
-* Tests.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/ConvertXgToJson_Lib.Tests.csproj
-* Tests/GlobalUsings.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/GlobalUsings.cs
-* Tests/TestPaths.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/TestPaths.cs
-* Tests/BoardTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/BoardTests.cs
-* Tests/RealFileTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/RealFileTests.cs
-* Tests/DecisionCsvTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/DecisionCsvTests.cs
-* Tests/XgDecisionIteratorTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/XgDecisionIteratorTests.cs
-* Tests/FileIOCollection.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/FileIOCollection.cs
-* Tests/ReadMatchInfoBenchmarkTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/ReadMatchInfoBenchmarkTests.cs
-* Tests/DiagramRequestIteratorTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/968b0be/ConvertXgToJson_Lib.Tests/DiagramRequestIteratorTests.cs
+* ConvertXgToJson_Lib.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj
+* Models/DecisionRow.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Models/DecisionRow.cs
+* Models/Models.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Models/Models.cs
+* XgDecisionIterator.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/XgDecisionIterator.cs
+* XgIteratorState.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/XgIteratorState.cs
+* XgMatchInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/XgMatchInfo.cs
+* XgGameInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/XgGameInfo.cs
+* XgFileReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/XgFileReader.cs
+* BackgammonConstants.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/BackgammonConstants.cs
+* XgidEncoder.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/XgidEncoder.cs
+* MatchContext.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/MatchContext.cs
+* Json/XgJsonOptions.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Json/XgJsonOptions.cs
+* Parsing/SaveRecordParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Parsing/SaveRecordParser.cs
+* Parsing/PascalBinaryReader.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Parsing/PascalBinaryReader.cs
+* Parsing/RichGameHeaderParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Parsing/RichGameHeaderParser.cs
+* Parsing/RolloutContextParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Parsing/RolloutContextParser.cs
+* Parsing/XgDecompressor.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Parsing/XgDecompressor.cs
+* Parsing/CommentParser.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib/Parsing/CommentParser.cs
+* Tests.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/ConvertXgToJson_Lib.Tests.csproj
+* Tests/GlobalUsings.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/GlobalUsings.cs
+* Tests/TestPaths.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/TestPaths.cs
+* Tests/BoardTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/BoardTests.cs
+* Tests/RealFileTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/RealFileTests.cs
+* Tests/DecisionCsvTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/DecisionCsvTests.cs
+* Tests/XgDecisionIteratorTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/XgDecisionIteratorTests.cs
+* Tests/FileIOCollection.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/FileIOCollection.cs
+* Tests/ReadMatchInfoBenchmarkTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/ReadMatchInfoBenchmarkTests.cs
+* Tests/DiagramRequestIteratorTests.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/d61da8b/ConvertXgToJson_Lib.Tests/DiagramRequestIteratorTests.cs
 
 ## Dependency files
 
@@ -163,9 +162,10 @@ BgDataTypes_Lib @ 4fd5f6e:
 
 ## Current status
 
-✅ Complete — all tests pass.
-Benchmark: ReadMatchInfo is 90x faster than ReadFile.
-Benchmark: JSON iteration is 1.5x faster than XG iteration.
+Complete. All tests pass (184).
+IterateDiagramRequests populates UserPlayError, UserDoubleError, UserTakeError.
+PlayCandidate populated with win/gammon/bg probabilities from EvalResult.
+BgDecisionData_WriteSampleJson writes sample JSON to TestData/BgDecisionData/.
 
 ## Deferred
 
