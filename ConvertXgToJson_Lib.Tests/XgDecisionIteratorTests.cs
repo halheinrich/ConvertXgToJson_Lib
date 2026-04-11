@@ -1,7 +1,6 @@
-﻿// XgDecisionIteratorTests.cs
+﻿using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
-
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>

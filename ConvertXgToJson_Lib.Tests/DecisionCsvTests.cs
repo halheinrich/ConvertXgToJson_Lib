@@ -1,5 +1,4 @@
-using ConvertXgToJson_Lib;
-using ConvertXgToJson_Lib.Models;
+using BgDataTypes_Lib;
 
 namespace ConvertXgToJson_Lib.Tests;
 
