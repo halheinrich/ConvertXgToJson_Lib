@@ -245,7 +245,9 @@ public static class XgDecisionIterator
         {
             Xgid = xgid,
             Error = move.MoveError > -999.0 ? Math.Abs(move.MoveError) : 0.0,
-            MatchScore = ctx.MatchScoreFor(move.ActivePlayer),
+            OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
+            OpponentNeeds = ctx.NeedsFor(-move.ActivePlayer),
+            IsCrawford = ctx.CrawfordJacoby == 1,
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(move.ActivePlayer),
             Match = ctx.MatchId,
@@ -383,7 +385,9 @@ public static class XgDecisionIterator
         {
             Xgid = xgid,
             Error = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : 0.0,
-            MatchScore = ctx.MatchScoreFor(cube.ActivePlayer),
+            OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
+            OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
+            IsCrawford = ctx.CrawfordJacoby == 1,
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(cube.ActivePlayer),
             Match = ctx.MatchId,
