@@ -28,6 +28,7 @@ TestResults/
 ## Tooling
 .idea/
 *.DotSettings.user
+.claude/
 
 ## OS
 .DS_Store
