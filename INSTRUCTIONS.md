@@ -1,136 +1,244 @@
-# ConvertXgToJson_Lib — Project Instructions
+# ConvertXgToJson_Lib
 
-Part of the Backgammon tools ecosystem: https://github.com/halheinrich/backgammon
-
-## Repo
-
-https://github.com/halheinrich/ConvertXgToJson_Lib
-**Branch:** main
+> Session conventions: [`../CLAUDE.md`](../CLAUDE.md)
+> Umbrella status & dependency graph: [`../INSTRUCTIONS.md`](../INSTRUCTIONS.md)
+> Mission & principles: [`../VISION.md`](../VISION.md)
 
 ## Stack
 
-C# / .NET 10 / Class Library / Visual Studio 2026 / Windows
+C# / .NET 10 / Class Library / xUnit. Parses XG Gammon `.xg` and `.xgp` binary files into records defined by `BgDataTypes_Lib`.
 
 ## Solution
 
 `D:\Users\Hal\Documents\Visual Studio 2026\Projects\backgammon\ConvertXgToJson_Lib\ConvertXgToJson_Lib.slnx`
 
-## Purpose
+## Repo
 
-Reads .xg and .xgp files; produces DecisionRow and BgDecisionData records.
+https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 
 ## Depends on
 
-* **BgDataTypes_Lib** — DecisionRow, BgDecisionData, PositionData, DecisionData, DescriptiveData, PlayCandidate, AnalysisDepthEntry, CubeOwner
-
-## Dependency files
-
-### BgDataTypes_Lib
-* BgDataTypes_Lib/BgDecisionData.cs
-* BgDataTypes_Lib/PositionData.cs
-* BgDataTypes_Lib/DecisionData.cs
-* BgDataTypes_Lib/DescriptiveData.cs
-* BgDataTypes_Lib/DecisionRow.cs
-* BgDataTypes_Lib/PlayCandidate.cs
-* BgDataTypes_Lib/AnalysisDepthEntry.cs
-* BgDataTypes_Lib/CubeOwner.cs
+* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `AnalysisDepthEntry`, `CubeOwner`.
 
 ## Directory tree
 
 ```
+ConvertXgToJson_Lib.slnx
 ConvertXgToJson_Lib/
-  ConvertXgToJson_Lib/
-    ConvertXgToJson_Lib.csproj
-    BackgammonConstants.cs
-    MatchContext.cs
-    XgDecisionIterator.cs
-    XgFileReader.cs
-    XgGameInfo.cs
-    XgidEncoder.cs
-    XgIteratorState.cs
-    XgMatchInfo.cs
-    Json/
-      XgJsonOptions.cs
-    Models/
-      Models.cs
-    Parsing/
-      CommentParser.cs
-      PascalBinaryReader.cs
-      RichGameHeaderParser.cs
-      RolloutContextParser.cs
-      SaveRecordParser.cs
-      XgDecompressor.cs
-  ConvertXgToJson_Lib.Tests/
-    ConvertXgToJson_Lib.Tests.csproj
-    BoardTests.cs
-    DecisionCsvTests.cs
-    DiagramRequestIteratorTests.cs
-    FileIOCollection.cs
-    GlobalUsings.cs
-    ReadMatchInfoBenchmarkTests.cs
-    RealFileTests.cs
-    TestPaths.cs
-    XgDecisionIteratorTests.cs
-    XgpIterateTests.cs
-  ConvertXgToJson_Lib.slnx
+  ConvertXgToJson_Lib.csproj
+  BackgammonConstants.cs
+  MatchContext.cs
+  XgDecisionIterator.cs
+  XgFileReader.cs
+  XgGameInfo.cs
+  XgidEncoder.cs
+  XgIteratorState.cs
+  XgMatchInfo.cs
+  Json/
+    XgJsonOptions.cs
+  Models/
+    Models.cs
+  Parsing/
+    CommentParser.cs
+    PascalBinaryReader.cs
+    RichGameHeaderParser.cs
+    RolloutContextParser.cs
+    SaveRecordParser.cs
+    XgDecompressor.cs
+ConvertXgToJson_Lib.Tests/
+  ConvertXgToJson_Lib.Tests.csproj
+  BoardTests.cs
+  DecisionCsvTests.cs
+  DiagramRequestIteratorTests.cs
+  FileIOCollection.cs
+  GlobalUsings.cs
+  ReadMatchInfoBenchmarkTests.cs
+  RealFileTests.cs
+  TestPaths.cs
+  XgDecisionIteratorTests.cs
+  XgpIterateTests.cs
 ```
 
 ## Architecture
 
-### XgDecisionIterator
+### Pipeline
 
-* `Iterate` yields `DecisionRow` records
-* `IterateDiagramRequests` yields `BgDecisionData` records (one per decision; cube decisions yield one, not two)
-* `ToBoard` — converts position to board array, player-on-roll perspective
-* `FlipPosition` — flips PositionEngine for XGID encoding (bottom-player perspective)
-* `ExtractMatchInfo` — public helper; scans for MatchHeaderRecord, returns XgMatchInfo
-* `CubeValueActual` — internal static helper, called from MatchContext
-* `BuildMoveDiagramRequest` returns null if dice == 0
+`XgFileReader` handles binary I/O and zlib decompression; `XgDecisionIterator`
+walks the resulting record stream and yields typed rows. Parsing of individual
+record payloads lives under `Parsing/` (`SaveRecordParser`,
+`RichGameHeaderParser`, `RolloutContextParser`, `CommentParser`,
+`PascalBinaryReader`, `XgDecompressor`).
 
 ### XgFileReader
 
-* `ReadFile` — full parse of .xg file
-* `ReadMatchInfo` — fast path; first zlib stream, MatchHeaderRecord only
-* `ReadGameHeaders` — fast path; first zlib stream, GameHeaderRecord entries only
+Entry points:
+
+* `ReadFile` — full parse of a `.xg` file, yielding all records.
+* `ReadMatchInfo` — fast path. Reads only the first zlib stream and stops at
+  the `MatchHeaderRecord`. Used when a caller only needs match metadata.
+* `ReadGameHeaders` — fast path. Reads the first zlib stream and yields
+  `GameHeaderRecord` entries only.
+
+### XgDecisionIterator
+
+Two iteration surfaces over the same underlying record stream:
+
+* `Iterate` yields flat `DecisionRow` records (one per play or cube decision,
+  CSV-shaped).
+* `IterateDiagramRequests` yields `BgDecisionData` records. Cube decisions
+  yield exactly **one** `BgDecisionData`, not two — the doubler and the taker
+  share a single record.
+
+Supporting helpers:
+
+* `ExtractMatchInfo` — public helper that scans for the `MatchHeaderRecord`
+  and returns an `XgMatchInfo`, without iterating decisions.
+* `ToBoard` — converts a position to the 26-element board array from the
+  on-roll player's perspective (see "Board format" below).
+* `FlipPosition` — flips the position to bottom-player perspective for XGID
+  encoding.
+* `BuildMoveDiagramRequest` — returns `null` if `dice == 0`.
+* `CubeValueActual` — internal static helper, called from `MatchContext`.
 
 ### XgIteratorState
 
-* `AdvanceNextGame` / `AdvanceNextMatch` — caller-set flags for early-exit
-* `MatchInfo` / `GameInfo` — populated by iterator before first row
-* Flags reset at file boundaries
+Carries cross-row state and caller-controllable early-exit flags:
+
+* `AdvanceNextGame` / `AdvanceNextMatch` — caller-set flags. When set, the
+  iterator skips to the next game / match boundary on its next step.
+* `MatchInfo` / `GameInfo` — populated by the iterator before the first row
+  of each match / game.
+* Flags reset at file boundaries.
 
 ### MatchContext
 
-* Internal class tracking match/game state during iteration
-* `MatchScoreFor(int activePlayer)` — perspective-correct match score
+Internal class tracking match and game state during iteration.
+
+* `MatchScoreFor(int activePlayer)` — perspective-correct match score for
+  a given active player. Used by the taker side of a cube decision so its
+  row reflects the taker's perspective, not the doubler's.
 
 ### BackgammonConstants
 
-* `StandardOpeningPosition` — internal static readonly sbyte[26]
-* `IsStandardOpeningPosition` — comparison helper
+* `StandardOpeningPosition` — `internal static readonly sbyte[26]` holding
+  the standard starting position in the canonical 26-point layout.
+* `IsStandardOpeningPosition` — comparison helper against that constant.
+
+### Board format
+
+26-element array from the **on-roll player's** perspective throughout the
+pipeline (matches `BgDataTypes_Lib.PositionData.Mop`):
+
+* `[0]` = opponent's bar (≤ 0)
+* `[1–24]` = points 1–24
+* `[25]` = on-roll player's bar (≥ 0)
+* Positive = on-roll player; negative = opponent.
+
+### XGID encoding
+
+XGIDs are always normalized to **bottom-player** perspective. The iterator
+applies `FlipPosition` before handing the position to `XgidEncoder` — this is
+a separate convention from the on-roll-relative board layout above.
+
+### Cube decisions
+
+For a cube decision, the iterator produces a doubler row and a taker row.
+Both rows carry the **doubler's** board (no flip for the taker row). The
+taker row's match score comes from `MatchContext.MatchScoreFor(cube.ActivePlayer)`
+so the score reflects the taker's perspective.
+
+### `.xgp` file handling
+
+`.xgp` files (positions-only) encode "no analysis" differently from `.xg`
+match files:
+
+* `MoveError` and `ErrorCube` use sentinel value `-1000` to mean "unanalysed".
+* `IsAnalysed` is gated on the analysis-level field, not on error presence.
+* Error fields are treated as present when `> -999.0` (anything above the
+  sentinel).
+* `UserPlayError`, `UserDoubleError`, `UserTakeError` are populated from the
+  raw XG fields with sentinel guards.
+* `PlayCandidate` win / gammon / backgammon probabilities are populated from
+  `EvalResult`.
 
 ### TestData
 
-* Shared at `backgammon\TestData`; `TestPaths._root` resolves via 5 × `..` from `AppContext.BaseDirectory`
-* All file-touching tests use `[Collection("FileIO")]`
+* Shared at `backgammon\TestData`. `TestPaths._root` resolves it via
+  five `..` segments from `AppContext.BaseDirectory`.
+* All file-touching tests use `[Collection("FileIO")]`.
 
-## Current status
+## Public API
 
-✅ Complete — all 184 tests pass
+```csharp
+public static class XgFileReader
+{
+    public static IEnumerable<XgRecord> ReadFile(string path);
+    public static XgMatchInfo?          ReadMatchInfo(string path);
+    public static IEnumerable<GameHeaderRecord> ReadGameHeaders(string path);
+}
 
-## Deferred
+public static class XgDecisionIterator
+{
+    public static IEnumerable<DecisionRow> Iterate(
+        string path, XgIteratorState? state = null);
 
-* 0-rows bug in ExtractFromXgToCsv after XGID fix — to be diagnosed from that project
-* `SyncJsonDir` — sync XG to JSON cache by timestamp; under consideration
+    public static IEnumerable<BgDecisionData> IterateDiagramRequests(
+        string path, XgIteratorState? state = null);
 
-## Key decisions
+    public static XgMatchInfo? ExtractMatchInfo(string path);
 
-* Board encoding is player-on-roll perspective throughout
-* XGID is always bottom-player perspective
-* Taker cube row board is always doubler's POV — FlipBoard removed
-* Taker DecisionRow uses MatchScoreFor(cube.ActivePlayer)
-* IterateDiagramRequests yields one BgDecisionData per decision
-* Dependency on BackgammonDiagram_Lib replaced with BgDataTypes_Lib
-* `.xgp` files: MoveError and ErrorCube are -1000 (sentinel); `IsAnalysed` gates on analysis level; `Error` uses `> -999.0`
-* UserPlayError/UserDoubleError/UserTakeError populated from sentinel-guarded raw XG fields
-* PlayCandidate win/gammon/bg probabilities populated from EvalResult
+    // Position ↔ board conversion
+    public static int[] ToBoard(PositionEngine position, int onRoll);
+    public static PositionEngine FlipPosition(PositionEngine position);
+}
+
+public sealed class XgIteratorState
+{
+    public bool AdvanceNextGame  { get; set; }
+    public bool AdvanceNextMatch { get; set; }
+    public XgMatchInfo? MatchInfo { get; internal set; }
+    public XgGameInfo?  GameInfo  { get; internal set; }
+}
+
+public sealed class XgMatchInfo { /* match-level metadata */ }
+public sealed class XgGameInfo  { /* game-level metadata  */ }
+
+public static class BackgammonConstants
+{
+    public static bool IsStandardOpeningPosition(ReadOnlySpan<sbyte> position);
+}
+```
+
+Produces types defined in `BgDataTypes_Lib`; see that subproject's
+`INSTRUCTIONS.md` for their shapes and serialization contract.
+
+## Pitfalls
+
+* **Two perspectives, don't confuse them.** The board array is always
+  on-roll-relative. The XGID is always bottom-player-relative. `FlipPosition`
+  converts between them and is applied only at the XGID encoding boundary.
+* **Taker cube row uses doubler's board.** Do not add a flip for the taker
+  side — it was deliberately removed. The taker row is distinguished only
+  by its match score (via `MatchContext.MatchScoreFor(cube.ActivePlayer)`),
+  not by a board flip.
+* **`IterateDiagramRequests` yields one row per cube decision.** Consumers
+  expecting symmetric doubler/taker pairs will be off by a factor of two.
+  Flat `Iterate` still emits two `DecisionRow`s per cube decision.
+* **`.xgp` sentinel handling is easy to regress.** `-1000` means "unanalysed"
+  for `MoveError` / `ErrorCube`; anything `> -999.0` is a real error. Using
+  `!= 0` or `.HasValue` checks on raw fields will silently treat unanalysed
+  positions as zero-error.
+* **`BuildMoveDiagramRequest` returns `null` when `dice == 0`.** Callers must
+  null-check rather than assuming every decision yields a diagram request.
+* **`XgIteratorState.AdvanceNextGame` / `AdvanceNextMatch` reset at file
+  boundaries.** Do not rely on them persisting across files in batch runs.
+* **`TestPaths._root` depends on a specific build output depth.** If
+  `AppContext.BaseDirectory` moves relative to the repo root (e.g. a csproj
+  layout change), the five-`..` walk breaks and every file-touching test
+  fails. Fix by adjusting `TestPaths`, not by moving `TestData`.
+
+## Subproject-internal next steps
+
+None. Cross-cutting items (downstream bug reports, feature proposals spanning
+multiple subprojects) belong in the umbrella `INSTRUCTIONS.md`
+"Next up" / "Pending" sections, not here.
