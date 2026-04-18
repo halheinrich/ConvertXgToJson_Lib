@@ -183,6 +183,17 @@ public class MoveNotationFormatterTests
     }
 
     [Fact]
+    public void Format_InterleavedDoublesChains_GroupAcrossInterleave()
+    {
+        // Doubles 6-6 where XG emits the starts together then the
+        // continuations together: raw (19,13,19,13,13,7,13,7). Each (13,7)
+        // matches one of the earlier open chains ending at 13.
+        var result = MoveNotationFormatter.Format(
+            M(19, 13, 19, 13, 13, 7, 13, 7), EmptyBoard());
+        result.Should().Be("20/8(2)");
+    }
+
+    [Fact]
     public void Format_HitWithSeparateBlot_BothMarked()
     {
         // Two separate hits in the same turn: (23, 17) hits 18, (12, 8) hits 9
