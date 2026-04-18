@@ -18,9 +18,15 @@ namespace ConvertXgToJson_Lib;
 /// (board[to+1] == -1) are marked with "*" and the formatter updates the
 /// board in place so chained sub-moves that revisit the same point don't
 /// re-flag the hit.
+///
+/// Adjacent sub-moves on the same checker with no hit at the intermediate
+/// point are compressed ("24/21 21/15" → "24/15"); a hit at the
+/// intermediate keeps both legs visible so the hit is not lost.
 /// </summary>
 internal static class MoveNotationFormatter
 {
+    private record struct Leg(int FromRaw, int ToRaw, bool Hit);
+
     /// <summary>
     /// Formats a candidate move list. <paramref name="boardOnRollPov"/> is
     /// the 26-element board BEFORE the move is applied, in on-roll POV
@@ -32,50 +38,60 @@ internal static class MoveNotationFormatter
     {
         if (moves.Length == 0) return string.Empty;
 
-        var parts = new List<(string From, string To, bool Hit)>(4);
+        var legs = new List<Leg>(4);
         for (int i = 0; i + 1 < moves.Length; i += 2)
         {
             sbyte from = moves[i];
             sbyte to   = moves[i + 1];
             if (from == -1) break;
 
-            string fromLabel = from == 24 ? "bar" : (from + 1).ToString();
-            string toLabel;
             bool hit = false;
-
-            if (to == -1)
+            if (to >= 0 && to <= 23)
             {
-                toLabel = "off";
-            }
-            else
-            {
-                toLabel = (to + 1).ToString();
                 int boardIdx = to + 1;
-                if (boardIdx >= 1 && boardIdx <= 24 && boardOnRollPov[boardIdx] == -1)
+                if (boardOnRollPov[boardIdx] == -1)
                 {
                     hit = true;
-                    boardOnRollPov[boardIdx] = 0; // opponent blot goes to bar
+                    boardOnRollPov[boardIdx] = 0;
                     boardOnRollPov[0] -= 1;
                 }
             }
 
-            parts.Add((fromLabel, toLabel, hit));
+            legs.Add(new Leg(from, to, hit));
         }
 
-        if (parts.Count == 0) return string.Empty;
+        if (legs.Count == 0) return string.Empty;
+
+        // Merge chained sub-moves on the same checker when the intermediate
+        // point had no hit — e.g. (23,20,20,14) → single leg (23,14).
+        var merged = new List<Leg>(legs.Count);
+        for (int i = 0; i < legs.Count; i++)
+        {
+            var cur = legs[i];
+            while (i + 1 < legs.Count
+                   && !cur.Hit
+                   && cur.ToRaw >= 0 && cur.ToRaw <= 23
+                   && legs[i + 1].FromRaw == cur.ToRaw)
+            {
+                var next = legs[i + 1];
+                cur = new Leg(cur.FromRaw, next.ToRaw, next.Hit);
+                i++;
+            }
+            merged.Add(cur);
+        }
 
         var sb = new StringBuilder();
         int idx = 0;
-        while (idx < parts.Count)
+        while (idx < merged.Count)
         {
             int run = 1;
-            while (idx + run < parts.Count && parts[idx + run] == parts[idx])
+            while (idx + run < merged.Count && merged[idx + run] == merged[idx])
                 run++;
 
             if (sb.Length > 0) sb.Append(' ');
-            var (from, to, hit) = parts[idx];
-            sb.Append(from).Append('/').Append(to);
-            if (hit) sb.Append('*');
+            var leg = merged[idx];
+            sb.Append(LabelFrom(leg.FromRaw)).Append('/').Append(LabelTo(leg.ToRaw));
+            if (leg.Hit) sb.Append('*');
             if (run > 1) sb.Append('(').Append(run).Append(')');
 
             idx += run;
@@ -83,4 +99,7 @@ internal static class MoveNotationFormatter
 
         return sb.ToString();
     }
+
+    private static string LabelFrom(int raw) => raw == 24 ? "bar" : (raw + 1).ToString();
+    private static string LabelTo(int raw) => raw == -1 ? "off" : (raw + 1).ToString();
 }

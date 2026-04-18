@@ -133,16 +133,53 @@ public class MoveNotationFormatterTests
     }
 
     [Fact]
-    public void Format_HitThenContinue_OnlyHitMarkedOnce()
+    public void Format_HitThenContinue_KeepsBothLegsSoHitIsVisible()
     {
         // Active at 24(2), opponent blot at 18. Dice 6-1: 24/18*/17.
-        // Raw (23, 17, 17, 16): after first leg hits 18, second leg 18→17 is
-        // no longer a hit (board is cleared).
+        // Raw (23, 17, 17, 16): first leg hits 18, so the chain is NOT
+        // compressed — a hit at the intermediate must stay visible.
         var board = new int[26];
         board[24] = 2;
         board[18] = -1;
         var result = MoveNotationFormatter.Format(M(23, 17, 17, 16), board);
         result.Should().Be("24/18* 18/17");
+    }
+
+    // Chain compression ----------------------------------------------------
+
+    [Fact]
+    public void Format_ChainedSubMoves_CompressToSingleLeg()
+    {
+        // XG sometimes encodes a single checker's combined-die move as two
+        // sub-pairs (real example: dice 6-3, raw (23, 20, 20, 14) for 24/15).
+        var result = MoveNotationFormatter.Format(M(23, 20, 20, 14), EmptyBoard());
+        result.Should().Be("24/15");
+    }
+
+    [Fact]
+    public void Format_BarEntryChain_CompressesToBarSlashFinal()
+    {
+        // bar → 21 → 15: raw (24, 20, 20, 14). Compress to "bar/15".
+        var result = MoveNotationFormatter.Format(M(24, 20, 20, 14), EmptyBoard());
+        result.Should().Be("bar/15");
+    }
+
+    [Fact]
+    public void Format_ChainThenBearOff_Compresses()
+    {
+        // pt 4 → pt 1 → off: raw (3, 0, 0, -1). Compress to "4/off".
+        var result = MoveNotationFormatter.Format(M(3, 0, 0, -1), EmptyBoard());
+        result.Should().Be("4/off");
+    }
+
+    [Fact]
+    public void Format_TwoIdenticalChains_GroupAfterMerge()
+    {
+        // Two checkers each chain 24→20→16: raw (23,19,19,15,23,19,19,15).
+        // After merge: two legs of (23, 15) → "24/16(2)".
+        var result = MoveNotationFormatter.Format(
+            M(23, 19, 19, 15, 23, 19, 19, 15), EmptyBoard());
+        result.Should().Be("24/16(2)");
     }
 
     [Fact]
