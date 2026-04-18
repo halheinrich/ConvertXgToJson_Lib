@@ -150,7 +150,12 @@ public sealed class BestMoveAnalysis
     public int                     Jacoby        { get; init; }
     public int                     MoveCount     { get; init; }
     public PositionEngine[]        PositionsPlayed { get; init; } = [];
-    /// <summary>Move list per candidate: [from1,die1, from2,die2, …, -1].</summary>
+    /// <summary>
+    /// Move list per candidate: adjacent (from, to) pairs in active-player
+    /// POV, 0-indexed point values. Sentinels: from == -1 terminates;
+    /// from == 24 is bar entry; to == -1 is bear off. Regular points are
+    /// value + 1 (so raw 0 = point 1, raw 23 = point 24).
+    /// </summary>
     public sbyte[][]               Moves         { get; init; } = [];
     public EvalLevel[]             EvalLevels    { get; init; } = [];
     public EvalResult[]            Evals         { get; init; } = [];
@@ -309,7 +314,11 @@ public sealed class MoveRecord : SaveRecord
     public PositionEngine   InitialPosition  { get; init; } = new();
     public PositionEngine   FinalPosition    { get; init; } = new();
     public int              ActivePlayer     { get; init; }   // 1=player1, -1=player2
-    /// <summary>[from1,die1, from2,die2, …, -1 terminator], 8 ints.</summary>
+    /// <summary>
+    /// Adjacent (from, to) pairs for the played move, in active-player POV,
+    /// 0-indexed point values; same encoding as <see cref="BestMoveAnalysis.Moves"/>.
+    /// 8 ints with -1 filler.
+    /// </summary>
     public int[]            MoveList         { get; init; } = new int[8];
     public int[]            Dice             { get; init; } = new int[2];
     public int              CubeValue        { get; init; }

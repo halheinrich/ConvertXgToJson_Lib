@@ -297,9 +297,13 @@ public static class XgDecisionIterator
         {
             double equity = analysis.Evals[i].Equity;
             var eval = analysis.Evals[i];
+            sbyte[] candidateMoves = i < analysis.Moves.Length ? analysis.Moves[i] : [];
+            // Each candidate gets its own scratch board so hit-tracking in
+            // one candidate doesn't leak into the next.
+            int[] scratchBoard = (int[])board.Clone();
             plays.Add(new PlayCandidate
             {
-                MoveNotation = string.Empty, // notation reconstruction is a rendering concern
+                MoveNotation = MoveNotationFormatter.Format(candidateMoves, scratchBoard),
                 Equity = equity,
                 EquityLoss = i == 0 ? null : bestEquity - equity,
                 IsUserPlay = i == userPlayIndex,
