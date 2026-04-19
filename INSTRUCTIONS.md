@@ -180,16 +180,18 @@ public static class XgFileReader
 public static class XgDecisionIterator
 {
     public static IEnumerable<DecisionRow> Iterate(
-        string path, XgIteratorState? state = null);
+        XgFile file, string? sourceFile, XgIteratorState? state = null);
 
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
-        string path, XgIteratorState? state = null);
+        XgFile file, string? sourceFile, XgIteratorState? state = null);
 
-    public static XgMatchInfo? ExtractMatchInfo(string path);
+    public static IEnumerable<DecisionRow> IterateXgDirectory(
+        string xgDir, XgIteratorState? state = null);
 
-    // Position ↔ board conversion
-    public static int[] ToBoard(PositionEngine position, int onRoll);
-    public static PositionEngine FlipPosition(PositionEngine position);
+    public static IEnumerable<DecisionRow> IterateJsonDirectory(
+        string jsonDir, XgIteratorState? state = null);
+
+    public static XgMatchInfo ExtractMatchInfo(XgFile file);
 }
 
 public sealed class XgIteratorState

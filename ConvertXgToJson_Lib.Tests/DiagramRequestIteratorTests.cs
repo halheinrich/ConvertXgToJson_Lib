@@ -29,14 +29,13 @@ public class DiagramRequestIteratorTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
 
             // DecisionRow count: cube decisions yield two rows (doubler + taker).
             // DiagramRequest count: cube decisions yield one request.
             // So we need to count unique decisions, not raw rows.
             // A cube decision produces MoveNum+1 for both rows and Roll==0.
             // Count unique (Game, MoveNum, Roll==0) cube decisions separately.
-            var decisionRows = XgDecisionIterator.Iterate(file, matchId).ToList();
+            var decisionRows = XgDecisionIterator.Iterate(file, Path.GetFileName(path)).ToList();
 
             // Unique decision count = move rows + unique cube positions
             // (cube taker row shares Game/MoveNum with doubler row)
@@ -53,7 +52,7 @@ public class DiagramRequestIteratorTests
             int moveCount = decisionRows.Count(r => !r.IsCube);
             int expectedCount = moveCount + cubeGroups;
 
-            var requests = XgDecisionIterator.IterateDiagramRequests(file).ToList();
+            var requests = XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path)).ToList();
 
             requests.Count.Should().Be(expectedCount,
                 $"{Path.GetFileName(path)}: expected {expectedCount} DiagramRequests " +
@@ -80,13 +79,13 @@ public class DiagramRequestIteratorTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            var moveRows = XgDecisionIterator.Iterate(file, matchId)
+            var moveRows = XgDecisionIterator.Iterate(file, sourceFile)
                 .Where(r => !r.IsCube)
                 .ToList();
 
-            var moveRequests = XgDecisionIterator.IterateDiagramRequests(file)
+            var moveRequests = XgDecisionIterator.IterateDiagramRequests(file, sourceFile)
                 .Where(r => !r.Decision.IsCube)
                 .ToList();
 
@@ -141,7 +140,7 @@ public class DiagramRequestIteratorTests
         {
             var file = XgFileReader.ReadFile(path);
 
-            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file)
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path))
                                                    .Where(r => r.Decision.IsCube))
             {
                 foundCube = true;
@@ -184,7 +183,7 @@ public class DiagramRequestIteratorTests
         {
             var file = XgFileReader.ReadFile(path);
 
-            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file))
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path)))
             {
                 // Exclude positions where one side is bearing off (pip count < 7
                 // would mean at most one checker on point 6 or fewer remaining).
@@ -223,7 +222,7 @@ public class DiagramRequestIteratorTests
             var file = XgFileReader.ReadFile(path);
             bool isXgp = path.EndsWith(".xgp", StringComparison.OrdinalIgnoreCase);
 
-            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file)
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path))
                                                    .Where(r => !r.Decision.IsCube))
             {
                 if (isXgp)
@@ -253,7 +252,7 @@ public class DiagramRequestIteratorTests
         {
             var file = XgFileReader.ReadFile(path);
 
-            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file)
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path))
                                                    .Where(r => r.Decision.IsCube))
             {
                 foundCube = true;
@@ -285,7 +284,7 @@ public class DiagramRequestIteratorTests
                 .Where(c => c.Analysis.Level > 0 || c.Analysis.LevelRequest > 0)
                 .ToList();
 
-            var cubeRequests = XgDecisionIterator.IterateDiagramRequests(file)
+            var cubeRequests = XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path))
                 .Where(r => r.Decision.IsCube)
                 .ToList();
 
@@ -349,7 +348,7 @@ public class DiagramRequestIteratorTests
             var doubleErrors = new List<BgDecisionData>();
             var takeErrors = new List<BgDecisionData>();
 
-            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file))
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path)))
             {
                 if (playErrors.Count < quota && req.Decision.UserPlayError > 0)
                     playErrors.Add(req);

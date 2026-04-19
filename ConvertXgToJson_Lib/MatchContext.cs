@@ -4,7 +4,7 @@ namespace ConvertXgToJson_Lib;
 
 internal sealed class MatchContext
 {
-    public string MatchId { get; }
+    public string? SourceFile { get; }
     public int MatchLength { get; private set; }
     public int Score1 { get; private set; }
     public int Score2 { get; private set; }
@@ -19,9 +19,9 @@ internal sealed class MatchContext
     private string _player2 = "Player 2";
 //    private bool _lastWasDoubleTake;
 
-    public MatchContext(List<SaveRecord> records, string matchId)
+    public MatchContext(List<SaveRecord> records, string? sourceFile)
     {
-        MatchId = matchId;
+        SourceFile = sourceFile;
         if (records.Count == 0 || records[0] is not MatchHeaderRecord hm)
             throw new InvalidDataException("XG file must begin with a MatchHeaderRecord.");
         _player1 = hm.Player1;

@@ -27,7 +27,7 @@ public class DecisionCsvTests
             string csvPath = Path.Combine(TestPaths.CsvDir, matchId + ".csv");
 
             var file = XgFileReader.ReadFile(xgPath);
-            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+            var rows = XgDecisionIterator.Iterate(file, Path.GetFileName(xgPath)).ToList();
 
             using var writer = new StreamWriter(csvPath);
             writer.WriteLine(DecisionRow.CsvHeader);
@@ -49,7 +49,7 @@ public class DecisionCsvTests
         {
             string matchId = Path.GetFileNameWithoutExtension(path);
             var file = XgFileReader.ReadFile(path);
-            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+            var rows = XgDecisionIterator.Iterate(file, Path.GetFileName(path)).ToList();
 
             rows.Should().NotBeEmpty($"{matchId} should have decisions");
             rows.Should().OnlyContain(r => !string.IsNullOrEmpty(r.Player),
@@ -65,7 +65,7 @@ public class DecisionCsvTests
             string matchId = Path.GetFileNameWithoutExtension(path);
             var file = XgFileReader.ReadFile(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId)
+            foreach (var row in XgDecisionIterator.Iterate(file, Path.GetFileName(path))
                                                    .Where(r => !r.IsCube))
             {
                 row.Roll.Should().NotBe(0,
@@ -79,10 +79,9 @@ public class DecisionCsvTests
     {
         foreach (var path in Directory.GetFiles(TestPaths.XgDir, "*.xg"))
         {
-            string matchId = Path.GetFileNameWithoutExtension(path);
             var file = XgFileReader.ReadFile(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, Path.GetFileName(path)))
             {
                 // XGID=<26chars>:... — colon at index 31
                 int colonIndex = row.Xgid.IndexOf(':', 5);
@@ -115,7 +114,7 @@ public class DecisionCsvTests
             string csvPath = Path.Combine(TestPaths.CsvDir, matchId + "-fromjson.csv");
 
             var file = XgFileReader.ReadJson(jsonPath);
-            var rows = XgDecisionIterator.Iterate(file, matchId).ToList();
+            var rows = XgDecisionIterator.Iterate(file, Path.GetFileName(jsonPath)).ToList();
 
             using var writer = new StreamWriter(csvPath);
             writer.WriteLine(DecisionRow.CsvHeader);
@@ -143,8 +142,8 @@ public class DecisionCsvTests
             string matchId = Path.GetFileNameWithoutExtension(jsonPath);
             string xgPath = Path.Combine(TestPaths.XgDir, matchId + ".xg");
 
-            var fromXg = XgDecisionIterator.Iterate(XgFileReader.ReadFile(xgPath), matchId).ToList();
-            var fromJson = XgDecisionIterator.Iterate(XgFileReader.ReadJson(jsonPath), matchId).ToList();
+            var fromXg = XgDecisionIterator.Iterate(XgFileReader.ReadFile(xgPath), Path.GetFileName(xgPath)).ToList();
+            var fromJson = XgDecisionIterator.Iterate(XgFileReader.ReadJson(jsonPath), Path.GetFileName(jsonPath)).ToList();
 
             fromJson.Count.Should().Be(fromXg.Count,
                 $"{matchId}: JSON and .xg sources should produce the same number of decisions");
@@ -173,7 +172,7 @@ public class DecisionCsvTests
             string matchId = Path.GetFileNameWithoutExtension(jsonPath);
             var file = XgFileReader.ReadJson(jsonPath);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, Path.GetFileName(jsonPath)))
             {
                 if (row.MatchLength == 0) continue; // money — no away scores
 

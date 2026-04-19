@@ -125,7 +125,7 @@ public class RealFileTests
         var anyMoveRows = files.Any(path =>
         {
             var xgFile = XgFileReader.ReadFile(path);
-            return XgDecisionIterator.Iterate(xgFile, Path.GetFileNameWithoutExtension(path))
+            return XgDecisionIterator.Iterate(xgFile, Path.GetFileName(path))
                 .Any(r => !r.IsCube);
         });
 
@@ -145,7 +145,7 @@ public class RealFileTests
         var anyCubeRows = files.Any(path =>
         {
             var xgFile = XgFileReader.ReadFile(path);
-            return XgDecisionIterator.Iterate(xgFile, Path.GetFileNameWithoutExtension(path))
+            return XgDecisionIterator.Iterate(xgFile, Path.GetFileName(path))
                 .Any(r => r.IsCube);
         });
 

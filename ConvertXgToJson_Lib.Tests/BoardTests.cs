@@ -18,9 +18,9 @@ public class BoardTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 row.Board.Should().HaveCount(26,
                     $"Board must always have 26 elements [{Path.GetFileName(path)}]");
@@ -34,9 +34,9 @@ public class BoardTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 string loc = $"[{Path.GetFileName(path)} Game {row.Game} Move {row.MoveNum}]";
                 int onRoll = row.Board.Where(v => v > 0).Sum();
@@ -53,9 +53,9 @@ public class BoardTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 row.Board[0].Should().BeLessOrEqualTo(0,
                     $"board[0] is opponent bar — never positive [{Path.GetFileName(path)} " +
@@ -70,9 +70,9 @@ public class BoardTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 row.Board[25].Should().BeGreaterOrEqualTo(0,
                     $"board[25] is player on roll bar — never negative [{Path.GetFileName(path)} " +
@@ -91,9 +91,9 @@ public class BoardTests
         foreach (var path in TestPaths.XgpFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 string loc = $"[{Path.GetFileName(path)} Game {row.Game} Move {row.MoveNum}]";
                 int onRoll = row.Board.Where(v => v > 0).Sum();
@@ -110,9 +110,9 @@ public class BoardTests
         foreach (var path in TestPaths.XgpFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 row.Board[0].Should().BeLessOrEqualTo(0,
                     $"board[0] is opponent bar — never positive [{Path.GetFileName(path)} " +
@@ -127,9 +127,9 @@ public class BoardTests
         foreach (var path in TestPaths.XgpFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 row.Board[25].Should().BeGreaterOrEqualTo(0,
                     $"board[25] is player on roll bar — never negative [{Path.GetFileName(path)} " +

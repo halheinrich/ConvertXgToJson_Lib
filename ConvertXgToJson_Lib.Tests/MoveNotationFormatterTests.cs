@@ -244,7 +244,7 @@ public class MoveNotationFormatterTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file))
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path)))
             {
                 if (req.Decision.IsCube) continue;
                 req.Decision.Plays.Should().NotBeEmpty(

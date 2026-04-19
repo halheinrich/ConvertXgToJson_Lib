@@ -18,17 +18,21 @@ public static class XgDecisionIterator
     /// Yields all decisions from a single already-parsed <see cref="XgFile"/>.
     /// </summary>
     /// <param name="file">The parsed XG file.</param>
-    /// <param name="matchId">Match identifier (typically the filename without extension).</param>
+    /// <param name="sourceFile">
+    /// Originating file name including extension (e.g. "match.xg"), or null for
+    /// stream/programmatic parses with no filename context. Copied verbatim onto
+    /// every yielded <see cref="DecisionRow.SourceFile"/>.
+    /// </param>
     /// <param name="state">
     /// Optional early-exit state. The caller sets flags after each yielded row;
     /// the iterator resets them at game boundaries. Pass null for no early-exit.
     /// </param>
     public static IEnumerable<DecisionRow> Iterate(
         XgFile file,
-        string matchId,
+        string? sourceFile,
         XgIteratorState? state = null)
     {
-        var context = new MatchContext(file.Records, matchId);
+        var context = new MatchContext(file.Records, sourceFile);
 
         foreach (var record in file.Records)
         {
@@ -80,14 +84,20 @@ public static class XgDecisionIterator
     /// converting from <see cref="DecisionRow"/>.
     /// </summary>
     /// <param name="file">The parsed XG file.</param>
+    /// <param name="sourceFile">
+    /// Originating file name including extension (e.g. "match.xg"), or null for
+    /// stream/programmatic parses with no filename context. Copied verbatim onto
+    /// every yielded <see cref="DescriptiveData.SourceFile"/>.
+    /// </param>
     /// <param name="state">
     /// Optional early-exit state. Behaves identically to <see cref="Iterate"/>.
     /// </param>
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
         XgFile file,
+        string? sourceFile,
         XgIteratorState? state = null)
     {
-        var context = new MatchContext(file.Records, matchId: string.Empty);
+        var context = new MatchContext(file.Records, sourceFile);
 
         foreach (var record in file.Records)
         {
@@ -165,8 +175,8 @@ public static class XgDecisionIterator
             if (state != null)
                 state.MatchInfo = ExtractMatchInfo(file);
 
-            string matchId = Path.GetFileNameWithoutExtension(path);
-            foreach (var row in Iterate(file, matchId, state))
+            string sourceFile = Path.GetFileName(path);
+            foreach (var row in Iterate(file, sourceFile, state))
                 yield return row;
         }
     }
@@ -197,8 +207,8 @@ public static class XgDecisionIterator
             if (state != null)
                 state.MatchInfo = ExtractMatchInfo(file);
 
-            string matchId = Path.GetFileNameWithoutExtension(path);
-            foreach (var row in Iterate(file, matchId, state))
+            string sourceFile = Path.GetFileName(path);
+            foreach (var row in Iterate(file, sourceFile, state))
                 yield return row;
         }
     }
@@ -250,7 +260,7 @@ public static class XgDecisionIterator
             IsCrawford = ctx.CrawfordJacoby == 1,
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(move.ActivePlayer),
-            Match = ctx.MatchId,
+            SourceFile = ctx.SourceFile,
             Game = ctx.GameNumber,
             MoveNum = ctx.MoveNumber,
             Roll = dice,
@@ -343,6 +353,7 @@ public static class XgDecisionIterator
                 MatchLength = ctx.MatchLength,
                 OnRollName = ctx.PlayerName(move.ActivePlayer),
                 OpponentName = ctx.PlayerName(-move.ActivePlayer),
+                SourceFile = ctx.SourceFile,
             },
         };
     }
@@ -394,7 +405,7 @@ public static class XgDecisionIterator
             IsCrawford = ctx.CrawfordJacoby == 1,
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(cube.ActivePlayer),
-            Match = ctx.MatchId,
+            SourceFile = ctx.SourceFile,
             Game = ctx.GameNumber,
             MoveNum = ctx.MoveNumber + 1,
             Roll = 0,
@@ -464,6 +475,7 @@ public static class XgDecisionIterator
                 MatchLength = ctx.MatchLength,
                 OnRollName = ctx.PlayerName(cube.ActivePlayer),
                 OpponentName = ctx.PlayerName(-cube.ActivePlayer),
+                SourceFile = ctx.SourceFile,
             },
         };
     }

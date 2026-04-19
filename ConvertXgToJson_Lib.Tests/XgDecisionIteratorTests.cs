@@ -24,13 +24,13 @@ public class XgDecisionIteratorTests
     {
         var thisWay = XgDecisionIterator
             .Iterate(XgFileReader.ReadFile(TestPaths.ThisWayXg),
-                     Path.GetFileNameWithoutExtension(TestPaths.ThisWayXg))
+                     Path.GetFileName(TestPaths.ThisWayXg))
             .Select(r => r.Xgid)
             .ToList();
 
         var thatWay = XgDecisionIterator
             .Iterate(XgFileReader.ReadFile(TestPaths.ThatWayXg),
-                     Path.GetFileNameWithoutExtension(TestPaths.ThatWayXg))
+                     Path.GetFileName(TestPaths.ThatWayXg))
             .Select(r => r.Xgid)
             .ToList();
 
@@ -52,10 +52,10 @@ public class XgDecisionIteratorTests
         foreach (var path in TestPaths.XgFiles)
         {
             var file = XgFileReader.ReadFile(path);
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
 
-            var withoutState = XgDecisionIterator.Iterate(file, matchId).ToList();
-            var withNull = XgDecisionIterator.Iterate(file, matchId, null).ToList();
+            var withoutState = XgDecisionIterator.Iterate(file, sourceFile).ToList();
+            var withNull = XgDecisionIterator.Iterate(file, sourceFile, null).ToList();
 
             withNull.Count.Should().Be(withoutState.Count,
                 $"null state should produce identical rows [{Path.GetFileName(path)}]");
@@ -72,9 +72,9 @@ public class XgDecisionIteratorTests
         // Use the first xg file that has multiple decisions in at least one game.
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
-        string matchId = Path.GetFileNameWithoutExtension(path);
+        string sourceFile = Path.GetFileName(path);
 
-        var allRows = XgDecisionIterator.Iterate(file, matchId).ToList();
+        var allRows = XgDecisionIterator.Iterate(file, sourceFile).ToList();
 
         // Find a game that has more than one decision.
         int targetGame = allRows
@@ -92,7 +92,7 @@ public class XgDecisionIteratorTests
         var state = new XgIteratorState();
         var collected = new List<DecisionRow>();
 
-        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             collected.Add(row);
             if (row.Game == targetGame && collected.Count(r => r.Game == targetGame) == 1)
@@ -118,16 +118,16 @@ public class XgDecisionIteratorTests
     {
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
-        string matchId = Path.GetFileNameWithoutExtension(path);
+        string sourceFile = Path.GetFileName(path);
 
-        var allRows = XgDecisionIterator.Iterate(file, matchId).ToList();
+        var allRows = XgDecisionIterator.Iterate(file, sourceFile).ToList();
         allRows.Count.Should().BeGreaterThan(1,
             "test requires a file with more than one decision");
 
         var state = new XgIteratorState();
         var collected = new List<DecisionRow>();
 
-        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             collected.Add(row);
             state.AdvanceNextMatch = true; // skip everything after first row
@@ -162,8 +162,8 @@ public class XgDecisionIteratorTests
         collected.Count.Should().BeGreaterThanOrEqualTo(2,
             "each file should contribute at least one row despite AdvanceNextMatch");
 
-        var matchIds = collected.Select(r => r.Match).Distinct().ToList();
-        matchIds.Count.Should().BeGreaterThanOrEqualTo(2,
+        var sourceFiles = collected.Select(r => r.SourceFile).Distinct().ToList();
+        sourceFiles.Count.Should().BeGreaterThanOrEqualTo(2,
             "rows should come from at least two distinct matches");
     } 
     /// <summary>
@@ -205,14 +205,14 @@ public class XgDecisionIteratorTests
 
         var state = new XgIteratorState();
         var capturedInfos = new List<XgMatchInfo?>();
-        string? lastMatch = null;
+        string? lastSourceFile = null;
 
         foreach (var row in XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir, state))
         {
-            if (row.Match != lastMatch)
+            if (row.SourceFile != lastSourceFile)
             {
                 capturedInfos.Add(state.MatchInfo);
-                lastMatch = row.Match;
+                lastSourceFile = row.SourceFile;
             }
             if (capturedInfos.Count >= 2) break;
         }
@@ -235,11 +235,11 @@ public class XgDecisionIteratorTests
     {
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
-        string matchId = Path.GetFileNameWithoutExtension(path);
+        string sourceFile = Path.GetFileName(path);
 
         var state = new XgIteratorState();
 
-        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             state.GameInfo.Should().NotBeNull("GameInfo should be set before the first row");
             state.GameInfo!.Away1.Should().BeGreaterThanOrEqualTo(0);
@@ -256,13 +256,13 @@ public class XgDecisionIteratorTests
     {
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
-        string matchId = Path.GetFileNameWithoutExtension(path);
+        string sourceFile = Path.GetFileName(path);
 
         var state = new XgIteratorState();
         var capturedInfos = new List<XgGameInfo?>();
         int? lastGame = null;
 
-        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             if (row.Game != lastGame)
             {
@@ -286,11 +286,11 @@ public class XgDecisionIteratorTests
     public void GameInfo_IsStandardStart_TrueForNormalGame()
     {
         var file = XgFileReader.ReadFile(TestPaths.ThisWayXg);
-        string matchId = Path.GetFileNameWithoutExtension(TestPaths.ThisWayXg);
+        string sourceFile = Path.GetFileName(TestPaths.ThisWayXg);
 
         var state = new XgIteratorState();
 
-        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             // First game of a normal match must be standard start
             state.GameInfo.Should().NotBeNull();
@@ -309,9 +309,9 @@ public class XgDecisionIteratorTests
     {
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
-        string matchId = Path.GetFileNameWithoutExtension(path);
+        string sourceFile = Path.GetFileName(path);
 
-        var allRows = XgDecisionIterator.Iterate(file, matchId).ToList();
+        var allRows = XgDecisionIterator.Iterate(file, sourceFile).ToList();
 
         // Need a file with at least 2 games that each have rows
         var gamesWithRows = allRows.GroupBy(r => r.Game).Where(g => g.Count() > 0).ToList();
@@ -324,7 +324,7 @@ public class XgDecisionIteratorTests
         var collected2 = new List<DecisionRow>();
         int? prevGame2 = null;
 
-        var enumerator = XgDecisionIterator.Iterate(file, matchId, state2).GetEnumerator();
+        var enumerator = XgDecisionIterator.Iterate(file, sourceFile, state2).GetEnumerator();
         while (enumerator.MoveNext())
         {
             var row = enumerator.Current;
@@ -353,7 +353,7 @@ public class XgDecisionIteratorTests
     {
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
-        string matchId = Path.GetFileNameWithoutExtension(path);
+        string sourceFile = Path.GetFileName(path);
 
         // Get match length from the file
         int matchLength = 0;
@@ -371,7 +371,7 @@ public class XgDecisionIteratorTests
 
         var state = new XgIteratorState();
 
-        foreach (var row in XgDecisionIterator.Iterate(file, matchId, state))
+        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             // First game of a match always starts 0-0
             state.GameInfo!.Away1.Should().Be(matchLength,
@@ -391,10 +391,10 @@ public class XgDecisionIteratorTests
     {
         foreach (var path in TestPaths.XgFiles)
         {
-            string matchId = Path.GetFileNameWithoutExtension(path);
+            string sourceFile = Path.GetFileName(path);
             var file = XgFileReader.ReadFile(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, matchId))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
                 if (row.MatchLength == 0) continue; // money — no away scores
 
@@ -417,6 +417,38 @@ public class XgDecisionIteratorTests
                 msAway2.Should().Be(expectedAway2,
                     $"away2 should be opponent's away score in {Path.GetFileName(path)} " +
                     $"game {row.Game} move {row.MoveNum} (XGID score2={xgidScore2})");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    //  SourceFile plumbing — corpus check
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every <see cref="DecisionRow"/> and <see cref="BgDecisionData"/> produced
+    /// from a corpus file carries that file's name (with extension) in its
+    /// <c>SourceFile</c> field. Guards against regressions in the parser
+    /// plumbing where the filename is dropped before reaching a row or request.
+    /// </summary>
+    [Fact]
+    public void SourceFile_PopulatedFromFixtureFilename_ForEveryRowAndRequest()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            string expected = Path.GetFileName(path);
+            var file = XgFileReader.ReadFile(path);
+
+            foreach (var row in XgDecisionIterator.Iterate(file, expected))
+            {
+                row.SourceFile.Should().Be(expected,
+                    $"every DecisionRow from {expected} must carry that filename");
+            }
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, expected))
+            {
+                req.Descriptive.SourceFile.Should().Be(expected,
+                    $"every BgDecisionData from {expected} must carry that filename");
             }
         }
     }

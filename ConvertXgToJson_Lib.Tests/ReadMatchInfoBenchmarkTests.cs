@@ -108,7 +108,7 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
         {
             XgFileReader.ReadGameHeaders(path, warmState).ToList();
             XgDecisionIterator.Iterate(XgFileReader.ReadFile(path),
-                Path.GetFileNameWithoutExtension(path)).ToList();
+                Path.GetFileName(path)).ToList();
         }
 
         // --- Full decision iteration ---
@@ -118,7 +118,7 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
         {
             var file = XgFileReader.ReadFile(path);
             fullDecisions += XgDecisionIterator
-                .Iterate(file, Path.GetFileNameWithoutExtension(path))
+                .Iterate(file, Path.GetFileName(path))
                 .Count();
         }
         sw.Stop();
@@ -172,7 +172,7 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
             int? lastGame = null;
 
             foreach (var row in XgDecisionIterator.Iterate(
-                file, Path.GetFileNameWithoutExtension(path), fullState))
+                file, Path.GetFileName(path), fullState))
             {
                 if (row.Game != lastGame)
                 {
