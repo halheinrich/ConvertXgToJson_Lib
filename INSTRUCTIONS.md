@@ -230,6 +230,12 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   for `MoveError` / `ErrorCube`; anything `> -999.0` is a real error. Using
   `!= 0` or `.HasValue` checks on raw fields will silently treat unanalysed
   positions as zero-error.
+* **Cube `IsAnalysed` must gate on `Analysis.Level`, not `LevelRequest`.** XG
+  writes `LevelRequest` when the user *asks* for an analysis and `Level` when
+  it *runs*. An `.xgp` saved before the requested rollout completes has
+  `Level == -100` (queued) but a non-zero `LevelRequest`. Using `||` between
+  the two re-admits these phantom cubes and yields rows with empty equity /
+  eval fields.
 * **`BuildMoveDiagramRequest` returns `null` when `dice == 0`.** Callers must
   null-check rather than assuming every decision yields a diagram request.
 * **`XgIteratorState.AdvanceNextGame` / `AdvanceNextMatch` reset at file

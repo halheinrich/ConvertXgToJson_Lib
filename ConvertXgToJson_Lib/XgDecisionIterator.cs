@@ -607,8 +607,11 @@ public static class XgDecisionIterator
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;
 
+    // LevelRequest reflects what the user asked XG to compute, not what XG ran:
+    // an .xgp closed before the analysis completed has Level == -100 (XG's
+    // "queued, never ran" sentinel) but a non-zero LevelRequest. Gate on Level.
     private static bool IsAnalysed(CubeRecord cube) =>
-        cube.Analysis.Level > 0 || cube.Analysis.LevelRequest > 0;
+        cube.Analysis.Level > 0;
 
     private static int DiceToInt(int[] dice) =>
         dice.Length >= 2 ? dice[0] * 10 + dice[1] : 0;
