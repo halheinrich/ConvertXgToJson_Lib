@@ -453,6 +453,34 @@ public class XgDecisionIteratorTests
         }
     }
 
+    /// <summary>
+    /// Cube DecisionRows (both doubler and taker) carry no play, so the
+    /// PlayOutcomeData contract requires both after-boards empty. Producer-
+    /// enforced — board-based play-type filters rely on this to skip cube rows.
+    /// </summary>
+    [Fact]
+    public void CubeDecisionRows_AfterBoardsAreEmpty()
+    {
+        bool foundCube = false;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+
+            foreach (var row in XgDecisionIterator.Iterate(file, Path.GetFileName(path))
+                                                   .Where(r => r.IsCube))
+            {
+                foundCube = true;
+                row.AfterBestBoard.Should().BeEmpty(
+                    $"cube DecisionRow in {Path.GetFileName(path)} must have empty AfterBestBoard");
+                row.AfterPlayerBoard.Should().BeEmpty(
+                    $"cube DecisionRow in {Path.GetFileName(path)} must have empty AfterPlayerBoard");
+            }
+        }
+
+        foundCube.Should().BeTrue("test data should contain at least one cube decision");
+    }
+
     // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------

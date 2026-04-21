@@ -166,6 +166,36 @@ public class DiagramRequestIteratorTests
         foundCube.Should().BeTrue("test data should contain at least one cube decision");
     }
 
+    /// <summary>
+    /// Cube requests carry no play; both after-boards must be empty per the
+    /// PlayOutcomeData contract so board-based play-type filters correctly skip
+    /// cube decisions. Producer-enforced — consumers rely on it.
+    /// </summary>
+    [Fact]
+    public void IterateDiagramRequests_CubeRequest_AfterBoardsAreEmpty()
+    {
+        bool foundCube = false;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path))
+                                                   .Where(r => r.Decision.IsCube))
+            {
+                foundCube = true;
+                req.Outcome.AfterBestBoard.Should().BeEmpty(
+                    $"cube request in {Path.GetFileName(path)} must have empty AfterBestBoard");
+                req.Outcome.AfterPlayerBoard.Should().BeEmpty(
+                    $"cube request in {Path.GetFileName(path)} must have empty AfterPlayerBoard");
+                req.AfterBestBoard.Should().BeEmpty("forwarded IDecisionFilterData.AfterBestBoard must be empty");
+                req.AfterPlayerBoard.Should().BeEmpty("forwarded IDecisionFilterData.AfterPlayerBoard must be empty");
+            }
+        }
+
+        foundCube.Should().BeTrue("test data should contain at least one cube decision");
+    }
+
     // -----------------------------------------------------------------------
     //  Pip counts
     // -----------------------------------------------------------------------

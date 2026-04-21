@@ -416,6 +416,10 @@ public static class XgDecisionIterator
             AnalysisDepth = depth,
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
             Board = board,
+            // Cube decisions carry no play; the PlayOutcomeData contract requires
+            // both after-boards empty. Explicit to document the producer intent.
+            AfterBestBoard = [],
+            AfterPlayerBoard = [],
         };
     }
 
@@ -480,6 +484,13 @@ public static class XgDecisionIterator
                 OnRollName = ctx.PlayerName(cube.ActivePlayer),
                 OpponentName = ctx.PlayerName(-cube.ActivePlayer),
                 SourceFile = ctx.SourceFile,
+            },
+            // Cube decisions carry no play; PlayOutcomeData contract requires
+            // both after-boards empty. Explicit for producer intent.
+            Outcome = new PlayOutcomeData
+            {
+                AfterBestBoard = [],
+                AfterPlayerBoard = [],
             },
         };
     }
