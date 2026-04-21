@@ -11,7 +11,9 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// adjacent <c>(from, to)</c> pairs in active-player POV, 0-indexed point values.
 /// Sentinels:
 ///   <c>from == -1</c> terminates; <c>from == 24</c> is bar entry;
-///   <c>to == -1</c> is bear off; otherwise the point is <c>value + 1</c>.
+///   any <c>to &lt; 0</c> is a bear off (XG encodes overshoot bear-offs as
+///   <c>to = from - die</c>, which can be <c>-2, -3, …</c>); otherwise the
+///   point is <c>value + 1</c>.
 /// </para>
 ///
 /// <para>
@@ -45,7 +47,7 @@ internal static class AfterBoardBuilder
             int fromIdx = from == 24 ? 25 : from + 1;
             board[fromIdx]--;
 
-            if (to == -1) continue; // bear off — no destination side-effects
+            if (to < 0) continue; // bear off — no destination side-effects
 
             int toIdx = to + 1;
             if (board[toIdx] == -1)

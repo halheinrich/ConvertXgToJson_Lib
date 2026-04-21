@@ -187,6 +187,20 @@ public class AfterBoardBuilderTests
         DecisionMakerCheckerCount(result).Should().Be(0);
     }
 
+    [Fact]
+    public void ComputeAfterBoard_OvershootBearOff_TreatedAsBearOff()
+    {
+        // XG encodes "bear off with an overshoot die" as to = from - die, which
+        // can be more negative than -1 (e.g. pt 5 borne off with a 6 → raw (4, -2)).
+        // Any negative `to` means bear off.
+        var prior = EmptyBoard();
+        prior[5] = 1;
+
+        var result = AfterBoardBuilder.ComputeAfterBoard(prior, M(4, -2));
+
+        DecisionMakerCheckerCount(result).Should().Be(0);
+    }
+
     // Bar entry ------------------------------------------------------------
 
     [Fact]

@@ -1,5 +1,6 @@
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Parsing;
 
 namespace ConvertXgToJson_Lib;
 
@@ -251,6 +252,10 @@ public static class XgDecisionIterator
             matchLength: ctx.MatchLength,
             maxCubeLog2: ctx.MaxCubeLimit);
 
+        int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
+        int userPlayIndex = FindUserPlayIndex(analysis, move.FinalPosition);
+        var (afterBest, afterPlayer) = ComputeMoveAfterBoards(board, analysis, userPlayIndex);
+
         return new DecisionRow
         {
             Xgid = xgid,
@@ -266,7 +271,9 @@ public static class XgDecisionIterator
             Roll = dice,
             AnalysisDepth = depth,
             Equity = bestEval.Equity,
-            Board = ToBoard(move.InitialPosition.Points, move.ActivePlayer),
+            Board = board,
+            AfterBestBoard = afterBest,
+            AfterPlayerBoard = afterPlayer,
         };
     }
 
@@ -290,16 +297,8 @@ public static class XgDecisionIterator
         int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
 
-        // Identify which analysis candidate matches the move actually played.
-        int userPlayIndex = -1;
-        for (int i = 0; i < analysis.PositionsPlayed.Length && i < analysis.MoveCount; i++)
-        {
-            if (PositionsEqual(analysis.PositionsPlayed[i], move.FinalPosition))
-            {
-                userPlayIndex = i;
-                break;
-            }
-        }
+        int userPlayIndex = FindUserPlayIndex(analysis, move.FinalPosition);
+        var (afterBest, afterPlayer) = ComputeMoveAfterBoards(board, analysis, userPlayIndex);
 
         var plays = new List<PlayCandidate>(analysis.MoveCount);
         double bestEquity = analysis.Evals.Length > 0 ? analysis.Evals[0].Equity : 0.0;
@@ -354,6 +353,11 @@ public static class XgDecisionIterator
                 OnRollName = ctx.PlayerName(move.ActivePlayer),
                 OpponentName = ctx.PlayerName(-move.ActivePlayer),
                 SourceFile = ctx.SourceFile,
+            },
+            Outcome = new PlayOutcomeData
+            {
+                AfterBestBoard = afterBest,
+                AfterPlayerBoard = afterPlayer,
             },
         };
     }
@@ -546,6 +550,49 @@ public static class XgDecisionIterator
         for (int i = 0; i < 26; i++)
             if (a.Points[i] != b.Points[i]) return false;
         return true;
+    }
+
+    /// <summary>
+    /// Identifies which analysis candidate matches the move the player actually
+    /// made. Returns <c>-1</c> when the played position is not in the analysed
+    /// candidate set (e.g. the player chose a move XG didn't rank in its top-N).
+    /// </summary>
+    private static int FindUserPlayIndex(BestMoveAnalysis analysis, PositionEngine finalPosition)
+    {
+        for (int i = 0; i < analysis.PositionsPlayed.Length && i < analysis.MoveCount; i++)
+            if (PositionsEqual(analysis.PositionsPlayed[i], finalPosition)) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Computes the after-boards for a checker-play decision.
+    ///
+    /// <para>
+    /// When <paramref name="userPlayIndex"/> is a valid index into
+    /// <see cref="BestMoveAnalysis.Moves"/>, both boards are computed via
+    /// <see cref="AfterBoardBuilder.ComputeAfterBoard"/>: best from
+    /// <c>Moves[0]</c>, player from <c>Moves[userPlayIndex]</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Otherwise — when the player's actual play is not in the analysed
+    /// candidate set, or XG did not emit a move encoding for that index —
+    /// both boards are returned empty. Per the
+    /// <see cref="PlayOutcomeData"/> contract this makes the decision
+    /// invisible to board-based play-type filters, matching the handling of
+    /// cube decisions.
+    /// </para>
+    /// </summary>
+    private static (IReadOnlyList<int> afterBest, IReadOnlyList<int> afterPlayer) ComputeMoveAfterBoards(
+        int[] priorBoard, BestMoveAnalysis analysis, int userPlayIndex)
+    {
+        if (userPlayIndex < 0 || userPlayIndex >= analysis.Moves.Length)
+            return ([], []);
+
+        return (
+            AfterBoardBuilder.ComputeAfterBoard(priorBoard, analysis.Moves[0]),
+            AfterBoardBuilder.ComputeAfterBoard(priorBoard, analysis.Moves[userPlayIndex])
+        );
     }
 
     // -----------------------------------------------------------------------
