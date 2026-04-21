@@ -10,7 +10,9 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// Input is the same raw encoding as <see cref="Models.BestMoveAnalysis.Moves"/>:
 /// adjacent <c>(from, to)</c> pairs in active-player POV, 0-indexed point values.
 /// Sentinels:
-///   <c>from == -1</c> terminates; <c>from == 24</c> is bar entry;
+///   <c>from == -1</c> terminates; <c>(from, to) == (0, 0)</c> is XG's
+///   "no legal moves" (dance) encoding — the whole move list is a no-op;
+///   <c>from == 24</c> is bar entry;
 ///   any <c>to &lt; 0</c> is a bear off (XG encodes overshoot bear-offs as
 ///   <c>to = from - die</c>, which can be <c>-2, -3, …</c>); otherwise the
 ///   point is <c>value + 1</c>.
@@ -43,6 +45,7 @@ internal static class AfterBoardBuilder
             sbyte from = moves[i];
             sbyte to   = moves[i + 1];
             if (from == -1) break;
+            if (from == 0 && to == 0) break; // "no legal moves" — dance
 
             int fromIdx = from == 24 ? 25 : from + 1;
             board[fromIdx]--;

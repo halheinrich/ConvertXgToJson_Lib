@@ -188,6 +188,28 @@ public class AfterBoardBuilderTests
     }
 
     [Fact]
+    public void ComputeAfterBoard_NoLegalMoves_EncodedAsAllZeros_TreatedAsNoOp()
+    {
+        // XG emits Moves[0] = [0,0,0,0,0,0,0,0] when the player has no legal
+        // move (dance on the bar). Must not be interpreted as four (0,0)
+        // phantom moves, which would corrupt the board.
+        var prior = EmptyBoard();
+        prior[25] = 2;     // active is danced on the bar
+        prior[24] = -2;    // opponent holds the 24 point
+        prior[23] = -2;
+        prior[22] = -2;
+        prior[21] = -2;
+        prior[20] = -2;
+        prior[19] = -2;    // full home board
+
+        var result = AfterBoardBuilder.ComputeAfterBoard(prior, M(0, 0, 0, 0, 0, 0, 0, 0));
+
+        // Expected: prior flipped, no moves applied.
+        var expectedFlipped = AfterBoardBuilder.FlipBoard(prior);
+        result.Should().Equal(expectedFlipped);
+    }
+
+    [Fact]
     public void ComputeAfterBoard_OvershootBearOff_TreatedAsBearOff()
     {
         // XG encodes "bear off with an overshoot die" as to = from - die, which

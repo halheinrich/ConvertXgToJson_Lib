@@ -414,4 +414,152 @@ public class DiagramRequestIteratorTests
         }
     }
 
+    // -----------------------------------------------------------------------
+    //  After-boards: real-corpus invariants
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// For every analysed checker decision across <c>TestData/xg/</c>:
+    ///
+    ///  * cube requests carry empty after-boards;
+    ///  * move requests where the player's chosen play is not in the analysed
+    ///    candidate set also carry empty after-boards (producer contract
+    ///    matching the cube-decision handling — the decision doesn't qualify
+    ///    for board-based play-type filters);
+    ///  * otherwise both after-boards have exactly 26 elements, and the
+    ///    decision-maker's checker count matches XG's stored end-state
+    ///    (<c>PositionsPlayed[0]</c> for best, <c>FinalPosition</c> for
+    ///    player). The opponent's checker count is preserved (hits move a
+    ///    checker from a point to the bar; they do not remove a checker).
+    ///
+    /// Pairs raw records with iterator output by walking both in tandem.
+    /// Guards against silent regressions in <see cref="Parsing.AfterBoardBuilder"/>
+    /// or the <see cref="XgDecisionIterator"/> wiring that would pass
+    /// unit tests (synthetic boards) but disagree with XG's ground truth.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_AfterBoards_AgreeWithXgStoredPositions()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            using var reqEnum = XgDecisionIterator
+                .IterateDiagramRequests(file, sourceFile).GetEnumerator();
+
+            foreach (var rec in file.Records)
+            {
+                if (rec is MoveRecord move)
+                {
+                    var analysis = move.Analysis;
+                    if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                    int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
+                    if (dice == 0) continue; // BuildMoveDiagramRequest skips dice==0
+
+                    reqEnum.MoveNext().Should().BeTrue(
+                        $"{sourceFile}: expected a diagram request for analysed move");
+                    var req = reqEnum.Current;
+                    req.Decision.IsCube.Should().BeFalse($"{sourceFile}: correlated request should be a move");
+
+                    var best = req.Outcome.AfterBestBoard;
+                    var player = req.Outcome.AfterPlayerBoard;
+
+                    // "Doesn't qualify" case: the player's actual play was not in
+                    // the analysed candidate set. Both must be empty per the
+                    // PlayOutcomeData contract.
+                    if (best.Count == 0)
+                    {
+                        player.Count.Should().Be(0,
+                            $"{sourceFile}: when AfterBestBoard is empty, AfterPlayerBoard must also be empty");
+                        continue;
+                    }
+
+                    best.Count.Should().Be(26,
+                        $"{sourceFile}: non-empty AfterBestBoard must have 26 elements");
+                    player.Count.Should().Be(26,
+                        $"{sourceFile}: non-empty AfterPlayerBoard must have 26 elements");
+
+                    // req.Position.Mop is in on-roll POV (decision-maker = positive,
+                    // opponent = negative) — the natural place to count both sides.
+                    int priorOppCount = SumAbsNegatives(req.Position.Mop);
+
+                    // Decision-maker's checkers are stored as *negative* in the
+                    // POV-flipped after-board (opponent is now on roll).
+                    int bestDmCount = SumAbsNegatives(best);
+                    int playerDmCount = SumAbsNegatives(player);
+                    int bestOppCount = SumPositives(best);
+                    int playerOppCount = SumPositives(player);
+
+                    // PositionsPlayed[0] and FinalPosition are stored in
+                    // active-player POV (decision-maker = positive), unlike
+                    // InitialPosition which is file-native. Sum positives
+                    // directly to get the decision-maker's count.
+                    int expectedBestDmCount = SumPositivesOnPoints(analysis.PositionsPlayed[0]);
+                    int expectedPlayerDmCount = SumPositivesOnPoints(move.FinalPosition);
+
+                    bestDmCount.Should().Be(expectedBestDmCount,
+                        $"{sourceFile}: AfterBestBoard decision-maker count must match XG's PositionsPlayed[0]");
+                    playerDmCount.Should().Be(expectedPlayerDmCount,
+                        $"{sourceFile}: AfterPlayerBoard decision-maker count must match XG's FinalPosition");
+
+                    bestOppCount.Should().Be(priorOppCount,
+                        $"{sourceFile}: AfterBestBoard opponent count must equal prior (hits preserve total)");
+                    playerOppCount.Should().Be(priorOppCount,
+                        $"{sourceFile}: AfterPlayerBoard opponent count must equal prior (hits preserve total)");
+                }
+                else if (rec is CubeRecord cube)
+                {
+                    if (cube.Analysis.Level <= 0) continue;
+
+                    reqEnum.MoveNext().Should().BeTrue(
+                        $"{sourceFile}: expected a diagram request for analysed cube");
+                    var req = reqEnum.Current;
+                    req.Decision.IsCube.Should().BeTrue($"{sourceFile}: correlated request should be a cube");
+                    req.Outcome.AfterBestBoard.Should().BeEmpty(
+                        $"{sourceFile}: cube request AfterBestBoard must be empty");
+                    req.Outcome.AfterPlayerBoard.Should().BeEmpty(
+                        $"{sourceFile}: cube request AfterPlayerBoard must be empty");
+                }
+            }
+        }
+    }
+
+    // Helpers for the corpus test above ------------------------------------
+
+    /// <summary>
+    /// Sums the positive values on a <see cref="PositionEngine.Points"/> array.
+    /// Used on <c>analysis.PositionsPlayed[i]</c> and <c>move.FinalPosition</c>,
+    /// both of which are stored in active-player POV — positives are the
+    /// decision-maker's checkers. Note that <c>move.InitialPosition</c> is
+    /// different: it's in file-native (player1-relative) POV, which is why
+    /// <see cref="XgDecisionIterator.ToBoard"/> applies a flip based on
+    /// <c>ActivePlayer</c> for it.
+    /// </summary>
+    private static int SumPositivesOnPoints(PositionEngine pos)
+    {
+        int count = 0;
+        for (int i = 0; i < 26; i++)
+        {
+            int v = pos.Points[i];
+            if (v > 0) count += v;
+        }
+        return count;
+    }
+
+    private static int SumAbsNegatives(IReadOnlyList<int> board)
+    {
+        int sum = 0;
+        for (int i = 0; i < board.Count; i++) if (board[i] < 0) sum -= board[i];
+        return sum;
+    }
+
+    private static int SumPositives(IReadOnlyList<int> board)
+    {
+        int sum = 0;
+        for (int i = 0; i < board.Count; i++) if (board[i] > 0) sum += board[i];
+        return sum;
+    }
+
 }
