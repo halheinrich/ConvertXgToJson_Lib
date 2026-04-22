@@ -430,6 +430,81 @@ public class DiagramRequestIteratorTests
             "passing the corpus test vacuously.");
     }
 
+    /// <summary>
+    /// On the <c>match35253054.xg</c> anomaly fixture, for every decision
+    /// where XG-native rank 0 is not the best-by-equity candidate, the
+    /// emitted <c>Decision.AnalysisDepths[0].Label</c> must match the depth
+    /// that <c>ResolveDepth</c> produces from
+    /// <c>EvalLevels[FindBestByEquityIndex]</c>. Pins the fix that the
+    /// depth label on a move diagram request sources from the best-by-equity
+    /// index rather than XG-native rank 0 — parallel to the BuildMoveRow
+    /// depth fix in <c>dea3eb4</c>. Non-vacuousness gate requires at least
+    /// one decision to exhibit rank-0 ≠ best-by-equity.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_Match35253054_DepthLabelUsesBestByEquity()
+    {
+        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on match35253054.xg being in TestData/xg/.");
+
+        var file = XgFileReader.ReadFile(path);
+        string sourceFile = Path.GetFileName(path);
+
+        using var reqEnum = XgDecisionIterator
+            .IterateDiagramRequests(file, sourceFile).GetEnumerator();
+
+        int divergingDecisions = 0;
+
+        foreach (var rec in file.Records)
+        {
+            if (rec is MoveRecord move)
+            {
+                var analysis = move.Analysis;
+                if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
+                if (dice == 0) continue; // BuildMoveDiagramRequest skips dice==0
+
+                reqEnum.MoveNext().Should().BeTrue(
+                    $"{sourceFile}: expected a diagram request for analysed move");
+                var req = reqEnum.Current;
+                req.Decision.IsCube.Should().BeFalse(
+                    $"{sourceFile}: correlated request should be a move");
+
+                int bestIdx = XgDecisionIterator.FindBestByEquityIndex(analysis);
+
+                short expectedEvalLevel = bestIdx < analysis.EvalLevels.Length
+                    ? analysis.EvalLevels[bestIdx].Level
+                    : (short)0;
+                string expectedLabel = XgDecisionIterator.ResolveDepth(
+                    evalLevel: expectedEvalLevel,
+                    rolloutIndices: move.RolloutIndices,
+                    rollouts: file.Rollouts);
+
+                req.Decision.AnalysisDepths.Should().NotBeEmpty(
+                    $"{sourceFile}: move request must carry at least one AnalysisDepths entry");
+                req.Decision.AnalysisDepths[0].Label.Should().Be(expectedLabel,
+                    $"{sourceFile} game {req.Descriptive.SourceFile}: " +
+                    "depth label must be resolved from EvalLevels[bestIdx], not EvalLevels[0]");
+
+                if (bestIdx != 0) divergingDecisions++;
+            }
+            else if (rec is CubeRecord cube)
+            {
+                // Skip past cube requests — they go through a different depth path.
+                if (cube.Analysis.Level <= 0) continue;
+                reqEnum.MoveNext();
+            }
+        }
+
+        divergingDecisions.Should().BeGreaterThan(0,
+            $"{sourceFile} must contain at least one decision where XG-native rank 0 " +
+            "disagrees with best-by-equity; otherwise this test passes vacuously.");
+    }
+
     // -----------------------------------------------------------------------
     //  IsCrawford flag propagation
     // -----------------------------------------------------------------------

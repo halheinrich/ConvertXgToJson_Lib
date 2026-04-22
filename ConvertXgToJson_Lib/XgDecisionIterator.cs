@@ -294,8 +294,18 @@ public static class XgDecisionIterator
         int dice = DiceToInt(move.Dice);
         if (dice == 0) return null;
 
+        // Depth describes the ply at which the reported best-by-equity
+        // candidate was evaluated. Read EvalLevels via the rank-coupled
+        // best-by-equity index so the label matches Plays[0]'s equity —
+        // XG-native rank 0 can differ from the equity-max candidate. See
+        // FindBestByEquityIndex and the subproject INSTRUCTIONS.md
+        // architecture note.
+        int bestIdx = analysis.EvalLevels.Length > 0 ? FindBestByEquityIndex(analysis) : -1;
+        short evalLevel = bestIdx >= 0 && bestIdx < analysis.EvalLevels.Length
+            ? analysis.EvalLevels[bestIdx].Level
+            : (short)0;
         string depth = ResolveDepth(
-            evalLevel: analysis.EvalLevels.Length > 0 ? analysis.EvalLevels[0].Level : (short)0,
+            evalLevel: evalLevel,
             rolloutIndices: move.RolloutIndices,
             rollouts: rollouts);
 
@@ -708,7 +718,7 @@ public static class XgDecisionIterator
     //  Depth resolution
     // -----------------------------------------------------------------------
 
-    private static string ResolveDepth(
+    internal static string ResolveDepth(
         short evalLevel,
         int[] rolloutIndices,
         List<RolloutContext> rollouts)
