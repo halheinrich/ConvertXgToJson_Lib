@@ -18,7 +18,7 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 
 ## Depends on
 
-* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `AnalysisDepthEntry`, `CubeOwner`.
+* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`.
 
 ## Directory tree
 

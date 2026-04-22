@@ -433,13 +433,13 @@ public class DiagramRequestIteratorTests
     /// <summary>
     /// On the <c>match35253054.xg</c> anomaly fixture, for every decision
     /// where XG-native rank 0 is not the best-by-equity candidate, the
-    /// emitted <c>Decision.AnalysisDepths[0].Label</c> must match the depth
-    /// that <c>ResolveDepth</c> produces from
-    /// <c>EvalLevels[FindBestByEquityIndex]</c>. Pins the fix that the
-    /// depth label on a move diagram request sources from the best-by-equity
-    /// index rather than XG-native rank 0 — parallel to the BuildMoveRow
-    /// depth fix in <c>dea3eb4</c>. Non-vacuousness gate requires at least
-    /// one decision to exhibit rank-0 ≠ best-by-equity.
+    /// emitted <c>Decision.Plays[0].Depth</c> must match the depth that
+    /// <c>ResolveDepth</c> produces from
+    /// <c>EvalLevels[FindBestByEquityIndex]</c>. Plays[0] is the
+    /// best-by-equity candidate after the sort in BuildMoveDiagramRequest
+    /// (see <c>3f1920d</c>), so its <c>Depth</c> label sources from
+    /// <c>EvalLevels[bestIdx]</c>, not <c>EvalLevels[0]</c>. Non-vacuousness
+    /// gate requires at least one decision to exhibit rank-0 ≠ best-by-equity.
     /// </summary>
     [Fact]
     [Trait("Category", "FileIO")]
@@ -484,11 +484,12 @@ public class DiagramRequestIteratorTests
                     rolloutIndices: move.RolloutIndices,
                     rollouts: file.Rollouts);
 
-                req.Decision.AnalysisDepths.Should().NotBeEmpty(
-                    $"{sourceFile}: move request must carry at least one AnalysisDepths entry");
-                req.Decision.AnalysisDepths[0].Label.Should().Be(expectedLabel,
+                req.Decision.Plays.Should().NotBeEmpty(
+                    $"{sourceFile}: move request must carry at least one candidate");
+                req.Decision.Plays[0].Depth.Should().Be(expectedLabel,
                     $"{sourceFile} game {req.Descriptive.SourceFile}: " +
-                    "depth label must be resolved from EvalLevels[bestIdx], not EvalLevels[0]");
+                    "Plays[0] is best-by-equity, so its Depth must resolve from " +
+                    "EvalLevels[bestIdx], not EvalLevels[0]");
 
                 if (bestIdx != 0) divergingDecisions++;
             }
@@ -503,6 +504,151 @@ public class DiagramRequestIteratorTests
         divergingDecisions.Should().BeGreaterThan(0,
             $"{sourceFile} must contain at least one decision where XG-native rank 0 " +
             "disagrees with best-by-equity; otherwise this test passes vacuously.");
+    }
+
+    /// <summary>
+    /// On the <c>match35253054.xg</c> fixture, for every analysed move
+    /// decision and every candidate <c>k</c> in
+    /// <c>req.Decision.Plays</c>, the emitted <c>Plays[k].Depth</c> must
+    /// equal the <c>ResolveDepth</c> result for the corresponding XG-native
+    /// index <c>sortedIdx[k]</c>'s <c>EvalLevels</c> entry. Pins the
+    /// per-play Depth migration (BgDataTypes <c>d86dab7</c>): each candidate
+    /// carries its own depth label keyed off its own <c>EvalLevels[i]</c>,
+    /// not a single decision-scoped value. Non-vacuousness gate: at least
+    /// one decision with non-empty <c>EvalLevels</c>.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_Match35253054_PerPlayDepthMatchesEvalLevel()
+    {
+        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on match35253054.xg being in TestData/xg/.");
+
+        var file = XgFileReader.ReadFile(path);
+        string sourceFile = Path.GetFileName(path);
+
+        using var reqEnum = XgDecisionIterator
+            .IterateDiagramRequests(file, sourceFile).GetEnumerator();
+
+        int decisionsCheckedWithEvalLevels = 0;
+
+        foreach (var rec in file.Records)
+        {
+            if (rec is MoveRecord move)
+            {
+                var analysis = move.Analysis;
+                if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
+                if (dice == 0) continue;
+
+                reqEnum.MoveNext().Should().BeTrue(
+                    $"{sourceFile}: expected a diagram request for analysed move");
+                var req = reqEnum.Current;
+
+                // Recompute sortedIdx the same way BuildMoveDiagramRequest
+                // does, so Plays[k] maps to XG-native index sortedIdx[k].
+                int n = Math.Min(analysis.MoveCount, analysis.Evals.Length);
+                int[] sortedIdx = Enumerable.Range(0, n)
+                    .OrderByDescending(i => analysis.Evals[i].Equity)
+                    .ToArray();
+
+                req.Decision.Plays.Count.Should().Be(sortedIdx.Length,
+                    $"{sourceFile}: Plays count must match analysed candidate count");
+
+                for (int k = 0; k < sortedIdx.Length; k++)
+                {
+                    int i = sortedIdx[k];
+                    short evalLevel = i < analysis.EvalLevels.Length
+                        ? analysis.EvalLevels[i].Level
+                        : (short)0;
+                    string expected = XgDecisionIterator.ResolveDepth(
+                        evalLevel: evalLevel,
+                        rolloutIndices: move.RolloutIndices,
+                        rollouts: file.Rollouts);
+                    req.Decision.Plays[k].Depth.Should().Be(expected,
+                        $"{sourceFile} candidate k={k} (XG-native index {i}): " +
+                        "Plays[k].Depth must be ResolveDepth(EvalLevels[sortedIdx[k]], ...)");
+                }
+
+                if (analysis.EvalLevels.Length > 0) decisionsCheckedWithEvalLevels++;
+            }
+            else if (rec is CubeRecord cube)
+            {
+                if (cube.Analysis.Level <= 0) continue;
+                reqEnum.MoveNext();
+            }
+        }
+
+        decisionsCheckedWithEvalLevels.Should().BeGreaterThan(0,
+            $"{sourceFile} must contain at least one analysed move decision with " +
+            "non-empty EvalLevels; otherwise this test passes vacuously.");
+    }
+
+    /// <summary>
+    /// For every analysed cube decision across the .xg corpus, the emitted
+    /// <c>Decision.CubeDepth</c> must equal <c>ResolveDepth</c> applied to
+    /// <c>analysis.LevelRequest</c> and the cube's rollout index. Also
+    /// asserts that cube requests carry no plays (cube decisions are
+    /// play-free by contract). Pins the scalar <c>CubeDepth</c> migration
+    /// (BgDataTypes <c>d86dab7</c>). Non-vacuousness: at least one cube
+    /// request must be observed across the corpus.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_Cube_CubeDepthMatchesResolveDepth()
+    {
+        int cubesChecked = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            using var reqEnum = XgDecisionIterator
+                .IterateDiagramRequests(file, sourceFile).GetEnumerator();
+
+            foreach (var rec in file.Records)
+            {
+                if (rec is MoveRecord move)
+                {
+                    var analysis = move.Analysis;
+                    if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                    int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
+                    if (dice == 0) continue;
+                    reqEnum.MoveNext();
+                }
+                else if (rec is CubeRecord cube)
+                {
+                    if (cube.Analysis.Level <= 0) continue;
+
+                    reqEnum.MoveNext().Should().BeTrue(
+                        $"{sourceFile}: expected a diagram request for analysed cube");
+                    var req = reqEnum.Current;
+
+                    req.Decision.IsCube.Should().BeTrue(
+                        $"{sourceFile}: correlated request should be a cube");
+
+                    string expected = XgDecisionIterator.ResolveDepth(
+                        evalLevel: cube.Analysis.LevelRequest,
+                        rolloutIndices: [cube.RolloutIndex],
+                        rollouts: file.Rollouts);
+
+                    req.Decision.CubeDepth.Should().Be(expected,
+                        $"{sourceFile}: CubeDepth must be ResolveDepth(analysis.LevelRequest, ...)");
+                    req.Decision.Plays.Should().BeEmpty(
+                        $"{sourceFile}: cube request must carry no plays");
+
+                    cubesChecked++;
+                }
+            }
+        }
+
+        cubesChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed cube decision; " +
+            "otherwise this test passes vacuously.");
     }
 
     // -----------------------------------------------------------------------

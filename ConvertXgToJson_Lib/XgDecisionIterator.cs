@@ -294,21 +294,6 @@ public static class XgDecisionIterator
         int dice = DiceToInt(move.Dice);
         if (dice == 0) return null;
 
-        // Depth describes the ply at which the reported best-by-equity
-        // candidate was evaluated. Read EvalLevels via the rank-coupled
-        // best-by-equity index so the label matches Plays[0]'s equity —
-        // XG-native rank 0 can differ from the equity-max candidate. See
-        // FindBestByEquityIndex and the subproject INSTRUCTIONS.md
-        // architecture note.
-        int bestIdx = analysis.EvalLevels.Length > 0 ? FindBestByEquityIndex(analysis) : -1;
-        short evalLevel = bestIdx >= 0 && bestIdx < analysis.EvalLevels.Length
-            ? analysis.EvalLevels[bestIdx].Level
-            : (short)0;
-        string depth = ResolveDepth(
-            evalLevel: evalLevel,
-            rolloutIndices: move.RolloutIndices,
-            rollouts: rollouts);
-
         int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
 
@@ -344,12 +329,20 @@ public static class XgDecisionIterator
             double equity = analysis.Evals[i].Equity;
             var eval = analysis.Evals[i];
             sbyte[] candidateMoves = i < analysis.Moves.Length ? analysis.Moves[i] : [];
+            short evalLevel = i < analysis.EvalLevels.Length
+                ? analysis.EvalLevels[i].Level
+                : (short)0;
+            string candidateDepth = ResolveDepth(
+                evalLevel: evalLevel,
+                rolloutIndices: move.RolloutIndices,
+                rollouts: rollouts);
             // Each candidate gets its own scratch board so hit-tracking in
             // one candidate doesn't leak into the next.
             int[] scratchBoard = (int[])board.Clone();
             plays.Add(new PlayCandidate
             {
                 MoveNotation = MoveNotationFormatter.Format(candidateMoves, scratchBoard),
+                Depth = candidateDepth,
                 Equity = equity,
                 EquityLoss = k == 0 ? null : bestEquity - equity,
                 IsUserPlay = k == userPlayIndex,
@@ -383,7 +376,6 @@ public static class XgDecisionIterator
                 UserPlayIndex = userPlayIndex,
                 UserPlayError = move.MoveError > -999.0 ? Math.Abs(move.MoveError) : (double?)null,
                 Plays = plays,
-                AnalysisDepths = [new AnalysisDepthEntry { Label = depth }],
             },
             Descriptive = new DescriptiveData
             {
@@ -479,8 +471,6 @@ public static class XgDecisionIterator
         int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
 
-        var depthEntries = new List<AnalysisDepthEntry> { new() { Label = depth } };
-
         // Doubler row
         yield return new BgDecisionData
         {
@@ -513,7 +503,7 @@ public static class XgDecisionIterator
                 LosePctAfterDoubleTake = analysis.EvalDoubleTake.LoseSingle,
                 LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
                 LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
-                AnalysisDepths = depthEntries,
+                CubeDepth = depth,
                 UserDoubleError = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : (double?)null,
                 UserTakeError = (cube.Doubled == 1 && cube.ErrorTake > -999.0) ? Math.Abs(cube.ErrorTake) : (double?)null,
             },
