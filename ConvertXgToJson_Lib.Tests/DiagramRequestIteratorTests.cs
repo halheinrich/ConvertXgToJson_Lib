@@ -341,6 +341,96 @@ public class DiagramRequestIteratorTests
     }
 
     // -----------------------------------------------------------------------
+    //  Plays list sort order
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// For every move request across the .xg corpus, <c>Plays</c> is sorted
+    /// strict-descending by equity, <c>Plays[0].EquityLoss</c> is null, and
+    /// every subsequent entry has <c>EquityLoss &gt; 0</c>. XG stores
+    /// candidates in its native ranking order, which is not always strict
+    /// equity-descending — an unsorted list produces negative EquityLoss on
+    /// any candidate whose equity exceeds rank-0's, which the renderer
+    /// correctly suppresses as blank cells.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_Plays_StrictDescendingEquity()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile)
+                                                    .Where(r => !r.Decision.IsCube))
+            {
+                var plays = req.Decision.Plays;
+                if (plays.Count == 0) continue;
+
+                plays[0].EquityLoss.Should().BeNull(
+                    $"{sourceFile}: Plays[0].EquityLoss must be null (the best play has no loss)");
+
+                for (int i = 1; i < plays.Count; i++)
+                {
+                    plays[i - 1].Equity.Should().BeGreaterThanOrEqualTo(plays[i].Equity,
+                        $"{sourceFile}: Plays must be sorted descending by equity " +
+                        $"(Plays[{i - 1}].Equity={plays[i - 1].Equity} vs Plays[{i}].Equity={plays[i].Equity})");
+
+                    plays[i].EquityLoss.Should().NotBeNull(
+                        $"{sourceFile}: Plays[{i}].EquityLoss must be populated");
+                    plays[i].EquityLoss!.Value.Should().BeGreaterThanOrEqualTo(0,
+                        $"{sourceFile}: Plays[{i}].EquityLoss must be non-negative after sorting " +
+                        $"(got {plays[i].EquityLoss})");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>match35253054.xg</c> is the user-observed fixture where XG's
+    /// native ordering disagrees with strict equity-descending: a candidate
+    /// past rank 0 has higher equity than rank 0. Before Task 2, that
+    /// produced negative EquityLoss and a blank cell in the renderer. This
+    /// test pins the anomaly: at least one decision in the file has a
+    /// candidate whose raw XG-native equity at index k &gt; 0 exceeds index
+    /// 0's — proving the sort is actually doing work on this corpus rather
+    /// than passing vacuously. The corpus-wide test above then proves the
+    /// output is correct.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_Match35253054_XgNativeOrderIsNotEquityOrder()
+    {
+        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "Task 2 test depends on match35253054.xg being in TestData/xg/.");
+
+        var file = XgFileReader.ReadFile(path);
+
+        bool foundAnomaly = false;
+        foreach (var rec in file.Records.OfType<MoveRecord>())
+        {
+            var analysis = rec.Analysis;
+            if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+
+            double rank0 = analysis.Evals[0].Equity;
+            for (int i = 1; i < analysis.MoveCount && i < analysis.Evals.Length; i++)
+            {
+                if (analysis.Evals[i].Equity > rank0) { foundAnomaly = true; break; }
+            }
+            if (foundAnomaly) break;
+        }
+
+        foundAnomaly.Should().BeTrue(
+            "match35253054.xg should contain at least one decision where XG's native " +
+            "rank 0 is not the highest-equity candidate — otherwise the Task 2 sort is " +
+            "passing the corpus test vacuously.");
+    }
+
+    // -----------------------------------------------------------------------
     //  IsCrawford flag propagation
     // -----------------------------------------------------------------------
 

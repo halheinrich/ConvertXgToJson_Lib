@@ -297,13 +297,35 @@ public static class XgDecisionIterator
         int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
 
-        int userPlayIndex = FindUserPlayIndex(analysis, move.FinalPosition);
-        var (afterBest, afterPlayer) = ComputeMoveAfterBoards(board, analysis, userPlayIndex);
+        int rawUserPlayIndex = FindUserPlayIndex(analysis, move.FinalPosition);
+        var (afterBest, afterPlayer) = ComputeMoveAfterBoards(board, analysis, rawUserPlayIndex);
 
-        var plays = new List<PlayCandidate>(analysis.MoveCount);
-        double bestEquity = analysis.Evals.Length > 0 ? analysis.Evals[0].Equity : 0.0;
-        for (int i = 0; i < analysis.MoveCount && i < analysis.Evals.Length; i++)
+        // XG stores candidates in its native ranking order, which is not
+        // strict equity-descending: a rank-2 candidate can have higher equity
+        // than rank-0. Sort by equity so Plays[0] is truly best, EquityLoss is
+        // non-negative throughout, and the renderer's equity column reads
+        // monotonically. OrderByDescending is stable, preserving XG's order
+        // for ties.
+        int n = Math.Min(analysis.MoveCount, analysis.Evals.Length);
+        int[] sortedIdx = Enumerable.Range(0, n)
+            .OrderByDescending(i => analysis.Evals[i].Equity)
+            .ToArray();
+
+        // Sorted Plays means UserPlayIndex (an index into Plays per the
+        // BgDataTypes contract) must be re-mapped from the XG-native index
+        // FindUserPlayIndex returned.
+        int userPlayIndex = -1;
+        if (rawUserPlayIndex >= 0)
         {
+            for (int k = 0; k < sortedIdx.Length; k++)
+                if (sortedIdx[k] == rawUserPlayIndex) { userPlayIndex = k; break; }
+        }
+
+        var plays = new List<PlayCandidate>(n);
+        double bestEquity = n > 0 ? analysis.Evals[sortedIdx[0]].Equity : 0.0;
+        for (int k = 0; k < n; k++)
+        {
+            int i = sortedIdx[k];
             double equity = analysis.Evals[i].Equity;
             var eval = analysis.Evals[i];
             sbyte[] candidateMoves = i < analysis.Moves.Length ? analysis.Moves[i] : [];
@@ -314,8 +336,8 @@ public static class XgDecisionIterator
             {
                 MoveNotation = MoveNotationFormatter.Format(candidateMoves, scratchBoard),
                 Equity = equity,
-                EquityLoss = i == 0 ? null : bestEquity - equity,
-                IsUserPlay = i == userPlayIndex,
+                EquityLoss = k == 0 ? null : bestEquity - equity,
+                IsUserPlay = k == userPlayIndex,
                 WinPct = eval.WinSingle,
                 WinGammonPct = eval.WinGammon,
                 WinBgPct = eval.WinBackgammon,
