@@ -341,6 +341,65 @@ public class DiagramRequestIteratorTests
     }
 
     // -----------------------------------------------------------------------
+    //  IsCrawford flag propagation
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// For every diagram request across the .xg corpus, <c>Position.IsCrawford</c>
+    /// equals <c>state.GameInfo.IsCrawfordGame</c> for the game the request was
+    /// yielded in. Catches regressions on both sides: omitting IsCrawford from
+    /// a <see cref="PositionData"/> construction (renders Crawford games as
+    /// non-Crawford downstream) and over-flagging money-game decisions where
+    /// the match-header Jacoby flag used to leak through the overloaded int.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_PositionIsCrawford_MatchesGameInfo()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            var state = new XgIteratorState();
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile, state))
+            {
+                bool inCrawford = state.GameInfo?.IsCrawfordGame ?? false;
+                req.Position.IsCrawford.Should().Be(inCrawford,
+                    $"{sourceFile} game {(state.GameInfo?.IsCrawfordGame == true ? "Crawford" : "non-Crawford")}: " +
+                    $"Position.IsCrawford must match state.GameInfo.IsCrawfordGame");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>match35041658.xg</c> contains a Crawford game (game 4). Pins that
+    /// the fixture reproducing the original rendering bug now yields at
+    /// least one diagram request with <c>Position.IsCrawford == true</c> and
+    /// at least one with <c>IsCrawford == false</c> — the two missing-
+    /// IsCrawford construction sites (move + cube doubler) would have
+    /// dropped the flag on every request before the fix.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_Match35041658_HasCrawfordAndNonCrawfordRequests()
+    {
+        string path = Path.Combine(TestPaths.XgDir, "match35041658.xg");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected Crawford fixture not present: {path}. " +
+                "Task 1 test depends on match35041658.xg being in TestData/xg/.");
+
+        var file = XgFileReader.ReadFile(path);
+        var requests = XgDecisionIterator.IterateDiagramRequests(file, "match35041658.xg").ToList();
+
+        requests.Any(r => r.Position.IsCrawford).Should().BeTrue(
+            "match35041658 contains a Crawford game; at least one diagram request must carry IsCrawford=true");
+        requests.Any(r => !r.Position.IsCrawford).Should().BeTrue(
+            "match35041658 also contains non-Crawford games; at least one diagram request must carry IsCrawford=false");
+    }
+
+    // -----------------------------------------------------------------------
     //  BgDecisionData sample output
     // -----------------------------------------------------------------------
 

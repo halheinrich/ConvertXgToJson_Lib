@@ -8,7 +8,15 @@ internal sealed class MatchContext
     public int MatchLength { get; private set; }
     public int Score1 { get; private set; }
     public int Score2 { get; private set; }
-    public int CrawfordJacoby { get; private set; }
+
+    // Three semantic bools replacing the overloaded CrawfordJacoby int.
+    // IsCrawford applies in match play only; IsJacoby / IsBeaver in money
+    // games only. The XGID wire-format int that folds them back together
+    // lives in XgidCrawfordJacobyField below.
+    public bool IsCrawford { get; private set; }
+    public bool IsJacoby { get; }
+    public bool IsBeaver { get; }
+
     public int CubeValue { get; private set; } = 1;
     public int CubePosition { get; private set; }
     public int GameNumber { get; private set; }
@@ -27,11 +35,20 @@ internal sealed class MatchContext
         _player1 = hm.Player1;
         _player2 = hm.Player2;
         MatchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength;
-        CrawfordJacoby = MatchLength == 0
-            ? (hm.Jacoby ? 1 : 0) + (hm.Beaver ? 2 : 0)
-            : 0;
+        IsJacoby = MatchLength == 0 && hm.Jacoby;
+        IsBeaver = MatchLength == 0 && hm.Beaver;
         MaxCubeLimit = hm.CubeLimit > 0 ? hm.CubeLimit : 6;
     }
+
+    /// <summary>
+    /// XGID field 8: match play encodes Crawford as 1/0; money games encode
+    /// Jacoby + 2×Beaver. Collocated here so the wire-format knowledge stays
+    /// with the XG binary semantics; XgidEncoder consumes this unchanged.
+    /// </summary>
+    public int XgidCrawfordJacobyField =>
+        MatchLength > 0
+            ? (IsCrawford ? 1 : 0)
+            : (IsJacoby ? 1 : 0) + (IsBeaver ? 2 : 0);
 
     public void Update(SaveRecord record)
     {
@@ -42,8 +59,7 @@ internal sealed class MatchContext
                 MoveNumber = 0;
                 Score1 = gh.Score1;
                 Score2 = gh.Score2;
-                if (MatchLength > 0 && gh.CrawfordApplies)
-                    CrawfordJacoby = 1;
+                IsCrawford = MatchLength > 0 && gh.CrawfordApplies;
                 CubeValue = 1;
                 CubePosition = 0;
                 break;
@@ -82,7 +98,7 @@ internal sealed class MatchContext
         int opponentScore = activePlayer >= 0 ? Score2 : Score1;
         int away1 = MatchLength - onRollScore;
         int away2 = MatchLength - opponentScore;
-        string crawford = CrawfordJacoby == 1 ? "C" : "";
+        string crawford = IsCrawford ? "C" : "";
         return $"{away1}a{away2}a{crawford}";
     }
 }

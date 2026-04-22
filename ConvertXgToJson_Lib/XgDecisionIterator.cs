@@ -248,7 +248,7 @@ public static class XgDecisionIterator
             dice: dice,
             score1: move.ActivePlayer >= 0 ? ctx.Score1 : ctx.Score2,
             score2: move.ActivePlayer >= 0 ? ctx.Score2 : ctx.Score1,
-            crawfordJacoby: ctx.CrawfordJacoby,
+            crawfordJacoby: ctx.XgidCrawfordJacobyField,
             matchLength: ctx.MatchLength,
             maxCubeLog2: ctx.MaxCubeLimit);
 
@@ -262,7 +262,7 @@ public static class XgDecisionIterator
             Error = move.MoveError > -999.0 ? Math.Abs(move.MoveError) : 0.0,
             OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
             OpponentNeeds = ctx.NeedsFor(-move.ActivePlayer),
-            IsCrawford = ctx.CrawfordJacoby == 1,
+            IsCrawford = ctx.IsCrawford,
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(move.ActivePlayer),
             SourceFile = ctx.SourceFile,
@@ -336,6 +336,7 @@ public static class XgDecisionIterator
                 OpponentPipCount = opponentPips,
                 CubeSize = ctx.CubeValue,
                 CubeOwner = CubeOwnerFor(ctx.CubePosition, move.ActivePlayer),
+                IsCrawford = ctx.IsCrawford,
             },
             Decision = new DecisionData
             {
@@ -394,7 +395,7 @@ public static class XgDecisionIterator
             dice: 0,
             score1: cube.ActivePlayer >= 0 ? ctx.Score1 : ctx.Score2,
             score2: cube.ActivePlayer >= 0 ? ctx.Score2 : ctx.Score1,
-            crawfordJacoby: ctx.CrawfordJacoby,
+            crawfordJacoby: ctx.XgidCrawfordJacobyField,
             matchLength: ctx.MatchLength,
             maxCubeLog2: ctx.MaxCubeLimit);
 
@@ -406,7 +407,7 @@ public static class XgDecisionIterator
             Error = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : 0.0,
             OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
             OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
-            IsCrawford = ctx.CrawfordJacoby == 1,
+            IsCrawford = ctx.IsCrawford,
             MatchLength = ctx.MatchLength,
             Player = ctx.PlayerName(cube.ActivePlayer),
             SourceFile = ctx.SourceFile,
@@ -455,6 +456,7 @@ public static class XgDecisionIterator
                 OpponentPipCount = opponentPips,
                 CubeSize = CubeValueActual(cube.CubeValue),
                 CubeOwner = CubeOwnerFor(cubePos, cube.ActivePlayer),
+                IsCrawford = ctx.IsCrawford,
             },
             Decision = new DecisionData
             {
