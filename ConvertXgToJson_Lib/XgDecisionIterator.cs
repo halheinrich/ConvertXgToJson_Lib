@@ -224,11 +224,16 @@ public static class XgDecisionIterator
         if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
             return null;
 
-        var bestEval = analysis.Evals[0];
+        // XG's native rank 0 is not always the highest-equity candidate;
+        // CSV Equity and the depth label that describes it must both key
+        // off the best-by-equity index, not Evals[0]. See
+        // FindBestByEquityIndex for the convention rationale.
+        int bestIdx = FindBestByEquityIndex(analysis);
+        var bestEval = analysis.Evals[bestIdx];
         int dice = DiceToInt(move.Dice);
 
         string depth = ResolveDepth(
-            evalLevel: analysis.EvalLevels.Length > 0 ? analysis.EvalLevels[0].Level : (short)0,
+            evalLevel: bestIdx < analysis.EvalLevels.Length ? analysis.EvalLevels[bestIdx].Level : (short)0,
             rolloutIndices: move.RolloutIndices,
             rollouts: rollouts);
 
@@ -585,6 +590,48 @@ public static class XgDecisionIterator
         for (int i = 0; i < 26; i++)
             if (a.Points[i] != b.Points[i]) return false;
         return true;
+    }
+
+    /// <summary>
+    /// Returns the index of the highest-equity entry in
+    /// <see cref="BestMoveAnalysis.Evals"/> — the canonical "best play"
+    /// locator for this subproject.
+    ///
+    /// <para>
+    /// XG stores candidates in its native ranking order, which is not
+    /// always strict equity-descending: a rank-&gt;0 entry can have higher
+    /// equity than rank 0. Rank-coupled data (<c>Evals</c>, <c>Moves</c>,
+    /// <c>PositionsPlayed</c>, <c>EvalLevels</c>) shares the same index,
+    /// so any producer surface that reports "best play" — CSV
+    /// <c>DecisionRow.Equity</c>, <c>PlayOutcomeData.AfterBestBoard</c>,
+    /// the top of sorted <c>BgDecisionData.Plays</c> — must resolve it
+    /// through this helper rather than hard-coding <c>[0]</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Stable tie-break: on equal equity, the lower XG-native index
+    /// wins, matching the semantics of a descending stable sort.
+    /// Callers are expected to have already gated on <c>MoveCount == 0</c>
+    /// or <c>Evals.Length == 0</c>; returns 0 on an empty analysis.
+    /// </para>
+    /// </summary>
+    internal static int FindBestByEquityIndex(BestMoveAnalysis analysis)
+    {
+        int n = Math.Min(analysis.MoveCount, analysis.Evals.Length);
+        if (n == 0) return 0;
+
+        int bestIdx = 0;
+        double bestEq = analysis.Evals[0].Equity;
+        for (int i = 1; i < n; i++)
+        {
+            double eq = analysis.Evals[i].Equity;
+            if (eq > bestEq)
+            {
+                bestIdx = i;
+                bestEq = eq;
+            }
+        }
+        return bestIdx;
     }
 
     /// <summary>

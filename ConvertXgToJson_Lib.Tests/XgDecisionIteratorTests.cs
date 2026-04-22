@@ -482,6 +482,66 @@ public class XgDecisionIteratorTests
     }
 
     // -----------------------------------------------------------------------
+    //  DecisionRow.Equity — best-by-equity convention
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>match35253054.xg</c> contains at least one decision where XG's
+    /// native rank 0 is not the highest-equity candidate (the same anomaly
+    /// fixture used by the diagram-request sort test). For every such
+    /// decision, <see cref="DecisionRow.Equity"/> must report the
+    /// <em>highest</em> equity in the analysed candidate set, not
+    /// <c>Evals[0].Equity</c>. Pairs raw MoveRecords with DecisionRows
+    /// emitted by <see cref="XgDecisionIterator.Iterate"/> and compares
+    /// against <see cref="XgDecisionIterator.FindBestByEquityIndex"/>.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void MoveRow_Equity_UsesHighestEquityCandidate_NotXgNativeRank0()
+    {
+        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on match35253054.xg being in TestData/xg/.");
+
+        var file = XgFileReader.ReadFile(path);
+        string sourceFile = Path.GetFileName(path);
+
+        using var rowEnum = XgDecisionIterator
+            .Iterate(file, sourceFile)
+            .Where(r => !r.IsCube)
+            .GetEnumerator();
+
+        int divergingDecisions = 0;
+
+        foreach (var rec in file.Records.OfType<MoveRecord>())
+        {
+            var analysis = rec.Analysis;
+            if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+
+            rowEnum.MoveNext().Should().BeTrue(
+                $"{sourceFile}: expected a DecisionRow for analysed move");
+            var row = rowEnum.Current;
+
+            int bestIdx = XgDecisionIterator.FindBestByEquityIndex(analysis);
+            double maxEquity = analysis.Evals.Take(analysis.MoveCount).Max(e => e.Equity);
+            double rank0Equity = analysis.Evals[0].Equity;
+
+            row.Equity.Should().BeApproximately(maxEquity, 1e-9,
+                $"{sourceFile} game {row.Game} move {row.MoveNum}: " +
+                $"DecisionRow.Equity must be the highest equity in the candidate set");
+
+            if (bestIdx != 0 || maxEquity > rank0Equity)
+                divergingDecisions++;
+        }
+
+        divergingDecisions.Should().BeGreaterThan(0,
+            $"{sourceFile} must contain at least one decision where XG-native rank 0 " +
+            "disagrees with best-by-equity; otherwise this test passes vacuously.");
+    }
+
+    // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------
 
