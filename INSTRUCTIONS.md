@@ -89,6 +89,16 @@ Two iteration surfaces over the same underlying record stream:
   yield exactly **one** `BgDecisionData`, not two — the doubler and the taker
   share a single record.
 
+Both surfaces report the "best play" as the **highest-equity** candidate in
+`analysis.Evals[]`, not XG-native rank 0. `BgDecisionData.Plays[0]`,
+`DecisionRow.Equity`, and `PlayOutcomeData.AfterBestBoard` all key off this
+convention. XG's stored ranking is not always strict equity-descending, so
+rank 0 and best-by-equity disagree on a subset of decisions. Use
+`FindBestByEquityIndex(analysis)` to locate the best candidate when adding
+code that reads from `analysis.Evals`, `analysis.Moves`,
+`analysis.PositionsPlayed`, or `analysis.EvalLevels` (all four are
+rank-coupled with the same index).
+
 Supporting helpers:
 
 * `ExtractMatchInfo` — public helper that scans for the `MatchHeaderRecord`

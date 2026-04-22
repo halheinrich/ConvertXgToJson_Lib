@@ -653,7 +653,11 @@ public static class XgDecisionIterator
     /// When <paramref name="userPlayIndex"/> is a valid index into
     /// <see cref="BestMoveAnalysis.Moves"/>, both boards are computed via
     /// <see cref="AfterBoardBuilder.ComputeAfterBoard"/>: best from
-    /// <c>Moves[0]</c>, player from <c>Moves[userPlayIndex]</c>.
+    /// <c>Moves[FindBestByEquityIndex(analysis)]</c>, player from
+    /// <c>Moves[userPlayIndex]</c>. The "best" index keys off the
+    /// highest-equity candidate (see <see cref="FindBestByEquityIndex"/>),
+    /// not XG-native rank 0 — those disagree on the subset of decisions
+    /// where XG's stored ranking is not strict equity-descending.
     /// </para>
     ///
     /// <para>
@@ -671,8 +675,10 @@ public static class XgDecisionIterator
         if (userPlayIndex < 0 || userPlayIndex >= analysis.Moves.Length)
             return ([], []);
 
+        int bestIdx = FindBestByEquityIndex(analysis);
+
         return (
-            AfterBoardBuilder.ComputeAfterBoard(priorBoard, analysis.Moves[0]),
+            AfterBoardBuilder.ComputeAfterBoard(priorBoard, analysis.Moves[bestIdx]),
             AfterBoardBuilder.ComputeAfterBoard(priorBoard, analysis.Moves[userPlayIndex])
         );
     }

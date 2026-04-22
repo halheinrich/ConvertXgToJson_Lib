@@ -641,15 +641,22 @@ public class DiagramRequestIteratorTests
                     int bestOppCount = SumPositives(best);
                     int playerOppCount = SumPositives(player);
 
-                    // PositionsPlayed[0] and FinalPosition are stored in
+                    // PositionsPlayed[i] and FinalPosition are stored in
                     // active-player POV (decision-maker = positive), unlike
                     // InitialPosition which is file-native. Sum positives
-                    // directly to get the decision-maker's count.
-                    int expectedBestDmCount = SumPositivesOnPoints(analysis.PositionsPlayed[0]);
+                    // directly to get the decision-maker's count. Best is
+                    // sourced from the highest-equity candidate index (see
+                    // XgDecisionIterator.FindBestByEquityIndex), which
+                    // agrees with rank 0 for most decisions but diverges on
+                    // the subset where XG's stored ranking isn't strict
+                    // equity-descending — the same convention that governs
+                    // BgDecisionData.Plays[0] and DecisionRow.Equity.
+                    int bestIdx = XgDecisionIterator.FindBestByEquityIndex(analysis);
+                    int expectedBestDmCount = SumPositivesOnPoints(analysis.PositionsPlayed[bestIdx]);
                     int expectedPlayerDmCount = SumPositivesOnPoints(move.FinalPosition);
 
                     bestDmCount.Should().Be(expectedBestDmCount,
-                        $"{sourceFile}: AfterBestBoard decision-maker count must match XG's PositionsPlayed[0]");
+                        $"{sourceFile}: AfterBestBoard decision-maker count must match XG's PositionsPlayed[bestIdx]");
                     playerDmCount.Should().Be(expectedPlayerDmCount,
                         $"{sourceFile}: AfterPlayerBoard decision-maker count must match XG's FinalPosition");
 
