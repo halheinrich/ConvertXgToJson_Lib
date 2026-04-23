@@ -652,6 +652,100 @@ public class DiagramRequestIteratorTests
     }
 
     // -----------------------------------------------------------------------
+    //  Depth abbreviation and rank population
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// For every emitted diagram request across the .xg corpus,
+    /// <c>PlayCandidate.DepthAbbreviation</c> is non-empty and
+    /// <c>DepthRank &gt;= 0</c> on every play; for cube requests,
+    /// <c>CubeDepthAbbreviation</c> is non-empty and
+    /// <c>CubeDepthRank &gt;= 0</c>. Catches regressions where
+    /// BuildMoveDiagramRequest or BuildCubeDiagramRequests forget to
+    /// populate the new fields from ResolveDepthInfo.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_DepthAbbreviationAndRank_PopulatedForEveryCandidate()
+    {
+        int movePlaysChecked = 0;
+        int cubesChecked = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile))
+            {
+                if (req.Decision.IsCube)
+                {
+                    req.Decision.CubeDepthAbbreviation.Should().NotBeNullOrEmpty(
+                        $"{sourceFile}: CubeDepthAbbreviation must be populated on cube requests");
+                    req.Decision.CubeDepthRank.Should().BeGreaterThanOrEqualTo(0,
+                        $"{sourceFile}: CubeDepthRank must be >= 0");
+                    cubesChecked++;
+                }
+                else
+                {
+                    foreach (var play in req.Decision.Plays)
+                    {
+                        play.DepthAbbreviation.Should().NotBeNullOrEmpty(
+                            $"{sourceFile}: PlayCandidate.DepthAbbreviation must be populated");
+                        play.DepthRank.Should().BeGreaterThanOrEqualTo(0,
+                            $"{sourceFile}: PlayCandidate.DepthRank must be >= 0");
+                        movePlaysChecked++;
+                    }
+                }
+            }
+        }
+
+        movePlaysChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed move candidate");
+        cubesChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed cube decision");
+    }
+
+    /// <summary>
+    /// <c>match35253054.xg</c> exercises XG's per-candidate depth
+    /// variation (see <see cref="ConvertXgToJson_Lib.MEMORY.md"/> note
+    /// "XG analysis depth varies per candidate" — 2–4 distinct ply
+    /// depths across ~12 candidates is typical). At least one move
+    /// decision in the fixture must emit adjacent plays with different
+    /// <c>DepthRank</c> values, providing non-vacuous coverage for
+    /// BackgammonDiagram_Lib's Session-3 out-of-order italic logic.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_Match35253054_AdjacentPlaysHaveDifferingDepthRanks()
+    {
+        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on match35253054.xg being in TestData/xg/.");
+
+        var file = XgFileReader.ReadFile(path);
+
+        bool foundVariation = false;
+        foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, "match35253054.xg")
+                                              .Where(r => !r.Decision.IsCube))
+        {
+            var plays = req.Decision.Plays;
+            for (int i = 1; i < plays.Count; i++)
+            {
+                if (plays[i].DepthRank != plays[i - 1].DepthRank) { foundVariation = true; break; }
+            }
+            if (foundVariation) break;
+        }
+
+        foundVariation.Should().BeTrue(
+            "match35253054.xg must contain at least one decision where adjacent " +
+            "candidates have different DepthRank values; otherwise Session 3's " +
+            "out-of-order italic logic has no non-vacuous test coverage.");
+    }
+
+    // -----------------------------------------------------------------------
     //  IsCrawford flag propagation
     // -----------------------------------------------------------------------
 

@@ -332,7 +332,7 @@ public static class XgDecisionIterator
             short evalLevel = i < analysis.EvalLevels.Length
                 ? analysis.EvalLevels[i].Level
                 : (short)0;
-            string candidateDepth = ResolveDepth(
+            var (candidateDepth, candidateDepthAbbrev, candidateDepthRank) = ResolveDepthInfo(
                 evalLevel: evalLevel,
                 rolloutIndices: move.RolloutIndices,
                 rollouts: rollouts);
@@ -343,6 +343,8 @@ public static class XgDecisionIterator
             {
                 MoveNotation = MoveNotationFormatter.Format(candidateMoves, scratchBoard),
                 Depth = candidateDepth,
+                DepthAbbreviation = candidateDepthAbbrev,
+                DepthRank = candidateDepthRank,
                 Equity = equity,
                 EquityLoss = k == 0 ? null : bestEquity - equity,
                 IsUserPlay = k == userPlayIndex,
@@ -461,7 +463,7 @@ public static class XgDecisionIterator
     {
         var analysis = cube.Analysis;
 
-        string depth = ResolveDepth(
+        var (depth, depthAbbrev, depthRank) = ResolveDepthInfo(
             evalLevel: analysis.LevelRequest,
             rolloutIndices: [cube.RolloutIndex],
             rollouts: rollouts);
@@ -504,6 +506,8 @@ public static class XgDecisionIterator
                 LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
                 LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
                 CubeDepth = depth,
+                CubeDepthAbbreviation = depthAbbrev,
+                CubeDepthRank = depthRank,
                 UserDoubleError = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : (double?)null,
                 UserTakeError = (cube.Doubled == 1 && cube.ErrorTake > -999.0) ? Math.Abs(cube.ErrorTake) : (double?)null,
             },
@@ -708,7 +712,37 @@ public static class XgDecisionIterator
     //  Depth resolution
     // -----------------------------------------------------------------------
 
-    internal static string ResolveDepth(
+    /// <summary>
+    /// Resolves the analysis depth for a candidate into three parallel
+    /// forms: the full human-readable label, a compact abbreviation for
+    /// narrow cells, and an ordinal rank (higher = deeper / more
+    /// rigorous). All three come from the same structured inputs — no
+    /// string re-parsing — so the producer keeps ownership of depth
+    /// semantics.
+    ///
+    /// <para>
+    /// Rollout branch: when a valid index in <paramref name="rolloutIndices"/>
+    /// points into <paramref name="rollouts"/>, the rollout's inner ply
+    /// level (<c>Level2</c>, falling back to <c>Level1</c>, then
+    /// <c>LevelTrunc</c>) combines with <c>GamesRolled</c> to produce:
+    /// <c>Label = "Rollout: {trials} trials. {inner ply label}"</c>,
+    /// <c>Abbreviation = "{innerPly}p{trials}"</c> (e.g. "3p1296"),
+    /// <c>Rank = 100 + innerPly</c>. The ply-label switch encodes ply as
+    /// <c>short - 1</c>, so <c>Level*</c> value 2 is a 3-ply rollout.
+    /// </para>
+    ///
+    /// <para>
+    /// Non-rollout branch: returns <see cref="LevelLabel"/>,
+    /// <see cref="LevelAbbreviation"/>, and <see cref="LevelRank"/> for
+    /// <paramref name="evalLevel"/>. The rank ordering is:
+    /// N-ply → N (1..7), XG Roller family → 20–22, Book V1/V2 → 0, any
+    /// unrecognised level → 0. The edge case is a "Rollout" sentinel
+    /// (<c>short 100</c>) without a matching rollout context, which ranks
+    /// 100 — the same floor as a no-inner-ply rollout (e.g. truncated at
+    /// level 0).
+    /// </para>
+    /// </summary>
+    internal static (string Label, string Abbreviation, int Rank) ResolveDepthInfo(
         short evalLevel,
         int[] rolloutIndices,
         List<RolloutContext> rollouts)
@@ -721,11 +755,27 @@ public static class XgDecisionIterator
                 int plyLevel = ctx.Level2 > 0 ? ctx.Level2
                              : ctx.Level1 > 0 ? ctx.Level1
                              : ctx.LevelTrunc;
-                return $"Rollout: {ctx.GamesRolled} trials. {LevelLabel((short)plyLevel)}";
+                int innerPly = plyLevel + 1;
+                string label = $"Rollout: {ctx.GamesRolled} trials. {LevelLabel((short)plyLevel)}";
+                string abbrev = $"{innerPly}p{ctx.GamesRolled}";
+                int rank = 100 + innerPly;
+                return (label, abbrev, rank);
             }
         }
-        return LevelLabel(evalLevel);
+        return (LevelLabel(evalLevel), LevelAbbreviation(evalLevel), LevelRank(evalLevel));
     }
+
+    /// <summary>
+    /// Thin wrapper returning only the label form of
+    /// <see cref="ResolveDepthInfo"/>, for callers that don't need the
+    /// abbreviation or rank — e.g. <see cref="DecisionRow.AnalysisDepth"/>
+    /// on the CSV path.
+    /// </summary>
+    internal static string ResolveDepth(
+        short evalLevel,
+        int[] rolloutIndices,
+        List<RolloutContext> rollouts)
+        => ResolveDepthInfo(evalLevel, rolloutIndices, rollouts).Label;
 
     // -----------------------------------------------------------------------
     //  Helpers
@@ -771,6 +821,68 @@ public static class XgDecisionIterator
         998 => "Book V1",
         999 => "Book V2",
         _ => $"level-{level}",
+    };
+
+    /// <summary>
+    /// Compact display form of <see cref="LevelLabel"/>, sized for narrow
+    /// table cells. N-ply labels are kept intact (short enough already);
+    /// XG Roller family collapses to R / R+ / R++; Book V1/V2 collapses
+    /// to B1 / B2. The Rollout sentinel (<c>short 100</c>) without a
+    /// matching rollout context abbreviates to "Ro" — the normal rollout
+    /// path goes through <see cref="ResolveDepthInfo"/>'s rollout branch
+    /// and never hits this code.
+    /// </summary>
+    private static string LevelAbbreviation(short level) => level switch
+    {
+        0 => "1-ply",
+        1 => "2-ply",
+        2 => "3-ply",
+        12 => "3-ply red",
+        3 => "4-ply",
+        4 => "5-ply",
+        5 => "6-ply",
+        6 => "7-ply",
+        100 => "Ro",
+        1000 => "R",
+        1001 => "R+",
+        1002 => "R++",
+        998 => "B1",
+        999 => "B2",
+        _ => $"level-{level}",
+    };
+
+    /// <summary>
+    /// Ordinal ranking of the analysis depth; higher = deeper / more
+    /// rigorous. Consumed by <see cref="BackgammonDiagram_Lib"/> to flag
+    /// out-of-order analysis across adjacent sorted-by-equity plays.
+    ///
+    /// <para>
+    /// Numeric gaps between categories leave room for future depths
+    /// without renumbering: N-ply occupies 1..7, XG Roller family 20..22,
+    /// rollouts 100+inner-ply (see <see cref="ResolveDepthInfo"/>). Book
+    /// V1/V2 and any unrecognised level rank 0 — the lowest slot —
+    /// because a static book lookup is not an analysis of this position.
+    /// "3-ply red" shares rank 3 with plain 3-ply: reduced variance
+    /// doesn't deepen search, it only narrows the candidate set.
+    /// </para>
+    /// </summary>
+    private static int LevelRank(short level) => level switch
+    {
+        0 => 1,
+        1 => 2,
+        2 => 3,
+        12 => 3,
+        3 => 4,
+        4 => 5,
+        5 => 6,
+        6 => 7,
+        100 => 100,
+        1000 => 20,
+        1001 => 21,
+        1002 => 22,
+        998 => 0,
+        999 => 0,
+        _ => 0,
     };
 
 }
