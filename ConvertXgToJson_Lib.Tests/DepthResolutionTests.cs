@@ -41,7 +41,7 @@ public class DepthResolutionTests
     {
         var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: level,
-            rolloutIndices: [],
+            rolloutIndex: -1,
             rollouts: NoRollouts);
 
         label.Should().Be(expectedLabel);
@@ -61,7 +61,7 @@ public class DepthResolutionTests
     {
         var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: 7777,
-            rolloutIndices: [],
+            rolloutIndex: -1,
             rollouts: NoRollouts);
 
         label.Should().Be("level-7777");
@@ -72,9 +72,8 @@ public class DepthResolutionTests
     /// <summary>
     /// RolloutIndex out of bounds (negative, or past the end of the
     /// rollouts list) falls through to the non-rollout branch. Guards
-    /// against a common regression where an empty rollout list still
-    /// triggers the rollout path because <c>rolloutIndices</c> was
-    /// non-empty.
+    /// against a regression where an empty rollout list still triggers
+    /// the rollout path.
     /// </summary>
     [Theory]
     [InlineData(-1)]
@@ -84,7 +83,7 @@ public class DepthResolutionTests
     {
         var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: 2, // 3-ply
-            rolloutIndices: [idx],
+            rolloutIndex: idx,
             rollouts: NoRollouts);
 
         label.Should().Be("3-ply");
@@ -118,7 +117,7 @@ public class DepthResolutionTests
         // evalLevel here is 7777 (unknown non-rollout) to prove it's ignored.
         var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: 7777,
-            rolloutIndices: [0],
+            rolloutIndex: 0,
             rollouts: rollouts);
 
         label.Should().Be(expectedLabel);
@@ -140,7 +139,7 @@ public class DepthResolutionTests
         {
             new() { Level2 = 3, Level1 = 2, LevelTrunc = 1, GamesRolled = 100 },
         };
-        XgDecisionIterator.ResolveDepthInfo(0, [0], r1).Rank.Should().Be(104,
+        XgDecisionIterator.ResolveDepthInfo(0, 0, r1).Rank.Should().Be(104,
             "Level2=3 → innerPly=4 → rank 104");
 
         // Level2 absent → Level1 wins.
@@ -148,7 +147,7 @@ public class DepthResolutionTests
         {
             new() { Level2 = 0, Level1 = 2, LevelTrunc = 1, GamesRolled = 100 },
         };
-        XgDecisionIterator.ResolveDepthInfo(0, [0], r2).Rank.Should().Be(103,
+        XgDecisionIterator.ResolveDepthInfo(0, 0, r2).Rank.Should().Be(103,
             "Level1=2 → innerPly=3 → rank 103");
 
         // Both absent → LevelTrunc wins.
@@ -156,18 +155,18 @@ public class DepthResolutionTests
         {
             new() { Level2 = 0, Level1 = 0, LevelTrunc = 1, GamesRolled = 100 },
         };
-        XgDecisionIterator.ResolveDepthInfo(0, [0], r3).Rank.Should().Be(102,
+        XgDecisionIterator.ResolveDepthInfo(0, 0, r3).Rank.Should().Be(102,
             "LevelTrunc=1 → innerPly=2 → rank 102");
     }
 
     /// <summary>
-    /// Multiple entries in rolloutIndices: the first valid index wins,
-    /// subsequent ones are ignored. Matches the existing foreach in
-    /// ResolveDepthInfo so producers that pass a batched array don't get
-    /// silently wrong results on the first-hit shortcut.
+    /// Two candidates pointing into the same rollouts list each resolve
+    /// independently to their own rollout's inner ply / trial count.
+    /// Pins the per-candidate scalar contract — a regression to "first
+    /// valid hit wins across all candidates" would surface here.
     /// </summary>
     [Fact]
-    public void ResolveDepthInfo_Rollout_FirstValidIndexWins()
+    public void ResolveDepthInfo_PerCandidate_IndependentResolution()
     {
         var rollouts = new List<RolloutContext>
         {
@@ -175,13 +174,12 @@ public class DepthResolutionTests
             new() { Level2 = 3, GamesRolled = 5000 }, // idx 1
         };
 
-        // -1 is skipped, then idx 0 hits.
-        var (_, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
-            evalLevel: 0,
-            rolloutIndices: [-1, 0, 1],
-            rollouts: rollouts);
+        var c0 = XgDecisionIterator.ResolveDepthInfo(0, 0, rollouts);
+        c0.Abbreviation.Should().Be("3p1296");
+        c0.Rank.Should().Be(103);
 
-        abbrev.Should().Be("3p1296");
-        rank.Should().Be(103);
+        var c1 = XgDecisionIterator.ResolveDepthInfo(0, 1, rollouts);
+        c1.Abbreviation.Should().Be("4p5000");
+        c1.Rank.Should().Be(104);
     }
 }

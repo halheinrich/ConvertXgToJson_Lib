@@ -234,7 +234,7 @@ public static class XgDecisionIterator
 
         string depth = ResolveDepth(
             evalLevel: bestIdx < analysis.EvalLevels.Length ? analysis.EvalLevels[bestIdx].Level : (short)0,
-            rolloutIndices: move.RolloutIndices,
+            rolloutIndex: bestIdx < move.RolloutIndices.Length ? move.RolloutIndices[bestIdx] : -1,
             rollouts: rollouts);
 
         var xgidPosition = move.ActivePlayer >= 0
@@ -334,7 +334,7 @@ public static class XgDecisionIterator
                 : (short)0;
             var (candidateDepth, candidateDepthAbbrev, candidateDepthRank) = ResolveDepthInfo(
                 evalLevel: evalLevel,
-                rolloutIndices: move.RolloutIndices,
+                rolloutIndex: i < move.RolloutIndices.Length ? move.RolloutIndices[i] : -1,
                 rollouts: rollouts);
             // Each candidate gets its own scratch board so hit-tracking in
             // one candidate doesn't leak into the next.
@@ -404,7 +404,7 @@ public static class XgDecisionIterator
 
         string depth = ResolveDepth(
             evalLevel: analysis.LevelRequest,
-            rolloutIndices: [cube.RolloutIndex],
+            rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
 
         int cubeActual = CubeValueActual(cube.CubeValue);
@@ -465,7 +465,7 @@ public static class XgDecisionIterator
 
         var (depth, depthAbbrev, depthRank) = ResolveDepthInfo(
             evalLevel: analysis.LevelRequest,
-            rolloutIndices: [cube.RolloutIndex],
+            rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
 
         int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
@@ -726,8 +726,8 @@ public static class XgDecisionIterator
     /// semantics.
     ///
     /// <para>
-    /// Rollout branch: when a valid index in <paramref name="rolloutIndices"/>
-    /// points into <paramref name="rollouts"/>, the rollout's inner ply
+    /// Rollout branch: when <paramref name="rolloutIndex"/> is a valid
+    /// index into <paramref name="rollouts"/>, the rollout's inner ply
     /// level (<c>Level2</c>, falling back to <c>Level1</c>, then
     /// <c>LevelTrunc</c>) combines with <c>GamesRolled</c> to produce:
     /// <c>Label = "Rollout: {trials} trials. {inner ply label}"</c>,
@@ -746,26 +746,32 @@ public static class XgDecisionIterator
     /// 100 — the same floor as a no-inner-ply rollout (e.g. truncated at
     /// level 0).
     /// </para>
+    ///
+    /// <para>
+    /// Per-candidate scalar input: callers pass the rollout index keyed
+    /// to a single candidate (move-path: <c>move.RolloutIndices[i]</c>;
+    /// cube-path: <c>cube.RolloutIndex</c>). The earlier array-shaped
+    /// signature iterated and returned on the first valid hit, which
+    /// caused every candidate in a decision to inherit the rollout
+    /// label whenever any candidate was rolled out.
+    /// </para>
     /// </summary>
     internal static (string Label, string Abbreviation, int Rank) ResolveDepthInfo(
         short evalLevel,
-        int[] rolloutIndices,
+        int rolloutIndex,
         List<RolloutContext> rollouts)
     {
-        foreach (int i in rolloutIndices)
+        if (rolloutIndex >= 0 && rolloutIndex < rollouts.Count)
         {
-            if (i >= 0 && i < rollouts.Count)
-            {
-                var ctx = rollouts[i];
-                int plyLevel = ctx.Level2 > 0 ? ctx.Level2
-                             : ctx.Level1 > 0 ? ctx.Level1
-                             : ctx.LevelTrunc;
-                int innerPly = plyLevel + 1;
-                string label = $"Rollout: {ctx.GamesRolled} trials. {LevelLabel((short)plyLevel)}";
-                string abbrev = $"{innerPly}p{ctx.GamesRolled}";
-                int rank = 100 + innerPly;
-                return (label, abbrev, rank);
-            }
+            var ctx = rollouts[rolloutIndex];
+            int plyLevel = ctx.Level2 > 0 ? ctx.Level2
+                         : ctx.Level1 > 0 ? ctx.Level1
+                         : ctx.LevelTrunc;
+            int innerPly = plyLevel + 1;
+            string label = $"Rollout: {ctx.GamesRolled} trials. {LevelLabel((short)plyLevel)}";
+            string abbrev = $"{innerPly}p{ctx.GamesRolled}";
+            int rank = 100 + innerPly;
+            return (label, abbrev, rank);
         }
         return (LevelLabel(evalLevel), LevelAbbreviation(evalLevel), LevelRank(evalLevel));
     }
@@ -778,9 +784,9 @@ public static class XgDecisionIterator
     /// </summary>
     internal static string ResolveDepth(
         short evalLevel,
-        int[] rolloutIndices,
+        int rolloutIndex,
         List<RolloutContext> rollouts)
-        => ResolveDepthInfo(evalLevel, rolloutIndices, rollouts).Label;
+        => ResolveDepthInfo(evalLevel, rolloutIndex, rollouts).Label;
 
     // -----------------------------------------------------------------------
     //  Helpers

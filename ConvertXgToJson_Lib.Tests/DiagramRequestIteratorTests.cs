@@ -481,7 +481,7 @@ public class DiagramRequestIteratorTests
                     : (short)0;
                 string expectedLabel = XgDecisionIterator.ResolveDepth(
                     evalLevel: expectedEvalLevel,
-                    rolloutIndices: move.RolloutIndices,
+                    rolloutIndex: bestIdx < move.RolloutIndices.Length ? move.RolloutIndices[bestIdx] : -1,
                     rollouts: file.Rollouts);
 
                 req.Decision.Plays.Should().NotBeEmpty(
@@ -566,11 +566,11 @@ public class DiagramRequestIteratorTests
                         : (short)0;
                     string expected = XgDecisionIterator.ResolveDepth(
                         evalLevel: evalLevel,
-                        rolloutIndices: move.RolloutIndices,
+                        rolloutIndex: i < move.RolloutIndices.Length ? move.RolloutIndices[i] : -1,
                         rollouts: file.Rollouts);
                     req.Decision.Plays[k].Depth.Should().Be(expected,
                         $"{sourceFile} candidate k={k} (XG-native index {i}): " +
-                        "Plays[k].Depth must be ResolveDepth(EvalLevels[sortedIdx[k]], ...)");
+                        "Plays[k].Depth must be ResolveDepth(EvalLevels[sortedIdx[k]], RolloutIndices[sortedIdx[k]], ...)");
                 }
 
                 if (analysis.EvalLevels.Length > 0) decisionsCheckedWithEvalLevels++;
@@ -633,7 +633,7 @@ public class DiagramRequestIteratorTests
 
                     string expected = XgDecisionIterator.ResolveDepth(
                         evalLevel: cube.Analysis.LevelRequest,
-                        rolloutIndices: [cube.RolloutIndex],
+                        rolloutIndex: cube.RolloutIndex,
                         rollouts: file.Rollouts);
 
                     req.Decision.CubeDepth.Should().Be(expected,
