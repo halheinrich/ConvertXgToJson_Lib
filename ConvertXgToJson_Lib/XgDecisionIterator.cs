@@ -560,9 +560,12 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// Computes pip counts from a board array already normalised to on-roll perspective.
-    /// Points 1–24 only; bar checkers do not contribute to pip count.
+    /// Points 1–24 contribute their distance from each player's home; bar checkers
+    /// contribute the maximum distance of 25 pips each. Per the on-roll-POV layout,
+    /// <c>board[25]</c> holds the on-roll player's bar (positive entries) and
+    /// <c>board[0]</c> holds the opponent's bar (negative entries).
     /// </summary>
-    private static void ComputePipCounts(int[] board, out int onRollPips, out int opponentPips)
+    internal static void ComputePipCounts(int[] board, out int onRollPips, out int opponentPips)
     {
         int onRoll = 0, opponent = 0;
         for (int i = 1; i <= 24; i++)
@@ -571,6 +574,8 @@ public static class XgDecisionIterator
             if (v > 0) onRoll += v * i;
             else if (v < 0) opponent += -v * (25 - i);
         }
+        onRoll += board[25] * 25;
+        opponent += -board[0] * 25;
         onRollPips = onRoll;
         opponentPips = opponent;
     }
