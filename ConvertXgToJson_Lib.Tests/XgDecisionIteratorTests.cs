@@ -499,11 +499,11 @@ public class XgDecisionIteratorTests
     [Trait("Category", "FileIO")]
     public void MoveRow_Equity_UsesHighestEquityCandidate_NotXgNativeRank0()
     {
-        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "match35253054.xg");
         if (!File.Exists(path))
             throw new Xunit.Sdk.XunitException(
                 $"Expected fixture not present: {path}. " +
-                "This test depends on match35253054.xg being in TestData/xg/.");
+                "This test depends on match35253054.xg being in TestData/FixtureFiles/.");
 
         var file = XgFileReader.ReadFile(path);
         string sourceFile = Path.GetFileName(path);

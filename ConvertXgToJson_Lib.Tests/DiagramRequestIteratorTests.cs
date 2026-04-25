@@ -402,11 +402,11 @@ public class DiagramRequestIteratorTests
     [Trait("Category", "FileIO")]
     public void IterateDiagramRequests_Match35253054_XgNativeOrderIsNotEquityOrder()
     {
-        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "match35253054.xg");
         if (!File.Exists(path))
             throw new Xunit.Sdk.XunitException(
                 $"Expected fixture not present: {path}. " +
-                "Task 2 test depends on match35253054.xg being in TestData/xg/.");
+                "Task 2 test depends on match35253054.xg being in TestData/FixtureFiles/.");
 
         var file = XgFileReader.ReadFile(path);
 
@@ -445,11 +445,11 @@ public class DiagramRequestIteratorTests
     [Trait("Category", "FileIO")]
     public void IterateDiagramRequests_Match35253054_DepthLabelUsesBestByEquity()
     {
-        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "match35253054.xg");
         if (!File.Exists(path))
             throw new Xunit.Sdk.XunitException(
                 $"Expected fixture not present: {path}. " +
-                "This test depends on match35253054.xg being in TestData/xg/.");
+                "This test depends on match35253054.xg being in TestData/FixtureFiles/.");
 
         var file = XgFileReader.ReadFile(path);
         string sourceFile = Path.GetFileName(path);
@@ -521,11 +521,11 @@ public class DiagramRequestIteratorTests
     [Trait("Category", "FileIO")]
     public void IterateDiagramRequests_Match35253054_PerPlayDepthMatchesEvalLevel()
     {
-        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "match35253054.xg");
         if (!File.Exists(path))
             throw new Xunit.Sdk.XunitException(
                 $"Expected fixture not present: {path}. " +
-                "This test depends on match35253054.xg being in TestData/xg/.");
+                "This test depends on match35253054.xg being in TestData/FixtureFiles/.");
 
         var file = XgFileReader.ReadFile(path);
         string sourceFile = Path.GetFileName(path);
@@ -719,11 +719,11 @@ public class DiagramRequestIteratorTests
     [Trait("Category", "FileIO")]
     public void IterateDiagramRequests_Match35253054_AdjacentPlaysHaveDifferingDepthRanks()
     {
-        string path = Path.Combine(TestPaths.XgDir, "match35253054.xg");
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "match35253054.xg");
         if (!File.Exists(path))
             throw new Xunit.Sdk.XunitException(
                 $"Expected fixture not present: {path}. " +
-                "This test depends on match35253054.xg being in TestData/xg/.");
+                "This test depends on match35253054.xg being in TestData/FixtureFiles/.");
 
         var file = XgFileReader.ReadFile(path);
 
@@ -789,11 +789,11 @@ public class DiagramRequestIteratorTests
     [Trait("Category", "FileIO")]
     public void IterateDiagramRequests_Match35041658_HasCrawfordAndNonCrawfordRequests()
     {
-        string path = Path.Combine(TestPaths.XgDir, "match35041658.xg");
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "match35041658.xg");
         if (!File.Exists(path))
             throw new Xunit.Sdk.XunitException(
                 $"Expected Crawford fixture not present: {path}. " +
-                "Task 1 test depends on match35041658.xg being in TestData/xg/.");
+                "Task 1 test depends on match35041658.xg being in TestData/FixtureFiles/.");
 
         var file = XgFileReader.ReadFile(path);
         var requests = XgDecisionIterator.IterateDiagramRequests(file, "match35041658.xg").ToList();

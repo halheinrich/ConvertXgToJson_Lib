@@ -8,6 +8,10 @@ internal static class TestPaths
     public static string XgDir => Path.Combine(_root, "xg");
     public static string JsonDir => Path.Combine(_root, "json");
     public static string BgDecisionDataDir => Path.Combine(_root, "BgDecisionData");
+    // Single-named fixture files (referenced by an exact filename, not a corpus
+    // glob) live here. Tests that pin behaviour against a specific .xg / .xgp
+    // build their path with FixtureFilesDir; corpus tests keep XgDir / XgpDir.
+    public static string FixtureFilesDir => Path.Combine(_root, "FixtureFiles");
     public static IEnumerable<string> XgpFiles =>
         Directory.EnumerateFiles(XgpDir, "*.xgp");
     public static IEnumerable<string> XgFiles =>
