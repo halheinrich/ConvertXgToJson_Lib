@@ -341,7 +341,8 @@ public static class XgDecisionIterator
             int[] scratchBoard = (int[])board.Clone();
             plays.Add(new PlayCandidate
             {
-                MoveNotation = MoveNotationFormatter.Format(candidateMoves, scratchBoard),
+                MoveNotation = BgMoveGen.MoveNotationFormatter.Format(
+                    XgMoveTranslator.Translate(candidateMoves, scratchBoard)),
                 Depth = candidateDepth,
                 DepthAbbreviation = candidateDepthAbbrev,
                 DepthRank = candidateDepthRank,

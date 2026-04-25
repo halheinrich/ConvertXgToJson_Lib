@@ -19,6 +19,7 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 ## Depends on
 
 * **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`.
+* **BgMoveGen** — `Move` / `Play` value types and `MoveNotationFormatter` for rendering candidate plays as standard backgammon notation. The producer-side bridge between XG's raw `sbyte[]` move encoding and BgMoveGen's `Play` lives here in `XgMoveTranslator`.
 
 ## Directory tree
 
@@ -34,6 +35,7 @@ ConvertXgToJson_Lib/
   XgidEncoder.cs
   XgIteratorState.cs
   XgMatchInfo.cs
+  XgMoveTranslator.cs
   Json/
     XgJsonOptions.cs
   Models/
@@ -119,6 +121,21 @@ Carries cross-row state and caller-controllable early-exit flags:
 * `MatchInfo` / `GameInfo` — populated by the iterator before the first row
   of each match / game.
 * Flags reset at file boundaries.
+
+### XgMoveTranslator
+
+Internal static helper that converts the 8-element `sbyte[]` move
+encoding XG stores in `BestMoveAnalysis.Moves[i]` into a
+`BgMoveGen.Play`. Hits are pre-encoded into `BgMoveGen.Move.ToPt`'s
+sign so `BgMoveGen.MoveNotationFormatter.Format(Play)` can render
+notation without seeing a board. The translator also performs the
+on-roll-board mutation (sending hit blots to the bar), which the
+local `MoveNotationFormatter` used to do inline. Sentinel handling
+matches `Parsing/AfterBoardBuilder` (`from == -1` terminator,
+`from == 24` bar entry, `to < 0` bear off including XG overshoot
+encodings); the `(0, 0)` "dance" sentinel is **not** recognized —
+preserving the prior local formatter's "1/1" garbage rendering of
+no-legal-move decisions, deferred to a follow-up.
 
 ### MatchContext
 
@@ -254,6 +271,15 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `AppContext.BaseDirectory` moves relative to the repo root (e.g. a csproj
   layout change), the five-`..` walk breaks and every file-touching test
   fails. Fix by adjusting `TestPaths`, not by moving `TestData`.
+* **`XgMoveTranslator` does not handle XG's `(0, 0)` dance sentinel.**
+  No-legal-move decisions render as the garbage notation "1/1" today,
+  matching the prior local formatter. The corpus integration test
+  `IterateDiagramRequests_AllBestCandidates_HaveNonEmptyNotation` relies
+  on this by asserting non-empty notation for every analysed move. Adding
+  a dance break in the translator without also relaxing or replacing that
+  test will fail the suite. The right fix is to render a recognizable
+  dance sentinel (e.g. "(no play)") in `XgMoveTranslator` *and* update
+  the test contract — they ship together, not separately.
 
 ## Subproject-internal next steps
 
