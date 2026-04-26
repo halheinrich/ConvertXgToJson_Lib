@@ -121,6 +121,79 @@ public class MatchContextTests
     }
 
     // -----------------------------------------------------------------------
+    //  IsStandardStart — standard vs. non-standard opening positions
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A GameHeaderRecord whose InitialPosition is the canonical opening
+    /// drives IsStandardStart to true. The flag is recomputed per-game from
+    /// the header, so downstream consumers can gate move-number filtering
+    /// on it.
+    /// </summary>
+    [Fact]
+    public void StandardOpeningPosition_IsStandardStartTrue()
+    {
+        var hm = new MatchHeaderRecord { MatchLength = 7 };
+        var gh = new GameHeaderRecord
+        {
+            InitialPosition = new PositionEngine
+            {
+                Points = (sbyte[])BackgammonConstants.StandardOpeningPosition.Clone(),
+            },
+        };
+
+        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null);
+        ctx.Update(gh);
+
+        ctx.IsStandardStart.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// A non-canonical InitialPosition (problem position, Bg960, mid-game
+    /// snapshot, etc.) drives IsStandardStart to false. Uses the all-zeros
+    /// default <see cref="PositionEngine"/> as a representative
+    /// non-standard shape.
+    /// </summary>
+    [Fact]
+    public void NonStandardOpeningPosition_IsStandardStartFalse()
+    {
+        var hm = new MatchHeaderRecord { MatchLength = 7 };
+        var gh = new GameHeaderRecord(); // default InitialPosition is all-zero
+
+        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null);
+        ctx.Update(gh);
+
+        ctx.IsStandardStart.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// IsStandardStart is recomputed per-game: a standard-start game
+    /// followed by a non-standard-start game flips the flag back to false.
+    /// Pins the per-game reset semantic — without it, a stale true from
+    /// game 1 would falsely admit move-number-filtered decisions in
+    /// non-standard later games.
+    /// </summary>
+    [Fact]
+    public void IsStandardStart_ResetPerGame()
+    {
+        var hm = new MatchHeaderRecord { MatchLength = 7 };
+        var standardGh = new GameHeaderRecord
+        {
+            InitialPosition = new PositionEngine
+            {
+                Points = (sbyte[])BackgammonConstants.StandardOpeningPosition.Clone(),
+            },
+        };
+        var nonStandardGh = new GameHeaderRecord();
+
+        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null);
+        ctx.Update(standardGh);
+        ctx.IsStandardStart.Should().BeTrue("standard-start game should set IsStandardStart=true");
+        ctx.Update(nonStandardGh);
+        ctx.IsStandardStart.Should().BeFalse("subsequent non-standard-start game must reset IsStandardStart=false");
+    }
+
+    // -----------------------------------------------------------------------
     //  Helper
     // -----------------------------------------------------------------------
 

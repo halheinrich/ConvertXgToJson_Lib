@@ -69,7 +69,7 @@ public class DecisionCsvTests
                                                    .Where(r => !r.IsCube))
             {
                 row.Roll.Should().NotBe(0,
-                    $"checker play in {matchId} game {row.Game} move {row.MoveNum} should have dice");
+                    $"checker play in {matchId} game {row.Game} move {row.MoveNumber} should have dice");
             }
         }
     }
@@ -186,10 +186,10 @@ public class DecisionCsvTests
 
                 msAway1.Should().Be(row.MatchLength - xgidScore1,
                     $"away1 should be on-roll player's away score in {matchId} " +
-                    $"game {row.Game} move {row.MoveNum} (XGID score1={xgidScore1})");
+                    $"game {row.Game} move {row.MoveNumber} (XGID score1={xgidScore1})");
                 msAway2.Should().Be(row.MatchLength - xgidScore2,
                     $"away2 should be opponent's away score in {matchId} " +
-                    $"game {row.Game} move {row.MoveNum} (XGID score2={xgidScore2})");
+                    $"game {row.Game} move {row.MoveNumber} (XGID score2={xgidScore2})");
             }
         }
     }

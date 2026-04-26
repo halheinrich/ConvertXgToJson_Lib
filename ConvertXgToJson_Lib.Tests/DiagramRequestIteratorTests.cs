@@ -33,21 +33,21 @@ public class DiagramRequestIteratorTests
             // DecisionRow count: cube decisions yield two rows (doubler + taker).
             // DiagramRequest count: cube decisions yield one request.
             // So we need to count unique decisions, not raw rows.
-            // A cube decision produces MoveNum+1 for both rows and Roll==0.
-            // Count unique (Game, MoveNum, Roll==0) cube decisions separately.
+            // A cube decision produces MoveNumber+1 for both rows and Roll==0.
+            // Count unique (Game, MoveNumber, Roll==0) cube decisions separately.
             var decisionRows = XgDecisionIterator.Iterate(file, Path.GetFileName(path)).ToList();
 
             // Unique decision count = move rows + unique cube positions
-            // (cube taker row shares Game/MoveNum with doubler row)
+            // (cube taker row shares Game/MoveNumber with doubler row)
             int uniqueDecisions = decisionRows
-                .GroupBy(r => (r.Game, r.MoveNum, r.IsCube))
+                .GroupBy(r => (r.Game, r.MoveNumber, r.IsCube))
                 .Count();
 
-            // For cube rows, grouping by (Game, MoveNum, IsCube=true) collapses
+            // For cube rows, grouping by (Game, MoveNumber, IsCube=true) collapses
             // doubler+taker into one. That gives the expected DiagramRequest count.
             int cubeGroups = decisionRows
                 .Where(r => r.IsCube)
-                .GroupBy(r => (r.Game, r.MoveNum))
+                .GroupBy(r => (r.Game, r.MoveNumber))
                 .Count();
             int moveCount = decisionRows.Count(r => !r.IsCube);
             int expectedCount = moveCount + cubeGroups;
@@ -802,6 +802,67 @@ public class DiagramRequestIteratorTests
             "match35041658 contains a Crawford game; at least one diagram request must carry IsCrawford=true");
         requests.Any(r => !r.Position.IsCrawford).Should().BeTrue(
             "match35041658 also contains non-Crawford games; at least one diagram request must carry IsCrawford=false");
+    }
+
+    // -----------------------------------------------------------------------
+    //  MoveNumber and IsStandardStart propagation
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every emitted diagram request across the .xg corpus has
+    /// <c>Descriptive.MoveNumber &gt;= 1</c>. Move requests source from
+    /// <c>ctx.MoveNumber</c> after MatchContext has incremented it; cube
+    /// requests use <c>ctx.MoveNumber + 1</c>, so even an opening cube
+    /// decision yields 1. A request with MoveNumber == 0 indicates the
+    /// new Descriptive field was not populated.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_AllRequests_DescriptiveMoveNumberAtLeastOne()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile))
+            {
+                req.Descriptive.MoveNumber.Should().BeGreaterThanOrEqualTo(1,
+                    $"{sourceFile}: every diagram request must have Descriptive.MoveNumber >= 1");
+                // The IDecisionFilterData forwarding accessor must agree.
+                req.MoveNumber.Should().Be(req.Descriptive.MoveNumber,
+                    $"{sourceFile}: BgDecisionData.MoveNumber must forward Descriptive.MoveNumber");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>match35041658.xg</c> and <c>match35253054.xg</c> are full-match
+    /// XG files where every game starts from the canonical opening
+    /// position. Every emitted diagram request must therefore carry
+    /// <c>Descriptive.IsStandardStart == true</c>. Mirrors the DecisionRow
+    /// corpus assertion for the BgDecisionData path.
+    /// </summary>
+    [Theory]
+    [InlineData("match35041658.xg")]
+    [InlineData("match35253054.xg")]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_StandardStartFixture_AllRequestsIsStandardStartTrue(string fixtureName)
+    {
+        string path = Path.Combine(TestPaths.FixtureFilesDir, fixtureName);
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}");
+
+        var file = XgFileReader.ReadFile(path);
+        var requests = XgDecisionIterator.IterateDiagramRequests(file, fixtureName).ToList();
+
+        requests.Should().NotBeEmpty($"{fixtureName} should yield at least one diagram request");
+        requests.Should().OnlyContain(r => r.Descriptive.IsStandardStart,
+            $"{fixtureName} starts every game from the canonical opening; " +
+            "every BgDecisionData must carry Descriptive.IsStandardStart=true");
+        requests.Should().OnlyContain(r => r.IsStandardStart,
+            $"{fixtureName}: BgDecisionData.IsStandardStart must forward Descriptive.IsStandardStart");
     }
 
     // -----------------------------------------------------------------------

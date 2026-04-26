@@ -38,7 +38,7 @@ public class BoardTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
-                string loc = $"[{Path.GetFileName(path)} Game {row.Game} Move {row.MoveNum}]";
+                string loc = $"[{Path.GetFileName(path)} Game {row.Game} Move {row.MoveNumber}]";
                 int onRoll = row.Board.Where(v => v > 0).Sum();
                 int opponent = row.Board.Where(v => v < 0).Sum(Math.Abs);
                 onRoll.Should().BeInRange(1, 15, $"player on roll checker count {loc}");
@@ -59,7 +59,7 @@ public class BoardTests
             {
                 row.Board[0].Should().BeLessOrEqualTo(0,
                     $"board[0] is opponent bar — never positive [{Path.GetFileName(path)} " +
-                    $"Game {row.Game} Move {row.MoveNum}]");
+                    $"Game {row.Game} Move {row.MoveNumber}]");
             }
         }
     }
@@ -76,7 +76,7 @@ public class BoardTests
             {
                 row.Board[25].Should().BeGreaterOrEqualTo(0,
                     $"board[25] is player on roll bar — never negative [{Path.GetFileName(path)} " +
-                    $"Game {row.Game} Move {row.MoveNum}]");
+                    $"Game {row.Game} Move {row.MoveNumber}]");
             }
         }
     }
@@ -95,7 +95,7 @@ public class BoardTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
-                string loc = $"[{Path.GetFileName(path)} Game {row.Game} Move {row.MoveNum}]";
+                string loc = $"[{Path.GetFileName(path)} Game {row.Game} Move {row.MoveNumber}]";
                 int onRoll = row.Board.Where(v => v > 0).Sum();
                 int opponent = row.Board.Where(v => v < 0).Sum(Math.Abs);
                 onRoll.Should().BeInRange(1, 15, $"player on roll checker count {loc}");
@@ -116,7 +116,7 @@ public class BoardTests
             {
                 row.Board[0].Should().BeLessOrEqualTo(0,
                     $"board[0] is opponent bar — never positive [{Path.GetFileName(path)} " +
-                    $"Game {row.Game} Move {row.MoveNum}]");
+                    $"Game {row.Game} Move {row.MoveNumber}]");
             }
         }
     }
@@ -133,7 +133,7 @@ public class BoardTests
             {
                 row.Board[25].Should().BeGreaterOrEqualTo(0,
                     $"board[25] is player on roll bar — never negative [{Path.GetFileName(path)} " +
-                    $"Game {row.Game} Move {row.MoveNum}]");
+                    $"Game {row.Game} Move {row.MoveNumber}]");
             }
         }
     }

@@ -23,6 +23,15 @@ internal sealed class MatchContext
     public int MoveNumber { get; private set; }
     public int MaxCubeLimit { get; private set; } = 6;
 
+    /// <summary>
+    /// True when the current game began from the canonical opening position.
+    /// Set per-game from <see cref="GameHeaderRecord.InitialPosition"/>; consumers
+    /// downstream gate move-number filtering on this so non-standard starts
+    /// (problem positions, Bg960, etc.) don't get filtered by 1-based move
+    /// numbers that no longer correspond to a real game opening.
+    /// </summary>
+    public bool IsStandardStart { get; private set; }
+
     private string _player1 = "Player 1";
     private string _player2 = "Player 2";
 //    private bool _lastWasDoubleTake;
@@ -60,6 +69,7 @@ internal sealed class MatchContext
                 Score1 = gh.Score1;
                 Score2 = gh.Score2;
                 IsCrawford = MatchLength > 0 && gh.CrawfordApplies;
+                IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition);
                 CubeValue = 1;
                 CubePosition = 0;
                 break;

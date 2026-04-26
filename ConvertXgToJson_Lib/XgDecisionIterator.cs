@@ -51,7 +51,7 @@ public static class XgDecisionIterator
                         Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
                         Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
                         IsCrawfordGame = gh.CrawfordApplies,
-                        IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition),
+                        IsStandardStart = context.IsStandardStart,
                     };
                 }
                 continue;
@@ -116,7 +116,7 @@ public static class XgDecisionIterator
                         Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
                         Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
                         IsCrawfordGame = gh.CrawfordApplies,
-                        IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition),
+                        IsStandardStart = context.IsStandardStart,
                     };
                 }
                 continue;
@@ -272,7 +272,8 @@ public static class XgDecisionIterator
             Player = ctx.PlayerName(move.ActivePlayer),
             SourceFile = ctx.SourceFile,
             Game = ctx.GameNumber,
-            MoveNum = ctx.MoveNumber,
+            MoveNumber = ctx.MoveNumber,
+            IsStandardStart = ctx.IsStandardStart,
             Roll = dice,
             AnalysisDepth = depth,
             Equity = bestEval.Equity,
@@ -386,6 +387,8 @@ public static class XgDecisionIterator
                 OnRollName = ctx.PlayerName(move.ActivePlayer),
                 OpponentName = ctx.PlayerName(-move.ActivePlayer),
                 SourceFile = ctx.SourceFile,
+                MoveNumber = ctx.MoveNumber,
+                IsStandardStart = ctx.IsStandardStart,
             },
             Outcome = new PlayOutcomeData
             {
@@ -444,7 +447,8 @@ public static class XgDecisionIterator
             Player = ctx.PlayerName(cube.ActivePlayer),
             SourceFile = ctx.SourceFile,
             Game = ctx.GameNumber,
-            MoveNum = ctx.MoveNumber + 1,
+            MoveNumber = ctx.MoveNumber + 1,
+            IsStandardStart = ctx.IsStandardStart,
             Roll = 0,
             AnalysisDepth = depth,
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
@@ -518,6 +522,8 @@ public static class XgDecisionIterator
                 OnRollName = ctx.PlayerName(cube.ActivePlayer),
                 OpponentName = ctx.PlayerName(-cube.ActivePlayer),
                 SourceFile = ctx.SourceFile,
+                MoveNumber = ctx.MoveNumber + 1,
+                IsStandardStart = ctx.IsStandardStart,
             },
             // Cube decisions carry no play; PlayOutcomeData contract requires
             // both after-boards empty. Explicit for producer intent.

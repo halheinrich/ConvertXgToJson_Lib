@@ -413,10 +413,10 @@ public class XgDecisionIteratorTests
 
                 msAway1.Should().Be(expectedAway1,
                     $"away1 should be on-roll player's away score in {Path.GetFileName(path)} " +
-                    $"game {row.Game} move {row.MoveNum} (XGID score1={xgidScore1})");
+                    $"game {row.Game} move {row.MoveNumber} (XGID score1={xgidScore1})");
                 msAway2.Should().Be(expectedAway2,
                     $"away2 should be opponent's away score in {Path.GetFileName(path)} " +
-                    $"game {row.Game} move {row.MoveNum} (XGID score2={xgidScore2})");
+                    $"game {row.Game} move {row.MoveNumber} (XGID score2={xgidScore2})");
             }
         }
     }
@@ -529,7 +529,7 @@ public class XgDecisionIteratorTests
             double rank0Equity = analysis.Evals[0].Equity;
 
             row.Equity.Should().BeApproximately(maxEquity, 1e-9,
-                $"{sourceFile} game {row.Game} move {row.MoveNum}: " +
+                $"{sourceFile} game {row.Game} move {row.MoveNumber}: " +
                 $"DecisionRow.Equity must be the highest equity in the candidate set");
 
             if (bestIdx != 0 || maxEquity > rank0Equity)
@@ -539,6 +539,64 @@ public class XgDecisionIteratorTests
         divergingDecisions.Should().BeGreaterThan(0,
             $"{sourceFile} must contain at least one decision where XG-native rank 0 " +
             "disagrees with best-by-equity; otherwise this test passes vacuously.");
+    }
+
+    // -----------------------------------------------------------------------
+    //  MoveNumber and IsStandardStart propagation
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every emitted DecisionRow across the .xg corpus has
+    /// <c>MoveNumber &gt;= 1</c>. Move rows pick up MoveNumber after
+    /// <c>MatchContext.Update</c> has incremented it; cube rows use
+    /// <c>ctx.MoveNumber + 1</c>, so even an opening cube decision (no
+    /// preceding move) yields 1. A row with MoveNumber == 0 indicates the
+    /// new field was not populated from the context.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void Iterate_AllRows_MoveNumberAtLeastOne()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
+            {
+                row.MoveNumber.Should().BeGreaterThanOrEqualTo(1,
+                    $"{sourceFile} game {row.Game}: every decision row must have MoveNumber >= 1");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>match35041658.xg</c> and <c>match35253054.xg</c> are full-match
+    /// XG files where every game starts from the canonical opening
+    /// position. Every emitted DecisionRow must therefore carry
+    /// <c>IsStandardStart == true</c>. Pins MatchContext-&gt;DecisionRow
+    /// flow for the new field; a regression here would manifest as
+    /// downstream MoveNumberFilter (Session 3) silently rejecting all
+    /// match decisions.
+    /// </summary>
+    [Theory]
+    [InlineData("match35041658.xg")]
+    [InlineData("match35253054.xg")]
+    [Trait("Category", "FileIO")]
+    public void Iterate_StandardStartFixture_AllRowsIsStandardStartTrue(string fixtureName)
+    {
+        string path = Path.Combine(TestPaths.FixtureFilesDir, fixtureName);
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}");
+
+        var file = XgFileReader.ReadFile(path);
+        var rows = XgDecisionIterator.Iterate(file, fixtureName).ToList();
+
+        rows.Should().NotBeEmpty($"{fixtureName} should yield at least one row");
+        rows.Should().OnlyContain(r => r.IsStandardStart,
+            $"{fixtureName} starts every game from the canonical opening; " +
+            "every DecisionRow must carry IsStandardStart=true");
     }
 
     // -----------------------------------------------------------------------
