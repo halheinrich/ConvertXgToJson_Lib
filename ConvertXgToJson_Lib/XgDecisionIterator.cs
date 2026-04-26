@@ -145,9 +145,12 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Yields all decisions from every .xg file in <paramref name="xgDir"/>.
+    /// Yields all decisions from every XG-format file in
+    /// <paramref name="xgDir"/> — both <c>.xg</c> match files and
+    /// <c>.xgp</c> position files. <see cref="XgFileReader.ReadFile"/>
+    /// detects format from file content, so per-file handling is uniform.
     /// </summary>
-    /// <param name="xgDir">Directory containing .xg files.</param>
+    /// <param name="xgDir">Directory containing .xg and/or .xgp files.</param>
     /// <param name="state">
     /// Optional early-exit state. <see cref="XgIteratorState.AdvanceNextMatch"/>
     /// and <see cref="XgIteratorState.MatchInfo"/> are reset at the start of each
@@ -159,7 +162,7 @@ public static class XgDecisionIterator
         string xgDir,
         XgIteratorState? state = null)
     {
-        foreach (var path in Directory.EnumerateFiles(xgDir, "*.xg"))
+        foreach (var path in EnumerateXgFormatFiles(xgDir))
         {
             if (state != null)
             {
@@ -798,6 +801,19 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Enumerates all XG-format files in a directory: both <c>*.xg</c>
+    /// (match files) and <c>*.xgp</c> (position files). Order is .xg
+    /// first then .xgp; within each extension, filesystem order
+    /// (non-deterministic per OS). Two separate enumerations rather than
+    /// a <c>*.xg*</c> glob — the broader pattern would also match
+    /// hypothetical .xgz, .xgr, etc. files, which we don't assume are
+    /// XG-format.
+    /// </summary>
+    private static IEnumerable<string> EnumerateXgFormatFiles(string xgDir) =>
+        Directory.EnumerateFiles(xgDir, "*.xg")
+            .Concat(Directory.EnumerateFiles(xgDir, "*.xgp"));
 
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;

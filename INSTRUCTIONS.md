@@ -91,6 +91,15 @@ Two iteration surfaces over the same underlying record stream:
   yield exactly **one** `BgDecisionData`, not two — the doubler and the taker
   share a single record.
 
+`IterateXgDirectory` is the directory-level entry point: it enumerates
+both `*.xg` (match files) and `*.xgp` (position files) — both formats
+are XG-native and `XgFileReader` handles them uniformly, so callers
+that point at a directory of mixed XG content get all decisions
+regardless of extension. `IterateJsonDirectory` is the parallel
+entry point for `*.json` exports. Two explicit `Directory.EnumerateFiles`
+calls rather than a `*.xg*` glob: the broader pattern would also match
+hypothetical `.xgz` / `.xgr` files we don't assume are XG-format.
+
 Both surfaces report the "best play" as the **highest-equity** candidate in
 `analysis.Evals[]`, not XG-native rank 0. `BgDecisionData.Plays[0]`,
 `DecisionRow.Equity`, and `PlayOutcomeData.AfterBestBoard` all key off this

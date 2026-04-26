@@ -137,6 +137,58 @@ public class XgDecisionIteratorTests
             "only the first decision should be yielded after AdvanceNextMatch is set");
     }
 
+    // -----------------------------------------------------------------------
+    //  IterateXgDirectory file selection
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// IterateXgDirectory must enumerate both <c>*.xg</c> match files and
+    /// <c>*.xgp</c> position files — both formats are valid XG-native
+    /// inputs and downstream consumers (e.g. LocalFolderProcessor) treat
+    /// them as a single supported set. Regression guard: prior to this
+    /// test, the iterator filtered to <c>*.xg</c> only and silently
+    /// skipped every <c>.xgp</c>.
+    ///
+    /// <para>
+    /// Self-contained: copies one fixture of each extension into a fresh
+    /// temp directory and iterates it. Avoids touching <c>TestData/xg/</c>
+    /// (which is partitioned by extension by convention).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void IterateXgDirectory_IncludesBothXgAndXgpFiles()
+    {
+        const string xgFixture = "match35041658.xg";
+        const string xgpFixture = "PlayAnalysis.xgp";
+        string xgSource = Path.Combine(TestPaths.FixtureFilesDir, xgFixture);
+        string xgpSource = Path.Combine(TestPaths.FixtureFilesDir, xgpFixture);
+
+        if (!File.Exists(xgSource) || !File.Exists(xgpSource))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixtures missing: {xgSource} and/or {xgpSource}.");
+
+        string tempDir = Path.Combine(Path.GetTempPath(), "ConvertXgToJson_Lib.Tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.Copy(xgSource, Path.Combine(tempDir, xgFixture));
+            File.Copy(xgpSource, Path.Combine(tempDir, xgpFixture));
+
+            var rows = XgDecisionIterator.IterateXgDirectory(tempDir).ToList();
+
+            var sourceFiles = rows.Select(r => r.SourceFile).Distinct().ToList();
+            sourceFiles.Should().Contain(xgFixture,
+                "IterateXgDirectory must yield rows from .xg match files");
+            sourceFiles.Should().Contain(xgpFixture,
+                "IterateXgDirectory must yield rows from .xgp position files — " +
+                "the prior *.xg-only filter silently skipped these");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
     /// <summary>
     /// AdvanceNextMatch set during directory iteration does not bleed into
     /// the next file — subsequent files still yield rows.
