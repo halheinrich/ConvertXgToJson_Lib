@@ -34,8 +34,8 @@ public class DepthResolutionTests
     [InlineData((short)1000, "XG Roller",   "R",         20)]
     [InlineData((short)1001, "XG Roller+",  "R+",        21)]
     [InlineData((short)1002, "XG Roller++", "R++",       22)]
-    [InlineData((short)998,  "Book V1",     "B1",        0)]
-    [InlineData((short)999,  "Book V2",     "B2",        0)]
+    [InlineData((short)998,  "Book V1",     "Book",      0)]
+    [InlineData((short)999,  "Book V2",     "Book",      0)]
     public void ResolveDepthInfo_NonRollout_KnownLevels(
         short level, string expectedLabel, string expectedAbbrev, int expectedRank)
     {

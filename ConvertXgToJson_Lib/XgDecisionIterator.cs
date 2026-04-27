@@ -860,8 +860,10 @@ public static class XgDecisionIterator
     /// <summary>
     /// Compact display form of <see cref="LevelLabel"/>, sized for narrow
     /// table cells. N-ply labels are kept intact (short enough already);
-    /// XG Roller family collapses to R / R+ / R++; Book V1/V2 collapses
-    /// to B1 / B2. The Rollout sentinel (<c>short 100</c>) without a
+    /// XG Roller family collapses to R / R+ / R++; Book V1 and Book V2
+    /// both collapse to "Book" — the version distinction is preserved in
+    /// the full <see cref="LevelLabel"/> but isn't surfaced in the
+    /// compact column. The Rollout sentinel (<c>short 100</c>) without a
     /// matching rollout context abbreviates to "Ro" — the normal rollout
     /// path goes through <see cref="ResolveDepthInfo"/>'s rollout branch
     /// and never hits this code.
@@ -880,8 +882,8 @@ public static class XgDecisionIterator
         1000 => "R",
         1001 => "R+",
         1002 => "R++",
-        998 => "B1",
-        999 => "B2",
+        998 => "Book",
+        999 => "Book",
         _ => $"level-{level}",
     };
 
