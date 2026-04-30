@@ -306,10 +306,10 @@ public static class XgDecisionIterator
 
         // XG stores candidates in its native ranking order, which is not
         // strict equity-descending: a rank-2 candidate can have higher equity
-        // than rank-0. Sort by equity so Plays[0] is truly best, EquityLoss is
-        // non-negative throughout, and the renderer's equity column reads
-        // monotonically. OrderByDescending is stable, preserving XG's order
-        // for ties.
+        // than rank-0. Sort by equity so Plays[0] is truly best, EquityLoss
+        // (= bestEquity - candidateEquity) is non-negative throughout, and
+        // the renderer's equity column reads monotonically. OrderByDescending
+        // is stable, preserving XG's order for ties.
         int n = Math.Min(analysis.MoveCount, analysis.Evals.Length);
         int[] sortedIdx = Enumerable.Range(0, n)
             .OrderByDescending(i => analysis.Evals[i].Equity)
@@ -341,17 +341,20 @@ public static class XgDecisionIterator
                 rolloutIndex: i < move.RolloutIndices.Length ? move.RolloutIndices[i] : -1,
                 rollouts: rollouts);
             // Each candidate gets its own scratch board so hit-tracking in
-            // one candidate doesn't leak into the next.
+            // one candidate doesn't leak into the next. Translate once and
+            // share the resulting Play between MoveNotation (rendered form)
+            // and Play (structural form) so the two views can never disagree.
             int[] scratchBoard = (int[])board.Clone();
+            Play candidatePlay = XgMoveTranslator.Translate(candidateMoves, scratchBoard);
             plays.Add(new PlayCandidate
             {
-                MoveNotation = BgMoveGen.MoveNotationFormatter.Format(
-                    XgMoveTranslator.Translate(candidateMoves, scratchBoard)),
+                MoveNotation = BgMoveGen.MoveNotationFormatter.Format(candidatePlay),
+                Play = candidatePlay,
                 Depth = candidateDepth,
                 DepthAbbreviation = candidateDepthAbbrev,
                 DepthRank = candidateDepthRank,
                 Equity = equity,
-                EquityLoss = k == 0 ? null : bestEquity - equity,
+                EquityLoss = bestEquity - equity,
                 IsUserPlay = k == userPlayIndex,
                 WinPct = eval.WinSingle,
                 WinGammonPct = eval.WinGammon,

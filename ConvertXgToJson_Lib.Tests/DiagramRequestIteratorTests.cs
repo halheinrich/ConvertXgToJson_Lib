@@ -346,16 +346,19 @@ public class DiagramRequestIteratorTests
 
     /// <summary>
     /// For every move request across the .xg corpus, <c>Plays</c> is sorted
-    /// strict-descending by equity, <c>Plays[0].EquityLoss</c> is null, and
-    /// every subsequent entry has <c>EquityLoss &gt; 0</c>. XG stores
-    /// candidates in its native ranking order, which is not always strict
-    /// equity-descending — an unsorted list produces negative EquityLoss on
-    /// any candidate whose equity exceeds rank-0's, which the renderer
-    /// correctly suppresses as blank cells.
+    /// descending by equity, <c>Plays[0].EquityLoss</c> is <c>0.0</c> (the
+    /// best play has no loss vs. itself), and every subsequent entry has
+    /// <c>EquityLoss &gt;= 0</c>. XG stores candidates in its native ranking
+    /// order, which is not always strict equity-descending — an unsorted
+    /// list produces negative EquityLoss on any candidate whose equity
+    /// exceeds rank-0's, which the renderer correctly suppresses as blank
+    /// cells. <see cref="PlayCandidate.EquityLoss"/> is non-nullable post
+    /// the BgDataTypes_Lib relocation; <c>0.0</c> is the test for "is this
+    /// a best play" and ties may share zero.
     /// </summary>
     [Fact]
     [Trait("Category", "FileIO")]
-    public void IterateDiagramRequests_Plays_StrictDescendingEquity()
+    public void IterateDiagramRequests_Plays_DescendingEquityWithZeroLossAtTop()
     {
         foreach (var path in TestPaths.XgFiles)
         {
@@ -368,8 +371,8 @@ public class DiagramRequestIteratorTests
                 var plays = req.Decision.Plays;
                 if (plays.Count == 0) continue;
 
-                plays[0].EquityLoss.Should().BeNull(
-                    $"{sourceFile}: Plays[0].EquityLoss must be null (the best play has no loss)");
+                plays[0].EquityLoss.Should().Be(0.0,
+                    $"{sourceFile}: Plays[0].EquityLoss must be 0.0 (the best play has no loss)");
 
                 for (int i = 1; i < plays.Count; i++)
                 {
@@ -377,14 +380,131 @@ public class DiagramRequestIteratorTests
                         $"{sourceFile}: Plays must be sorted descending by equity " +
                         $"(Plays[{i - 1}].Equity={plays[i - 1].Equity} vs Plays[{i}].Equity={plays[i].Equity})");
 
-                    plays[i].EquityLoss.Should().NotBeNull(
-                        $"{sourceFile}: Plays[{i}].EquityLoss must be populated");
-                    plays[i].EquityLoss!.Value.Should().BeGreaterThanOrEqualTo(0,
+                    plays[i].EquityLoss.Should().BeGreaterThanOrEqualTo(0,
                         $"{sourceFile}: Plays[{i}].EquityLoss must be non-negative after sorting " +
                         $"(got {plays[i].EquityLoss})");
                 }
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    //  PlayCandidate.Play population
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every <see cref="PlayCandidate"/> emitted for an analysed move
+    /// decision must have its <see cref="PlayCandidate.Play"/> populated —
+    /// <c>Count &gt; 0</c>. The Play is the structural counterpart to
+    /// <see cref="PlayCandidate.MoveNotation"/>, sourced from the same
+    /// <see cref="XgMoveTranslator"/> output, and is what downstream
+    /// consumers (e.g. BgQuiz_Blazor's submitted-play structural matching)
+    /// key off. A regression that drops the <c>Play = …</c> initializer
+    /// would leave default <c>Play</c> values (Count == 0) on every
+    /// candidate; this corpus-wide check catches that.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_AllCandidates_HavePopulatedPlay()
+    {
+        int candidatesChecked = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile)
+                                                    .Where(r => !r.Decision.IsCube))
+            {
+                foreach (var play in req.Decision.Plays)
+                {
+                    play.Play.Count.Should().BeGreaterThan(0,
+                        $"{sourceFile}: every PlayCandidate must have Play populated " +
+                        $"(MoveNotation='{play.MoveNotation}')");
+                    candidatesChecked++;
+                }
+            }
+        }
+
+        candidatesChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed move candidate; " +
+            "otherwise this test passes vacuously.");
+    }
+
+    /// <summary>
+    /// Pins the structural correctness of <see cref="PlayCandidate.Play"/>
+    /// against a known fixture: <c>Opening 32 65 64 31 65.xgp</c>. The
+    /// first analysed decision is a 6-5 roll with 25 candidates; this test
+    /// asserts specific <c>(FrPt, ToPt)</c> pairs on two of them, chosen
+    /// to cover the structural facts that distinguish <c>Play</c> from
+    /// <c>MoveNotation</c>:
+    ///
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <c>Plays[0]</c> renders as <c>"24/13"</c> (a single combined-die
+    ///     leg) but the structural <c>Play</c> contains <b>two</b> sub-moves
+    ///     <c>(24, 18)</c> and <c>(18, 13)</c>. The notation collapses the
+    ///     chain; the <see cref="Play"/> preserves it. Catches a regression
+    ///     where the producer hands a single-leg <c>Play</c> to the
+    ///     formatter (would yield the same notation but lose the structural
+    ///     signal downstream consumers rely on).
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>Plays[2]</c> renders as <c>"7/1* 6/1"</c> — a hit on point 1
+    ///     followed by a non-hit landing on the same point. The structural
+    ///     <c>Play</c> encodes the hit via the sign on <c>ToPt</c>:
+    ///     <c>(7, -1)</c> is the hit, <c>(6, 1)</c> is plain. Catches a
+    ///     regression where hit detection is dropped (would yield
+    ///     <c>(7, 1)</c>, both legs unmarked, and the formatter would
+    ///     re-collapse them).
+    ///   </description></item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_OpeningFixture_FirstDecisionPlayMovesMatchExpected()
+    {
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "Opening 32 65 64 31 65.xgp");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on the opening-roll fixture in TestData/FixtureFiles/.");
+
+        var file = XgFileReader.ReadFile(path);
+        var firstMove = XgDecisionIterator
+            .IterateDiagramRequests(file, Path.GetFileName(path))
+            .First(r => !r.Decision.IsCube);
+
+        firstMove.Decision.Dice.Should().BeEquivalentTo(new[] { 6, 5 },
+            options => options.WithStrictOrdering(),
+            "the first analysed move decision in this fixture is a 6-5 roll");
+
+        var plays = firstMove.Decision.Plays;
+        plays.Count.Should().BeGreaterThanOrEqualTo(3,
+            "fixture must yield at least three candidates for the spot-check");
+
+        // [0] best play — chain-collapsed notation, two-sub-move Play.
+        plays[0].MoveNotation.Should().Be("24/13",
+            "Plays[0] renders the combined-die leg as a single chain");
+        plays[0].Play.Count.Should().Be(2,
+            "Plays[0].Play preserves the two structural sub-moves the notation collapses");
+        plays[0].Play[0].Should().Be(new Move(24, 18),
+            "first sub-move uses the larger die from point 24");
+        plays[0].Play[1].Should().Be(new Move(18, 13),
+            "second sub-move continues the same checker to point 13");
+        plays[0].EquityLoss.Should().Be(0.0,
+            "Plays[0] is the best play — EquityLoss == 0.0 post the BgDataTypes_Lib relocation");
+
+        // [2] hit play — hit encoded via negative ToPt.
+        plays[2].MoveNotation.Should().Be("7/1* 6/1",
+            "Plays[2] hits the opponent blot on point 1 and lands a second checker there");
+        plays[2].Play.Count.Should().Be(2,
+            "Plays[2].Play has two distinct sub-moves (no chain to collapse)");
+        plays[2].Play[0].Should().Be(new Move(7, -1),
+            "first sub-move hits — ToPt is sign-encoded as -1 to flag the hit on point 1");
+        plays[2].Play[1].Should().Be(new Move(6, 1),
+            "second sub-move lands on point 1 plain (the blot is already on the bar)");
     }
 
     /// <summary>

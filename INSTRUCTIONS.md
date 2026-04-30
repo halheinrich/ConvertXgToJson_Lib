@@ -18,8 +18,8 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 
 ## Depends on
 
-* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`.
-* **BgMoveGen** — `Move` / `Play` value types and `MoveNotationFormatter` for rendering candidate plays as standard backgammon notation. The producer-side bridge between XG's raw `sbyte[]` move encoding and BgMoveGen's `Play` lives here in `XgMoveTranslator`.
+* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`. Also the `Move` / `Play` value types — these moved here from `BgMoveGen` so non-move-gen consumers can use them without dragging in the generator.
+* **BgMoveGen** — `MoveNotationFormatter` for rendering candidate plays as standard backgammon notation. The producer-side bridge between XG's raw `sbyte[]` move encoding and the shared `Play` primitive lives here in `XgMoveTranslator`.
 
 ## Directory tree
 
@@ -135,12 +135,17 @@ Carries cross-row state and caller-controllable early-exit flags:
 
 Internal static helper that converts the 8-element `sbyte[]` move
 encoding XG stores in `BestMoveAnalysis.Moves[i]` into a
-`BgMoveGen.Play`. Hits are pre-encoded into `BgMoveGen.Move.ToPt`'s
-sign so `BgMoveGen.MoveNotationFormatter.Format(Play)` can render
-notation without seeing a board. The translator also performs the
+`BgDataTypes_Lib.Play`. Hits are pre-encoded into
+`BgDataTypes_Lib.Move.ToPt`'s sign so
+`BgMoveGen.MoveNotationFormatter.Format(Play)` can render notation
+without seeing a board. The translator also performs the
 on-roll-board mutation (sending hit blots to the bar), which the
-local `MoveNotationFormatter` used to do inline. Sentinel handling
-matches `Parsing/AfterBoardBuilder` (`from == -1` terminator,
+local `MoveNotationFormatter` used to do inline. The translator's
+output is consumed once per candidate by `BuildMoveDiagramRequest`
+and feeds both `PlayCandidate.MoveNotation` (rendered) and
+`PlayCandidate.Play` (structural) — single producer call, single
+scratch-board mutation. Sentinel handling matches
+`Parsing/AfterBoardBuilder` (`from == -1` terminator,
 `from == 24` bar entry, `to < 0` bear off including XG overshoot
 encodings); the `(0, 0)` "dance" sentinel is **not** recognized —
 preserving the prior local formatter's "1/1" garbage rendering of

@@ -1,11 +1,11 @@
-using BgMoveGen;
+using BgDataTypes_Lib;
 
 namespace ConvertXgToJson_Lib;
 
 /// <summary>
 /// Translates XG's raw per-candidate move encoding into a
-/// <see cref="BgMoveGen.Play"/> with hits pre-encoded into
-/// <see cref="BgMoveGen.Move.ToPt"/>'s sign, ready to hand to
+/// <see cref="BgDataTypes_Lib.Play"/> with hits pre-encoded into
+/// <see cref="BgDataTypes_Lib.Move.ToPt"/>'s sign, ready to hand to
 /// <see cref="BgMoveGen.MoveNotationFormatter.Format(Play)"/>.
 ///
 /// <para>
@@ -29,8 +29,8 @@ namespace ConvertXgToJson_Lib;
 /// scratch copy if it needs to preserve the original — this method
 /// mutates the array. Mirrors the producer-side hit semantics that
 /// previously lived inline in the local <c>MoveNotationFormatter</c>;
-/// surfacing it on the translator keeps <see cref="BgMoveGen"/>
-/// board-agnostic.
+/// surfacing it on the translator keeps the formatter (and the
+/// underlying <see cref="BgDataTypes_Lib.Play"/> primitive) board-agnostic.
 /// </para>
 ///
 /// <para>
