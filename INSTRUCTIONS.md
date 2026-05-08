@@ -285,15 +285,25 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `AppContext.BaseDirectory` moves relative to the repo root (e.g. a csproj
   layout change), the five-`..` walk breaks and every file-touching test
   fails. Fix by adjusting `TestPaths`, not by moving `TestData`.
-* **`XgMoveTranslator` does not handle XG's `(0, 0)` dance sentinel.**
-  No-legal-move decisions render as the garbage notation "1/1" today,
-  matching the prior local formatter. The corpus integration test
-  `IterateDiagramRequests_AllBestCandidates_HaveNonEmptyNotation` relies
-  on this by asserting non-empty notation for every analysed move. Adding
-  a dance break in the translator without also relaxing or replacing that
-  test will fail the suite. The right fix is to render a recognizable
-  dance sentinel (e.g. "(no play)") in `XgMoveTranslator` *and* update
-  the test contract — they ship together, not separately.
+* **Sentinel-only analyses are filtered at the iterator boundary, not in
+  the leaves.** XG emits two known patterns where the lone "candidate" in
+  `BestMoveAnalysis.Moves[best]` is a non-play sentinel pair:
+  `(-100, -100)` is XG's *illegal-play workaround* (the recorded play in
+  the source file is illegal, XG forces the next position rather than
+  refusing to load), and `(0, 0)` is XG's *no-legal-move* (dance)
+  encoding. Neither is of interest downstream — there is no real
+  candidate to evaluate — and feeding either to leaf computation has
+  historically produced an `IndexOutOfRangeException` (the `(-100, -100)`
+  case in `AfterBoardBuilder.ComputeAfterBoard`) or a "1/1" notation
+  glitch (the `(0, 0)` case in `XgMoveTranslator.Translate`). Both surfaces
+  (`Iterate` and `IterateDiagramRequests`) gate emission through
+  `IsSentinelOnlyAnalysis` so neither leaf ever sees a sentinel. The
+  existing `(0, 0)` no-op branch in `AfterBoardBuilder` is retained as
+  defense-in-depth — it is unreachable on the standard iterator path but
+  still exercised by `AfterBoardBuilderTests`. Do not add a `(-100, -100)`
+  branch to either leaf; the encapsulation principle is that sentinel
+  semantics belong with the iterator that decides what to emit, not with
+  the leaf that operates on the resulting move encoding.
 
 ## Subproject-internal next steps
 

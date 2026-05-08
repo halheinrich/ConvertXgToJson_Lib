@@ -571,6 +571,7 @@ public class XgDecisionIteratorTests
         {
             var analysis = rec.Analysis;
             if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+            if (XgDecisionIterator.IsSentinelOnlyAnalysis(analysis)) continue;
 
             rowEnum.MoveNext().Should().BeTrue(
                 $"{sourceFile}: expected a DecisionRow for analysed move");

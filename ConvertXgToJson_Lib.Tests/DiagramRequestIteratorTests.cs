@@ -535,6 +535,7 @@ public class DiagramRequestIteratorTests
         {
             var analysis = rec.Analysis;
             if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+            if (XgDecisionIterator.IsSentinelOnlyAnalysis(analysis)) continue;
 
             double rank0 = analysis.Evals[0].Equity;
             for (int i = 1; i < analysis.MoveCount && i < analysis.Evals.Length; i++)
@@ -585,6 +586,7 @@ public class DiagramRequestIteratorTests
             {
                 var analysis = move.Analysis;
                 if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                if (XgDecisionIterator.IsSentinelOnlyAnalysis(analysis)) continue;
                 int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
                 if (dice == 0) continue; // BuildMoveDiagramRequest skips dice==0
 
@@ -661,6 +663,7 @@ public class DiagramRequestIteratorTests
             {
                 var analysis = move.Analysis;
                 if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                if (XgDecisionIterator.IsSentinelOnlyAnalysis(analysis)) continue;
                 int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
                 if (dice == 0) continue;
 
@@ -736,6 +739,7 @@ public class DiagramRequestIteratorTests
                 {
                     var analysis = move.Analysis;
                     if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                    if (XgDecisionIterator.IsSentinelOnlyAnalysis(analysis)) continue;
                     int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
                     if (dice == 0) continue;
                     reqEnum.MoveNext();
@@ -1100,6 +1104,7 @@ public class DiagramRequestIteratorTests
                 {
                     var analysis = move.Analysis;
                     if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
+                    if (XgDecisionIterator.IsSentinelOnlyAnalysis(analysis)) continue;
                     int dice = move.Dice.Length >= 2 ? move.Dice[0] * 10 + move.Dice[1] : 0;
                     if (dice == 0) continue; // BuildMoveDiagramRequest skips dice==0
 

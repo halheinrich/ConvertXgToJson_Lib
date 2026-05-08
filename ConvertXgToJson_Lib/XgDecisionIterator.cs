@@ -65,7 +65,7 @@ public static class XgDecisionIterator
             if (state?.AdvanceNextGame == true || state?.AdvanceNextMatch == true)
                 continue;
 
-            if (record is MoveRecord move && IsAnalysed(move))
+            if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
             {
                 var row = BuildMoveRow(move, context, file.Rollouts);
                 if (row != null) yield return row;
@@ -127,7 +127,7 @@ public static class XgDecisionIterator
             if (state?.AdvanceNextGame == true || state?.AdvanceNextMatch == true)
                 continue;
 
-            if (record is MoveRecord move && IsAnalysed(move))
+            if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
             {
                 var req = BuildMoveDiagramRequest(move, context, file.Rollouts);
                 if (req != null) yield return req;
@@ -820,6 +820,67 @@ public static class XgDecisionIterator
 
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;
+
+    /// <summary>
+    /// Returns <c>true</c> when any candidate in <paramref name="analysis"/>'s
+    /// <c>Moves</c> array starts with a known XG non-play sentinel pair. Used
+    /// by <see cref="Iterate"/> and <see cref="IterateDiagramRequests"/> to
+    /// skip these decisions before they reach
+    /// <see cref="Parsing.AfterBoardBuilder.ComputeAfterBoard"/> or
+    /// <see cref="XgMoveTranslator.Translate"/>: feeding either leaf the
+    /// sentinel encoding has historically produced an
+    /// <see cref="IndexOutOfRangeException"/> (the <c>(-100, -100)</c>
+    /// pattern) or a "1/1" notation glitch (the <c>(0, 0)</c> pattern).
+    ///
+    /// <para>
+    /// Two known sentinel pairs:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <c>(-100, -100)</c> — XG's <b>illegal-play workaround</b>. When
+    ///     the recorded play in the source file is illegal, XG forces the
+    ///     next position rather than refusing to load, and emits this
+    ///     sentinel at the user-play slot in <c>Moves</c> while leaving
+    ///     other candidates as real legal plays.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>(0, 0)</c> — XG's <b>no-legal-move</b> (dance) encoding,
+    ///     emitted when the on-roll player has no legal play.
+    ///   </description></item>
+    /// </list>
+    ///
+    /// <para>
+    /// Predicate scans every entry in <c>analysis.Moves</c> rather than just
+    /// the best-by-equity candidate, because the illegal-play workaround
+    /// places the sentinel at the user-play index — and
+    /// <see cref="ComputeMoveAfterBoards"/> reads both the best-by-equity
+    /// and user-play slots. Either contains the sentinel, the leaf trips.
+    /// </para>
+    ///
+    /// <para>
+    /// Internal-not-private so test code that pairs raw <c>MoveRecord</c>s
+    /// with iterator output can mirror the emission filter without
+    /// re-implementing the predicate. Skipped records would otherwise
+    /// shift downstream iterator-pairing indices.
+    /// </para>
+    /// </summary>
+    internal static bool IsSentinelOnlyAnalysis(BestMoveAnalysis analysis)
+    {
+        // Moves is fixed-length 32 with zero-padded unused entries; only the
+        // first MoveCount slots are real candidates. Scanning past MoveCount
+        // would read the (0, 0, …) padding as a dance sentinel and falsely
+        // trigger on every analysis with fewer than 32 candidates.
+        int n = Math.Min(analysis.MoveCount, analysis.Moves.Length);
+        for (int i = 0; i < n; i++)
+        {
+            sbyte[] candidate = analysis.Moves[i];
+            if (candidate.Length < 2) continue;
+            if ((candidate[0] == -100 && candidate[1] == -100)
+                || (candidate[0] == 0 && candidate[1] == 0))
+                return true;
+        }
+        return false;
+    }
 
     // LevelRequest reflects what the user asked XG to compute, not what XG ran:
     // an .xgp closed before the analysis completed has Level == -100 (XG's

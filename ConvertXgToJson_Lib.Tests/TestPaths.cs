@@ -21,4 +21,11 @@ internal static class TestPaths
     public static string BothWaysDir => Path.Combine(_root, "BothWays");
     public static string ThisWayXg => Path.Combine(BothWaysDir, "ThisWay.xg");
     public static string ThatWayXg => Path.Combine(BothWaysDir, "ThatWay.xg");
+
+    // Tournament file containing at least one illegal-play workaround
+    // emission — XG's (-100, -100) sentinel pattern in BestMoveAnalysis.Moves.
+    // Pinned for the iterator-level skip regression test.
+    public static string AchimMuellerSeqXg =>
+        Path.Combine(FixtureFilesDir,
+            "Achim Mueller (8.36) - Mario Sequeira (7.13) 23pt Monte Carlo WC 2008 SF.xg");
 }
