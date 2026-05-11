@@ -19,9 +19,8 @@ public class DiagramRequestIteratorTests
 
     /// <summary>
     /// IterateDiagramRequests yields exactly one DiagramRequest per analysed
-    /// decision — the same count as Iterate yields DecisionRows. This pins the
-    /// one-per-decision contract, including that cube decisions yield one request
-    /// (not two as DecisionRow does for the taker).
+    /// decision — the same count as Iterate yields DecisionRows. Pins the
+    /// 1:1 contract across both surfaces (play and cube).
     /// </summary>
     [Fact]
     public void IterateDiagramRequests_YieldsOneRequestPerAnalysedDecision()
@@ -30,21 +29,16 @@ public class DiagramRequestIteratorTests
         {
             var file = XgFileReader.ReadFile(path);
 
-            // DecisionRow count: cube decisions yield two rows (doubler + taker).
-            // DiagramRequest count: cube decisions yield one request.
-            // So we need to count unique decisions, not raw rows.
-            // A cube decision produces MoveNumber+1 for both rows and Roll==0.
-            // Count unique (Game, MoveNumber, Roll==0) cube decisions separately.
+            // Both surfaces emit one row per analysed decision (play or cube),
+            // so IterateDiagramRequests should yield the same count as Iterate.
+            // The grouping below is residual defence from the prior two-row
+            // cube regime and is a no-op under the current 1:1 contract.
             var decisionRows = XgDecisionIterator.Iterate(file, Path.GetFileName(path)).ToList();
 
-            // Unique decision count = move rows + unique cube positions
-            // (cube taker row shares Game/MoveNumber with doubler row)
             int uniqueDecisions = decisionRows
                 .GroupBy(r => (r.Game, r.MoveNumber, r.IsCube))
                 .Count();
 
-            // For cube rows, grouping by (Game, MoveNumber, IsCube=true) collapses
-            // doubler+taker into one. That gives the expected DiagramRequest count.
             int cubeGroups = decisionRows
                 .Where(r => r.IsCube)
                 .GroupBy(r => (r.Game, r.MoveNumber))

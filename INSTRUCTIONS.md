@@ -41,6 +41,7 @@ ConvertXgToJson_Lib/
   Models/
     Models.cs
   Parsing/
+    AfterBoardBuilder.cs
     CommentParser.cs
     PascalBinaryReader.cs
     RichGameHeaderParser.cs
@@ -58,8 +59,10 @@ ConvertXgToJson_Lib.Tests/
   RealFileTests.cs
   TestPaths.cs
   XgDecisionIteratorTests.cs
-  XgpIterateTests.cs
 ```
+
+The test directory lists principal classes only; additional `*Tests.cs`
+files exist per parser, builder, and analysis surface.
 
 ## Architecture
 
@@ -79,7 +82,8 @@ Entry points:
 * `ReadMatchInfo` — fast path. Reads only the first zlib stream and stops at
   the `MatchHeaderRecord`. Used when a caller only needs match metadata.
 * `ReadGameHeaders` — fast path. Reads the first zlib stream and yields
-  `GameHeaderRecord` entries only.
+  `XgGameInfo` entries; populates `XgIteratorState.MatchInfo` before the
+  first yield.
 
 ### XgDecisionIterator
 
@@ -88,8 +92,8 @@ Two iteration surfaces over the same underlying record stream:
 * `Iterate` yields flat `DecisionRow` records (one per play or cube decision,
   CSV-shaped).
 * `IterateDiagramRequests` yields `BgDecisionData` records. Cube decisions
-  yield exactly **one** `BgDecisionData`, not two — the doubler and the taker
-  share a single record.
+  yield exactly **one** `BgDecisionData` per decision (see "Cube decisions"
+  below for the producer-perspective contract).
 
 `IterateXgDirectory` is the directory-level entry point: it enumerates
 both `*.xg` (match files) and `*.xgp` (position files) — both formats
@@ -118,8 +122,8 @@ Supporting helpers:
   on-roll player's perspective (see "Board format" below).
 * `FlipPosition` — flips the position to bottom-player perspective for XGID
   encoding.
-* `BuildMoveDiagramRequest` — returns `null` if `dice == 0`.
-* `CubeValueActual` — internal static helper, called from `MatchContext`.
+* `CubeValueActual` — internal static helper, called from `MatchContext`
+  and `XgDecisionIterator`'s cube-row / cube-diagram builders.
 
 ### XgIteratorState
 
@@ -127,9 +131,13 @@ Carries cross-row state and caller-controllable early-exit flags:
 
 * `AdvanceNextGame` / `AdvanceNextMatch` — caller-set flags. When set, the
   iterator skips to the next game / match boundary on its next step.
-* `MatchInfo` / `GameInfo` — populated by the iterator before the first row
-  of each match / game.
-* Flags reset at file boundaries.
+* `MatchInfo` / `GameInfo` — populated by the iterator. `MatchInfo` is set
+  at the file boundary (start of every `Iterate` / `IterateDiagramRequests`
+  invocation, including the per-file calls inside the directory walks);
+  `GameInfo` is set at each new `GameHeaderRecord`.
+* At each file boundary the iterator resets the `AdvanceNext*` flags and
+  `GameInfo`, then repopulates `MatchInfo`. `AdvanceNextGame` additionally
+  resets at each game header.
 
 ### XgMoveTranslator
 
@@ -153,11 +161,10 @@ no-legal-move decisions, deferred to a follow-up.
 
 ### MatchContext
 
-Internal class tracking match and game state during iteration.
-
-* `MatchScoreFor(int activePlayer)` — perspective-correct match score for
-  a given active player. Used by the taker side of a cube decision so its
-  row reflects the taker's perspective, not the doubler's.
+Internal class tracking match and game state during iteration. Exposes
+match-length / score / cube state, plus `NeedsFor(activePlayer)`,
+`PlayerName(activePlayer)`, and the `XgidCrawfordJacobyField` wire-format
+helper consumed by `XgidEncoder`.
 
 ### BackgammonConstants
 
@@ -183,10 +190,12 @@ a separate convention from the on-roll-relative board layout above.
 
 ### Cube decisions
 
-For a cube decision, the iterator produces a doubler row and a taker row.
-Both rows carry the **doubler's** board (no flip for the taker row). The
-taker row's match score comes from `MatchContext.MatchScoreFor(cube.ActivePlayer)`
-so the score reflects the taker's perspective.
+Both `Iterate` and `IterateDiagramRequests` emit exactly **one** row per
+cube decision — a single `DecisionRow` or `BgDecisionData` carrying the
+doubler's board (no flip). Cube-side equity and error fields
+(`analysis.EquityNoDouble`, `analysis.EquityDoubleTake`, `cube.ErrorCube`,
+`cube.ErrorTake`) are written from the doubler's perspective; there is
+no second taker-perspective row.
 
 ### `.xgp` file handling
 
@@ -213,9 +222,9 @@ match files:
 ```csharp
 public static class XgFileReader
 {
-    public static IEnumerable<XgRecord> ReadFile(string path);
+    public static XgFile                ReadFile(string path);
     public static XgMatchInfo?          ReadMatchInfo(string path);
-    public static IEnumerable<GameHeaderRecord> ReadGameHeaders(string path);
+    public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state);
 }
 
 public static class XgDecisionIterator
@@ -245,11 +254,6 @@ public sealed class XgIteratorState
 
 public sealed class XgMatchInfo { /* match-level metadata */ }
 public sealed class XgGameInfo  { /* game-level metadata  */ }
-
-public static class BackgammonConstants
-{
-    public static bool IsStandardOpeningPosition(ReadOnlySpan<sbyte> position);
-}
 ```
 
 Produces types defined in `BgDataTypes_Lib`; see that subproject's
@@ -260,13 +264,11 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 * **Two perspectives, don't confuse them.** The board array is always
   on-roll-relative. The XGID is always bottom-player-relative. `FlipPosition`
   converts between them and is applied only at the XGID encoding boundary.
-* **Taker cube row uses doubler's board.** Do not add a flip for the taker
-  side — it was deliberately removed. The taker row is distinguished only
-  by its match score (via `MatchContext.MatchScoreFor(cube.ActivePlayer)`),
-  not by a board flip.
-* **`IterateDiagramRequests` yields one row per cube decision.** Consumers
-  expecting symmetric doubler/taker pairs will be off by a factor of two.
-  Flat `Iterate` still emits two `DecisionRow`s per cube decision.
+* **Cube and play decisions are 1:1 with emitted rows.** Both `Iterate`
+  and `IterateDiagramRequests` produce exactly one `DecisionRow` /
+  `BgDecisionData` per analysed decision. The earlier two-row "doubler
+  + taker" emission for cube decisions is gone; consumers that count or
+  filter on the assumption of one row per decision are correct.
 * **`.xgp` sentinel handling is easy to regress.** `-1000` means "unanalysed"
   for `MoveError` / `ErrorCube`; anything `> -999.0` is a real error. Using
   `!= 0` or `.HasValue` checks on raw fields will silently treat unanalysed
@@ -277,8 +279,10 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `Level == -100` (queued) but a non-zero `LevelRequest`. Using `||` between
   the two re-admits these phantom cubes and yields rows with empty equity /
   eval fields.
-* **`BuildMoveDiagramRequest` returns `null` when `dice == 0`.** Callers must
-  null-check rather than assuming every decision yields a diagram request.
+* **`BuildMoveDiagramRequest` returns `null` on three conditions:**
+  `analysis.MoveCount == 0`, `analysis.Evals.Length == 0`, or `dice == 0`.
+  The iterator's call site gates emission on the non-null return; preserve
+  this null-check when refactoring the move-diagram path.
 * **`XgIteratorState.AdvanceNextGame` / `AdvanceNextMatch` reset at file
   boundaries.** Do not rely on them persisting across files in batch runs.
 * **`TestPaths._root` depends on a specific build output depth.** If
