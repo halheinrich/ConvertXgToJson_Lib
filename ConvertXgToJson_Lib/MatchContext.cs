@@ -34,7 +34,6 @@ internal sealed class MatchContext
 
     private string _player1 = "Player 1";
     private string _player2 = "Player 2";
-//    private bool _lastWasDoubleTake;
 
     public MatchContext(List<SaveRecord> records, string? sourceFile)
     {
@@ -100,15 +99,4 @@ internal sealed class MatchContext
     /// </summary>
     public int NeedsFor(int activePlayer) =>
         MatchLength == 0 ? 0 : MatchLength - (activePlayer >= 0 ? Score1 : Score2);
-
-    public string MatchScoreFor(int activePlayer)
-    {
-        if (MatchLength == 0) return "money";
-        int onRollScore = activePlayer >= 0 ? Score1 : Score2;
-        int opponentScore = activePlayer >= 0 ? Score2 : Score1;
-        int away1 = MatchLength - onRollScore;
-        int away2 = MatchLength - opponentScore;
-        string crawford = IsCrawford ? "C" : "";
-        return $"{away1}a{away2}a{crawford}";
-    }
 }
