@@ -186,20 +186,17 @@ public static class XgFileReader
     /// Streaming overload of <see cref="ReadGameHeaders(string)"/>.
     /// Yields one <see cref="XgGameInfo"/> per game in the file, populating
     /// <see cref="XgIteratorState.MatchInfo"/> before the first yield.
-    /// The caller may set <see cref="XgIteratorState.AdvanceNextMatch"/> = true
-    /// to stop iteration early.
+    /// To stop iteration early, the caller breaks out of the consuming
+    /// <c>foreach</c> — disposing the enumerator stops further yields.
     /// </summary>
     /// <param name="path">Full path to the .xg file.</param>
     /// <param name="state">
     /// Iterator state. <see cref="XgIteratorState.MatchInfo"/> is reset to null
     /// at the start of each file and populated before the first yield.
-    /// <see cref="XgIteratorState.AdvanceNextMatch"/> is reset to false at the
-    /// start of each file.
     /// </param>
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state)
     {
         state.MatchInfo = null;
-        state.AdvanceNextMatch = false;
 
         using var stream = File.OpenRead(path);
 
@@ -223,9 +220,6 @@ public static class XgFileReader
 
         for (int offset = 0; offset + stride <= data.Length; offset += stride)
         {
-            if (state.AdvanceNextMatch)
-                yield break;
-
             var entryType = (RecordType)data[offset + 8];
 
             if (entryType == RecordType.FooterMatch)

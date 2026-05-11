@@ -25,31 +25,36 @@ public static class XgDecisionIterator
     /// every yielded <see cref="DecisionRow.SourceFile"/>.
     /// </param>
     /// <param name="state">
-    /// Optional early-exit state. The iterator populates
+    /// Optional read-only observer. The iterator populates
     /// <see cref="XgIteratorState.MatchInfo"/> from the file's
-    /// <see cref="MatchHeaderRecord"/> and resets
-    /// <see cref="XgIteratorState.AdvanceNextMatch"/>,
-    /// <see cref="XgIteratorState.AdvanceNextGame"/>, and
-    /// <see cref="XgIteratorState.GameInfo"/> before the first yield;
-    /// <c>GameInfo</c> is then re-populated at each <see cref="GameHeaderRecord"/>
-    /// and <c>AdvanceNextGame</c> is cleared at each game boundary. The caller
-    /// sets the <c>AdvanceNext*</c> flags after a yielded row to skip the rest
-    /// of the current game or match. Pass null for no state.
+    /// <see cref="MatchHeaderRecord"/> before the first yield, then
+    /// repopulates <see cref="XgIteratorState.GameInfo"/> at each
+    /// <see cref="GameHeaderRecord"/>. Inspect these for per-row context;
+    /// pass null when not needed.
+    /// </param>
+    /// <param name="callbacks">
+    /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/> for
+    /// the boundaries at which each predicate fires.
     /// </param>
     public static IEnumerable<DecisionRow> Iterate(
         XgFile file,
         string? sourceFile,
-        XgIteratorState? state = null)
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null)
     {
         var context = new MatchContext(file.Records, sourceFile);
 
+        var matchInfo = ExtractMatchInfo(file);
         if (state != null)
         {
-            state.AdvanceNextMatch = false;
-            state.AdvanceNextGame = false;
-            state.MatchInfo = ExtractMatchInfo(file);
+            state.MatchInfo = matchInfo;
             state.GameInfo = null;
         }
+
+        if (callbacks?.SkipMatchAt?.Invoke(matchInfo) == true)
+            yield break;
+
+        bool skipCurrentGame = false;
 
         foreach (var record in file.Records)
         {
@@ -57,19 +62,19 @@ public static class XgDecisionIterator
             {
                 context.Update(record); // must be before GameInfo so MatchLength is current
 
-                if (state != null)
+                bool isMoney = context.MatchLength == 0;
+                var gameInfo = new XgGameInfo
                 {
-                    state.AdvanceNextGame = false;
+                    Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
+                    Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
+                    IsCrawfordGame = gh.CrawfordApplies,
+                    IsStandardStart = context.IsStandardStart,
+                };
 
-                    bool isMoney = context.MatchLength == 0;
-                    state.GameInfo = new XgGameInfo
-                    {
-                        Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
-                        Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
-                        IsCrawfordGame = gh.CrawfordApplies,
-                        IsStandardStart = context.IsStandardStart,
-                    };
-                }
+                if (state != null)
+                    state.GameInfo = gameInfo;
+
+                skipCurrentGame = callbacks?.SkipGameAt?.Invoke(gameInfo) == true;
                 continue;
             }
 
@@ -77,19 +82,34 @@ public static class XgDecisionIterator
             // so that scores, game number, and cube state stay correct.
             context.Update(record);
 
-            // Skip non-header records when a skip flag is active.
-            if (state?.AdvanceNextGame == true || state?.AdvanceNextMatch == true)
+            if (skipCurrentGame)
                 continue;
 
             if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
             {
                 var row = BuildMoveRow(move, context, file.Rollouts);
-                if (row != null) yield return row;
+                if (row != null)
+                {
+                    yield return row;
+                    if (callbacks?.StopMatchAfter?.Invoke(row) == true)
+                        yield break;
+                    if (callbacks?.StopGameAfter?.Invoke(row) == true)
+                        skipCurrentGame = true;
+                }
             }
             else if (record is CubeRecord cube && IsAnalysed(cube))
             {
                 foreach (var row in BuildCubeRows(cube, context, file.Rollouts))
+                {
                     yield return row;
+                    if (callbacks?.StopMatchAfter?.Invoke(row) == true)
+                        yield break;
+                    if (callbacks?.StopGameAfter?.Invoke(row) == true)
+                    {
+                        skipCurrentGame = true;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -107,25 +127,33 @@ public static class XgDecisionIterator
     /// every yielded <see cref="DescriptiveData.SourceFile"/>.
     /// </param>
     /// <param name="state">
-    /// Optional early-exit state. Behaves identically to <see cref="Iterate"/>:
-    /// <see cref="XgIteratorState.MatchInfo"/> is populated and the
-    /// <c>AdvanceNext*</c> flags plus <see cref="XgIteratorState.GameInfo"/>
-    /// are reset before the first yield.
+    /// Optional read-only observer. Behaves identically to
+    /// <see cref="Iterate"/>: <see cref="XgIteratorState.MatchInfo"/> is
+    /// populated before the first yield, <see cref="XgIteratorState.GameInfo"/>
+    /// at each <see cref="GameHeaderRecord"/>.
+    /// </param>
+    /// <param name="callbacks">
+    /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/>.
     /// </param>
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
         XgFile file,
         string? sourceFile,
-        XgIteratorState? state = null)
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null)
     {
         var context = new MatchContext(file.Records, sourceFile);
 
+        var matchInfo = ExtractMatchInfo(file);
         if (state != null)
         {
-            state.AdvanceNextMatch = false;
-            state.AdvanceNextGame = false;
-            state.MatchInfo = ExtractMatchInfo(file);
+            state.MatchInfo = matchInfo;
             state.GameInfo = null;
         }
+
+        if (callbacks?.SkipMatchAt?.Invoke(matchInfo) == true)
+            yield break;
+
+        bool skipCurrentGame = false;
 
         foreach (var record in file.Records)
         {
@@ -133,36 +161,52 @@ public static class XgDecisionIterator
             {
                 context.Update(record);
 
-                if (state != null)
+                bool isMoney = context.MatchLength == 0;
+                var gameInfo = new XgGameInfo
                 {
-                    state.AdvanceNextGame = false;
+                    Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
+                    Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
+                    IsCrawfordGame = gh.CrawfordApplies,
+                    IsStandardStart = context.IsStandardStart,
+                };
 
-                    bool isMoney = context.MatchLength == 0;
-                    state.GameInfo = new XgGameInfo
-                    {
-                        Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
-                        Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
-                        IsCrawfordGame = gh.CrawfordApplies,
-                        IsStandardStart = context.IsStandardStart,
-                    };
-                }
+                if (state != null)
+                    state.GameInfo = gameInfo;
+
+                skipCurrentGame = callbacks?.SkipGameAt?.Invoke(gameInfo) == true;
                 continue;
             }
 
             context.Update(record);
 
-            if (state?.AdvanceNextGame == true || state?.AdvanceNextMatch == true)
+            if (skipCurrentGame)
                 continue;
 
             if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
             {
                 var req = BuildMoveDiagramRequest(move, context, file.Rollouts);
-                if (req != null) yield return req;
+                if (req != null)
+                {
+                    yield return req;
+                    if (callbacks?.StopMatchAfter?.Invoke(req) == true)
+                        yield break;
+                    if (callbacks?.StopGameAfter?.Invoke(req) == true)
+                        skipCurrentGame = true;
+                }
             }
             else if (record is CubeRecord cube && IsAnalysed(cube))
             {
                 foreach (var req in BuildCubeDiagramRequests(cube, context, file.Rollouts))
+                {
                     yield return req;
+                    if (callbacks?.StopMatchAfter?.Invoke(req) == true)
+                        yield break;
+                    if (callbacks?.StopGameAfter?.Invoke(req) == true)
+                    {
+                        skipCurrentGame = true;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -178,12 +222,16 @@ public static class XgDecisionIterator
     /// detects format from file content, so per-file handling is uniform.
     /// </summary>
     /// <param name="xgDir">Directory containing .xg and/or .xgp files.</param>
-    /// <param name="state">Optional early-exit state. See <see cref="Iterate"/>
-    /// — per-file state setup (MatchInfo population and AdvanceNext* / GameInfo
-    /// reset) happens inside <c>Iterate</c> at each file boundary.</param>
+    /// <param name="state">Optional read-only observer. See <see cref="Iterate"/>
+    /// — per-file <see cref="XgIteratorState.MatchInfo"/> repopulation happens
+    /// inside <c>Iterate</c> at each file boundary.</param>
+    /// <param name="callbacks">Optional skip predicates. Re-evaluated fresh per
+    /// file — predicates are stateless from the producer's perspective, so a
+    /// match-skip in one file has no effect on the next.</param>
     public static IEnumerable<DecisionRow> IterateXgDirectory(
         string xgDir,
-        XgIteratorState? state = null)
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null)
     {
         foreach (var path in EnumerateXgFormatFiles(xgDir))
         {
@@ -192,7 +240,7 @@ public static class XgDecisionIterator
             catch { continue; }
 
             string sourceFile = Path.GetFileName(path);
-            foreach (var row in Iterate(file, sourceFile, state))
+            foreach (var row in Iterate(file, sourceFile, state, callbacks))
                 yield return row;
         }
     }
@@ -201,10 +249,12 @@ public static class XgDecisionIterator
     /// Yields all decisions from every .json file in <paramref name="jsonDir"/>.
     /// </summary>
     /// <param name="jsonDir">Directory containing .json files.</param>
-    /// <param name="state">Optional early-exit state. See <see cref="Iterate"/>.</param>
+    /// <param name="state">Optional read-only observer. See <see cref="Iterate"/>.</param>
+    /// <param name="callbacks">Optional skip predicates. See <see cref="IterateXgDirectory"/>.</param>
     public static IEnumerable<DecisionRow> IterateJsonDirectory(
         string jsonDir,
-        XgIteratorState? state = null)
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null)
     {
         foreach (var path in Directory.EnumerateFiles(jsonDir, "*.json"))
         {
@@ -213,7 +263,7 @@ public static class XgDecisionIterator
             catch { continue; }
 
             string sourceFile = Path.GetFileName(path);
-            foreach (var row in Iterate(file, sourceFile, state))
+            foreach (var row in Iterate(file, sourceFile, state, callbacks))
                 yield return row;
         }
     }

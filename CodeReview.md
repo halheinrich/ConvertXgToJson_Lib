@@ -106,6 +106,8 @@ long start = stream.Position;  // set but never referenced below
 
 The test iterates the enumerator once into `collected` (unused result), then repeats with `collected2` and the real assertion. The first pass and its variables (`collected`, `state`, `lastGame`) should be removed.
 
+*Resolved by 2026-05-11 callbacks redesign:* test rewritten and renamed to `SkipGameAt_SkipsEntireGameBeforeAnyYield`. The new test uses the `SkipGameAt` predicate, which skips the game before any row yields — no reference pass needed.
+
 ---
 
 ### Summary table
@@ -122,5 +124,5 @@ The test iterates the enumerator once into `collected` (unused result), then rep
 | 8 | XgDecisionIterator.cs | ✅ | `IsUsable` `v != 0f` guard is semantically wrong |
 | 9 | XgDecisionIterator.cs | ❌ | Crawford suffix in MatchScore format is ambiguous | dropped — not a real issue |
 | 10 | SaveRecordParser.cs | ✅ | `start` variable unused in `ReadAll` |
-| 11 | XgDecisionIteratorTests.cs | ✅ | Dead first-pass code in `GameInfo_AdvanceNextGame_SkipsEntireGame` |
+| 11 | XgDecisionIteratorTests.cs | ✅ | Dead first-pass code in `GameInfo_AdvanceNextGame_SkipsEntireGame` (test renamed to `SkipGameAt_SkipsEntireGameBeforeAnyYield` in 2026-05-11 callbacks redesign) |
 

@@ -63,11 +63,12 @@ public class XgDecisionIteratorTests
     }
 
     /// <summary>
-    /// Setting AdvanceNextGame after the first row of a game skips remaining
-    /// decisions in that game but not in subsequent games.
+    /// A <c>StopGameAfter</c> predicate returning true after the first row of
+    /// a game skips remaining decisions in that game but not in subsequent
+    /// games.
     /// </summary>
     [Fact]
-    public void AdvanceNextGame_SkipsRemainingDecisionsInGame()
+    public void StopGameAfter_SkipsRemainingDecisionsInGame()
     {
         // Use the first xg file that has multiple decisions in at least one game.
         var path = TestPaths.XgFiles.First();
@@ -88,21 +89,18 @@ public class XgDecisionIteratorTests
 
         int fullCountInGame = allRows.Count(r => r.Game == targetGame);
 
-        // Now iterate with state, advancing after the first row of targetGame.
-        var state = new XgIteratorState();
-        var collected = new List<DecisionRow>();
-
-        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
-        {
-            collected.Add(row);
-            if (row.Game == targetGame && collected.Count(r => r.Game == targetGame) == 1)
-                state.AdvanceNextGame = true;
-        }
+        // StopGameAfter receives IDecisionFilterData (the cross-surface
+        // contract); cast back to DecisionRow to read the .Game ordinal.
+        var callbacks = new XgIteratorCallbacks(
+            StopGameAfter: row => ((DecisionRow)row).Game == targetGame);
+        var collected = XgDecisionIterator
+            .Iterate(file, sourceFile, callbacks: callbacks)
+            .ToList();
 
         int skippedCount = collected.Count(r => r.Game == targetGame);
         skippedCount.Should().Be(1,
             $"only the first decision of game {targetGame} should be yielded " +
-            $"after AdvanceNextGame is set (full count was {fullCountInGame})");
+            $"after StopGameAfter returns true (full count was {fullCountInGame})");
 
         // Decisions from other games should still appear.
         collected.Any(r => r.Game != targetGame).Should().BeTrue(
@@ -110,11 +108,11 @@ public class XgDecisionIteratorTests
     }
 
     /// <summary>
-    /// Setting AdvanceNextMatch after the first row skips all remaining
-    /// decisions in the match.
+    /// A <c>StopMatchAfter</c> predicate returning true after the first
+    /// yielded row skips all remaining decisions in the match.
     /// </summary>
     [Fact]
-    public void AdvanceNextMatch_SkipsRemainingDecisionsInMatch()
+    public void StopMatchAfter_SkipsRemainingDecisionsInMatch()
     {
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
@@ -124,17 +122,14 @@ public class XgDecisionIteratorTests
         allRows.Count.Should().BeGreaterThan(1,
             "test requires a file with more than one decision");
 
-        var state = new XgIteratorState();
-        var collected = new List<DecisionRow>();
-
-        foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
-        {
-            collected.Add(row);
-            state.AdvanceNextMatch = true; // skip everything after first row
-        }
+        var callbacks = new XgIteratorCallbacks(
+            StopMatchAfter: _ => true);
+        var collected = XgDecisionIterator
+            .Iterate(file, sourceFile, callbacks: callbacks)
+            .ToList();
 
         collected.Count.Should().Be(1,
-            "only the first decision should be yielded after AdvanceNextMatch is set");
+            "only the first decision should be yielded when StopMatchAfter returns true");
     }
 
     // -----------------------------------------------------------------------
@@ -190,34 +185,32 @@ public class XgDecisionIteratorTests
     }
 
     /// <summary>
-    /// AdvanceNextMatch set during directory iteration does not bleed into
-    /// the next file — subsequent files still yield rows.
+    /// A <c>StopMatchAfter</c> predicate fires independently per file during
+    /// directory iteration: skipping the rest of one match has no effect on
+    /// subsequent files. The predicate is stateless from the producer's
+    /// perspective, so bleed across files is impossible by construction.
     /// </summary>
     [Fact]
-    public void AdvanceNextMatch_DoesNotBleedIntoNextFile()
+    public void StopMatchAfter_DoesNotBleedIntoNextFile()
     {
         var files = TestPaths.XgFiles.Take(2).ToList();
         if (files.Count < 2)
             return; // need at least two files
 
-        var state = new XgIteratorState();
-        var collected = new List<DecisionRow>();
+        var callbacks = new XgIteratorCallbacks(
+            StopMatchAfter: _ => true);
+        var collected = XgDecisionIterator
+            .IterateXgDirectory(TestPaths.XgDir, callbacks: callbacks)
+            .ToList();
 
-        foreach (var row in XgDecisionIterator.IterateXgDirectory(
-            TestPaths.XgDir, state))
-        {
-            collected.Add(row);
-            state.AdvanceNextMatch = true; // skip rest of every match after first row
-        }
-
-        // Should get exactly one row per file.
+        // Should get exactly one row per file that has any rows.
         collected.Count.Should().BeGreaterThanOrEqualTo(2,
-            "each file should contribute at least one row despite AdvanceNextMatch");
+            "each file should contribute at least one row despite StopMatchAfter");
 
         var sourceFiles = collected.Select(r => r.SourceFile).Distinct().ToList();
         sourceFiles.Count.Should().BeGreaterThanOrEqualTo(2,
             "rows should come from at least two distinct matches");
-    } 
+    }
     /// <summary>
     /// MatchInfo is populated on state before the first row is yielded from
     /// each file. Player names and match length must be non-default values for
@@ -353,11 +346,14 @@ public class XgDecisionIteratorTests
     }
 
     /// <summary>
-    /// Setting AdvanceNextGame after reading GameInfo skips the entire game
-    /// before any rows are yielded from it.
+    /// A <c>SkipGameAt</c> predicate evaluated at the game header skips the
+    /// entire game before any rows are yielded from it. This is the precise
+    /// "skip before yield" semantic the prior flag-based mechanism could not
+    /// express — under the old API the first row of the target game still
+    /// yielded before the flag could be set.
     /// </summary>
     [Fact]
-    public void GameInfo_AdvanceNextGame_SkipsEntireGame()
+    public void SkipGameAt_SkipsEntireGameBeforeAnyYield()
     {
         var path = TestPaths.XgFiles.First();
         var file = XgFileReader.ReadFile(path);
@@ -372,28 +368,20 @@ public class XgDecisionIteratorTests
 
         int skipGame = gamesWithRows.First().Key;
 
-        var state2 = new XgIteratorState();
-        var collected2 = new List<DecisionRow>();
-        int? prevGame2 = null;
+        // SkipGameAt fires once per game header, ordered by file position.
+        // Skip the Nth invocation where N matches the target game number
+        // (MatchContext.GameNumber is 1-based, incremented on each
+        // GameHeaderRecord, so the callback-fire ordinal lines up).
+        int currentGameOrdinal = 0;
+        var callbacks = new XgIteratorCallbacks(
+            SkipGameAt: _ => ++currentGameOrdinal == skipGame);
+        var collected = XgDecisionIterator
+            .Iterate(file, sourceFile, callbacks: callbacks)
+            .ToList();
 
-        var enumerator = XgDecisionIterator.Iterate(file, sourceFile, state2).GetEnumerator();
-        while (enumerator.MoveNext())
-        {
-            var row = enumerator.Current;
-            if (row.Game == skipGame && prevGame2 != skipGame)
-            {
-                // First row of the target game — GameInfo was already set before this
-                // We can't set it pre-row via Iterate(), but we can skip after first row
-                state2.AdvanceNextGame = true;
-            }
-            if (row.Game != skipGame)
-                collected2.Add(row);
-            prevGame2 = row.Game;
-        }
-
-        collected2.Any(r => r.Game == skipGame).Should().BeFalse(
-            "no rows from the skipped game should appear after AdvanceNextGame is set on first row");
-        collected2.Count.Should().BeGreaterThan(0,
+        collected.Any(r => r.Game == skipGame).Should().BeFalse(
+            "no rows from the skipped game should appear when SkipGameAt returns true");
+        collected.Count.Should().BeGreaterThan(0,
             "rows from other games should still be yielded");
     }
     /// <summary>

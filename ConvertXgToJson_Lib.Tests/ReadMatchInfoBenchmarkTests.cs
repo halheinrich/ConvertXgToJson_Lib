@@ -199,10 +199,12 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
                     $"IsStandardStart mismatch game {i + 1} in {Path.GetFileName(path)}");
             }
         }
-    }    /// <summary>
-         /// Verifies the streaming ReadGameHeaders overload populates MatchInfo before
-         /// the first yield and stops when AdvanceNextMatch is set.
-         /// </summary>
+    }
+
+    /// <summary>
+    /// Verifies the streaming ReadGameHeaders overload populates MatchInfo
+    /// before the first yield.
+    /// </summary>
     [Fact]
     public void ReadGameHeaders_Streaming_PopulatesMatchInfoBeforeFirstYield()
     {
@@ -222,33 +224,35 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Verifies AdvanceNextMatch stops iteration after the current game.
+    /// Verifies the streaming ReadGameHeaders enumerator stops when the
+    /// consumer breaks out of the foreach — the natural early-exit
+    /// mechanism for yield-iterators. No imperative skip flag is needed.
     /// </summary>
     [Fact]
-    public void ReadGameHeaders_Streaming_StopsOnAdvanceNextMatch()
+    public void ReadGameHeaders_Streaming_RespectsConsumerBreak()
     {
         var files = TestPaths.XgFiles.ToList();
         if (files.Count < 2)
             return;
 
-        var state = new XgIteratorState();
         int totalGames = 0;
         int filesWithRows = 0;
 
         foreach (var path in files)
         {
+            var state = new XgIteratorState();
             int gamesThisFile = 0;
             foreach (var game in XgFileReader.ReadGameHeaders(path, state))
             {
                 gamesThisFile++;
                 totalGames++;
-                state.AdvanceNextMatch = true; // stop after first game of each file
+                break; // stop after first game of each file
             }
             if (gamesThisFile > 0) filesWithRows++;
         }
 
         totalGames.Should().Be(filesWithRows,
-            "each file should yield exactly one game when AdvanceNextMatch is set after the first");
+            "each file should yield exactly one game when the consumer breaks after the first");
     }
     /// <summary>
     /// Compares throughput of iterating decisions from .xg vs pre-parsed .json files.

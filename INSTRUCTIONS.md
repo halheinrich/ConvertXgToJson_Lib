@@ -33,6 +33,7 @@ ConvertXgToJson_Lib/
   XgFileReader.cs
   XgGameInfo.cs
   XgidEncoder.cs
+  XgIteratorCallbacks.cs
   XgIteratorState.cs
   XgMatchInfo.cs
   XgMoveTranslator.cs
@@ -83,7 +84,8 @@ Entry points:
   the `MatchHeaderRecord`. Used when a caller only needs match metadata.
 * `ReadGameHeaders` — fast path. Reads the first zlib stream and yields
   `XgGameInfo` entries; populates `XgIteratorState.MatchInfo` before the
-  first yield.
+  first yield. To stop early, the consumer breaks out of the foreach —
+  disposing the enumerator stops further yields. No imperative skip flag.
 
 ### XgDecisionIterator
 
@@ -127,17 +129,36 @@ Supporting helpers:
 
 ### XgIteratorState
 
-Carries cross-row state and caller-controllable early-exit flags:
+Pure read-only observer of producer-internal iteration state. Inspect for
+per-row context; carries no caller-mutable surface.
 
-* `AdvanceNextGame` / `AdvanceNextMatch` — caller-set flags. When set, the
-  iterator skips to the next game / match boundary on its next step.
-* `MatchInfo` / `GameInfo` — populated by the iterator. `MatchInfo` is set
-  at the file boundary (start of every `Iterate` / `IterateDiagramRequests`
-  invocation, including the per-file calls inside the directory walks);
-  `GameInfo` is set at each new `GameHeaderRecord`.
-* At each file boundary the iterator resets the `AdvanceNext*` flags and
-  `GameInfo`, then repopulates `MatchInfo`. `AdvanceNextGame` additionally
-  resets at each game header.
+* `MatchInfo` — populated by the iterator at the file boundary (start of
+  every `Iterate` / `IterateDiagramRequests` invocation, including the
+  per-file calls inside the directory walks).
+* `GameInfo` — populated by the iterator at each new `GameHeaderRecord`.
+  Reset to null at each file boundary.
+
+Skip semantics — "skip this match", "skip this game", "stop after this
+row" — live separately on `XgIteratorCallbacks` (see below). The state
+type does not participate in iteration control.
+
+### XgIteratorCallbacks
+
+Optional predicate record supplied at call time to
+`Iterate` / `IterateDiagramRequests` / `IterateXgDirectory` /
+`IterateJsonDirectory`. Four predicates, each null by default:
+
+* `SkipMatchAt(XgMatchInfo) → bool` — fires once per match at the match
+  header. True = skip the entire match before any row yields.
+* `SkipGameAt(XgGameInfo) → bool` — fires once per game at the game
+  header. True = skip the rest of the current game before any row yields.
+* `StopGameAfter(IDecisionFilterData) → bool` — fires after each yielded
+  decision. True = advance to the next game.
+* `StopMatchAfter(IDecisionFilterData) → bool` — fires after each yielded
+  decision. True = advance to the next match.
+
+Both `DecisionRow` and `BgDecisionData` implement `IDecisionFilterData`,
+so the post-yield predicates work uniformly across both iterator surfaces.
 
 ### XgMoveTranslator
 
@@ -230,27 +251,39 @@ public static class XgFileReader
 public static class XgDecisionIterator
 {
     public static IEnumerable<DecisionRow> Iterate(
-        XgFile file, string? sourceFile, XgIteratorState? state = null);
+        XgFile file, string? sourceFile,
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null);
 
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
-        XgFile file, string? sourceFile, XgIteratorState? state = null);
+        XgFile file, string? sourceFile,
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null);
 
     public static IEnumerable<DecisionRow> IterateXgDirectory(
-        string xgDir, XgIteratorState? state = null);
+        string xgDir,
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null);
 
     public static IEnumerable<DecisionRow> IterateJsonDirectory(
-        string jsonDir, XgIteratorState? state = null);
+        string jsonDir,
+        XgIteratorState? state = null,
+        XgIteratorCallbacks? callbacks = null);
 
     public static XgMatchInfo ExtractMatchInfo(XgFile file);
 }
 
 public sealed class XgIteratorState
 {
-    public bool AdvanceNextGame  { get; set; }
-    public bool AdvanceNextMatch { get; set; }
     public XgMatchInfo? MatchInfo { get; internal set; }
     public XgGameInfo?  GameInfo  { get; internal set; }
 }
+
+public sealed record XgIteratorCallbacks(
+    Func<XgMatchInfo, bool>?          SkipMatchAt    = null,
+    Func<XgGameInfo,  bool>?          SkipGameAt     = null,
+    Func<IDecisionFilterData, bool>?  StopGameAfter  = null,
+    Func<IDecisionFilterData, bool>?  StopMatchAfter = null);
 
 public sealed class XgMatchInfo { /* match-level metadata */ }
 public sealed class XgGameInfo  { /* game-level metadata  */ }
@@ -283,8 +316,12 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `analysis.MoveCount == 0`, `analysis.Evals.Length == 0`, or `dice == 0`.
   The iterator's call site gates emission on the non-null return; preserve
   this null-check when refactoring the move-diagram path.
-* **`XgIteratorState.AdvanceNextGame` / `AdvanceNextMatch` reset at file
-  boundaries.** Do not rely on them persisting across files in batch runs.
+* **`StopGameAfter` / `StopMatchAfter` fire *after* the yield.** The
+  consumer sees the just-yielded row, *then* the predicate runs on the
+  producer's next `MoveNext`. To suppress a row entirely (skip the game
+  or match before any decision is emitted from it), return `true` from
+  `SkipGameAt` / `SkipMatchAt` at the boundary instead. The post-yield
+  predicates exist for "I've seen enough" early-exit, not pre-filtering.
 * **`TestPaths._root` depends on a specific build output depth.** If
   `AppContext.BaseDirectory` moves relative to the repo root (e.g. a csproj
   layout change), the five-`..` walk breaks and every file-touching test

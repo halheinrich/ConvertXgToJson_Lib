@@ -1,39 +1,30 @@
-﻿namespace ConvertXgToJson_Lib;
+namespace ConvertXgToJson_Lib;
 
 /// <summary>
-/// Shared state allowing the caller to signal early-exit hints to
-/// <see cref="XgDecisionIterator"/> after processing each yielded row.
-/// ConvertXgToJson_Lib resets flags at the appropriate boundaries.
+/// Read-only observer of producer-internal iteration state. Populated by
+/// <see cref="XgDecisionIterator"/> as iteration progresses; the caller may
+/// inspect <see cref="MatchInfo"/> and <see cref="GameInfo"/> for per-row
+/// context.
+///
+/// <para>
+/// Iteration control — skipping matches, games, or stopping early — is
+/// supplied separately as predicates on <see cref="XgIteratorCallbacks"/>.
+/// This type carries no caller-mutable surface.
+/// </para>
 /// </summary>
 public sealed class XgIteratorState
 {
     /// <summary>
-    /// Set by the caller after receiving a row to skip all remaining
-    /// decisions in the current game. Reset by the iterator at each
-    /// new GameHeaderRecord.
-    /// </summary>
-    public bool AdvanceNextGame { get; set; }
-
-    /// <summary>
-    /// Set by the caller after receiving a row to skip all remaining
-    /// decisions in the current match (.xg file). Reset by the iterator
-    /// at each new .xg file.
-    /// </summary>
-    public bool AdvanceNextMatch { get; set; }
-
-    /// <summary>
     /// Populated by the iterator from <see cref="MatchHeaderRecord"/> before
-    /// any rows are yielded from the match. The caller may read this and set
-    /// <see cref="AdvanceNextMatch"/> = true to skip the match entirely.
-    /// Reset to null at the start of each new .xg file.
+    /// any rows are yielded from the match. Reset (repopulated) at the start
+    /// of each new .xg file.
     /// </summary>
     public XgMatchInfo? MatchInfo { get; internal set; }
 
     /// <summary>
     /// Populated by the iterator from <see cref="GameHeaderRecord"/> before
-    /// any rows are yielded from the game. The caller may read this and set
-    /// <see cref="AdvanceNextGame"/> = true to skip the game entirely.
-    /// Reset to null at the start of each new game.
+    /// any rows are yielded from the game. Reset to null at the start of each
+    /// new .xg file and repopulated at each new game.
     /// </summary>
     public XgGameInfo? GameInfo { get; internal set; }
 }
