@@ -115,10 +115,14 @@ public static class XgFileReader
     /// <param name="path">Full path to the .xg file.</param>
     /// <returns>
     /// An <see cref="XgMatchInfo"/> populated from the first
-    /// <see cref="MatchHeaderRecord"/>. Returns a default instance
-    /// (empty strings, MatchLength = 0) if no match header is found.
+    /// <see cref="MatchHeaderRecord"/>, or <c>null</c> if the file's first
+    /// zlib stream is unreadable, undersized, or does not begin with a
+    /// match header record. Callers that previously relied on a
+    /// default-constructed return (empty strings, <c>MatchLength = 0</c>)
+    /// should treat <c>null</c> as "skip this file" rather than as a
+    /// zero-length money match.
     /// </returns>
-    public static XgMatchInfo ReadMatchInfo(string path)
+    public static XgMatchInfo? ReadMatchInfo(string path)
     {
         using var stream = File.OpenRead(path);
 
@@ -131,12 +135,12 @@ public static class XgFileReader
         byte[] raw = ReadAllCompressedBytes(stream);
         byte[]? firstStream = XgDecompressor.DecompressFirstStream(raw);
         if (firstStream == null || firstStream.Length < SaveRecordParser.RecordSize)
-            return new XgMatchInfo();
+            return null;
 
         // The first record must be RecordType.HeaderMatch (0).
         // Byte 8 of the record is EntryType.
         if (firstStream[8] != (byte)RecordType.HeaderMatch)
-            return new XgMatchInfo();
+            return null;
 
         return ParseMatchInfoFromRecord(firstStream);
     }
