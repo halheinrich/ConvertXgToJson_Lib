@@ -25,8 +25,16 @@ public static class XgDecisionIterator
     /// every yielded <see cref="DecisionRow.SourceFile"/>.
     /// </param>
     /// <param name="state">
-    /// Optional early-exit state. The caller sets flags after each yielded row;
-    /// the iterator resets them at game boundaries. Pass null for no early-exit.
+    /// Optional early-exit state. The iterator populates
+    /// <see cref="XgIteratorState.MatchInfo"/> from the file's
+    /// <see cref="MatchHeaderRecord"/> and resets
+    /// <see cref="XgIteratorState.AdvanceNextMatch"/>,
+    /// <see cref="XgIteratorState.AdvanceNextGame"/>, and
+    /// <see cref="XgIteratorState.GameInfo"/> before the first yield;
+    /// <c>GameInfo</c> is then re-populated at each <see cref="GameHeaderRecord"/>
+    /// and <c>AdvanceNextGame</c> is cleared at each game boundary. The caller
+    /// sets the <c>AdvanceNext*</c> flags after a yielded row to skip the rest
+    /// of the current game or match. Pass null for no state.
     /// </param>
     public static IEnumerable<DecisionRow> Iterate(
         XgFile file,
@@ -34,6 +42,14 @@ public static class XgDecisionIterator
         XgIteratorState? state = null)
     {
         var context = new MatchContext(file.Records, sourceFile);
+
+        if (state != null)
+        {
+            state.AdvanceNextMatch = false;
+            state.AdvanceNextGame = false;
+            state.MatchInfo = ExtractMatchInfo(file);
+            state.GameInfo = null;
+        }
 
         foreach (var record in file.Records)
         {
@@ -91,7 +107,10 @@ public static class XgDecisionIterator
     /// every yielded <see cref="DescriptiveData.SourceFile"/>.
     /// </param>
     /// <param name="state">
-    /// Optional early-exit state. Behaves identically to <see cref="Iterate"/>.
+    /// Optional early-exit state. Behaves identically to <see cref="Iterate"/>:
+    /// <see cref="XgIteratorState.MatchInfo"/> is populated and the
+    /// <c>AdvanceNext*</c> flags plus <see cref="XgIteratorState.GameInfo"/>
+    /// are reset before the first yield.
     /// </param>
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
         XgFile file,
@@ -99,6 +118,14 @@ public static class XgDecisionIterator
         XgIteratorState? state = null)
     {
         var context = new MatchContext(file.Records, sourceFile);
+
+        if (state != null)
+        {
+            state.AdvanceNextMatch = false;
+            state.AdvanceNextGame = false;
+            state.MatchInfo = ExtractMatchInfo(file);
+            state.GameInfo = null;
+        }
 
         foreach (var record in file.Records)
         {
@@ -151,33 +178,18 @@ public static class XgDecisionIterator
     /// detects format from file content, so per-file handling is uniform.
     /// </summary>
     /// <param name="xgDir">Directory containing .xg and/or .xgp files.</param>
-    /// <param name="state">
-    /// Optional early-exit state. <see cref="XgIteratorState.AdvanceNextMatch"/>
-    /// and <see cref="XgIteratorState.MatchInfo"/> are reset at the start of each
-    /// file; <see cref="XgIteratorState.AdvanceNextGame"/> and
-    /// <see cref="XgIteratorState.GameInfo"/> are reset at each game boundary
-    /// inside <see cref="Iterate"/>.
-    /// </param>
+    /// <param name="state">Optional early-exit state. See <see cref="Iterate"/>
+    /// — per-file state setup (MatchInfo population and AdvanceNext* / GameInfo
+    /// reset) happens inside <c>Iterate</c> at each file boundary.</param>
     public static IEnumerable<DecisionRow> IterateXgDirectory(
         string xgDir,
         XgIteratorState? state = null)
     {
         foreach (var path in EnumerateXgFormatFiles(xgDir))
         {
-            if (state != null)
-            {
-                state.AdvanceNextMatch = false;
-                state.AdvanceNextGame = false;
-                state.MatchInfo = null;
-                state.GameInfo = null;
-            }
-
             XgFile file;
             try { file = XgFileReader.ReadFile(path); }
             catch { continue; }
-
-            if (state != null)
-                state.MatchInfo = ExtractMatchInfo(file);
 
             string sourceFile = Path.GetFileName(path);
             foreach (var row in Iterate(file, sourceFile, state))
@@ -189,27 +201,16 @@ public static class XgDecisionIterator
     /// Yields all decisions from every .json file in <paramref name="jsonDir"/>.
     /// </summary>
     /// <param name="jsonDir">Directory containing .json files.</param>
-    /// <param name="state">Optional early-exit state. See <see cref="IterateXgDirectory"/>.</param>
+    /// <param name="state">Optional early-exit state. See <see cref="Iterate"/>.</param>
     public static IEnumerable<DecisionRow> IterateJsonDirectory(
         string jsonDir,
         XgIteratorState? state = null)
     {
         foreach (var path in Directory.EnumerateFiles(jsonDir, "*.json"))
         {
-            if (state != null)
-            {
-                state.AdvanceNextMatch = false;
-                state.AdvanceNextGame = false;
-                state.MatchInfo = null;
-                state.GameInfo = null;
-            }
-
             XgFile file;
             try { file = XgFileReader.ReadJson(path); }
             catch { continue; }
-
-            if (state != null)
-                state.MatchInfo = ExtractMatchInfo(file);
 
             string sourceFile = Path.GetFileName(path);
             foreach (var row in Iterate(file, sourceFile, state))
