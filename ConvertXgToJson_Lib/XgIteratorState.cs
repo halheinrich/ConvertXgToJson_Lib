@@ -27,7 +27,7 @@ public sealed class XgIteratorState
     /// <see cref="AdvanceNextMatch"/> = true to skip the match entirely.
     /// Reset to null at the start of each new .xg file.
     /// </summary>
-    public XgMatchInfo? MatchInfo { get; set; }
+    public XgMatchInfo? MatchInfo { get; internal set; }
 
     /// <summary>
     /// Populated by the iterator from <see cref="GameHeaderRecord"/> before
@@ -35,5 +35,5 @@ public sealed class XgIteratorState
     /// <see cref="AdvanceNextGame"/> = true to skip the game entirely.
     /// Reset to null at the start of each new game.
     /// </summary>
-    public XgGameInfo? GameInfo { get; set; }
+    public XgGameInfo? GameInfo { get; internal set; }
 }
