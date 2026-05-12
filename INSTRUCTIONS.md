@@ -118,8 +118,12 @@ rank-coupled with the same index).
 
 Supporting helpers:
 
-* `ExtractMatchInfo` — public helper that scans for the `MatchHeaderRecord`
-  and returns an `XgMatchInfo`, without iterating decisions.
+* `ExtractMatchInfo` — public helper that scans for the first
+  `MatchHeaderRecord` and returns an `XgMatchInfo`, or `null` if no
+  match header is present. Callers must handle the no-header case
+  explicitly; `Iterate` / `IterateDiagramRequests` translate `null` into
+  a thrown `InvalidDataException` at the iteration boundary rather than
+  silently emitting decisions against a default-constructed header.
 * `ToBoard` — converts a position to the 26-element board array from the
   on-roll player's perspective (see "Board format" below).
 * `FlipPosition` — flips the position to bottom-player perspective for XGID
@@ -270,7 +274,7 @@ public static class XgDecisionIterator
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null);
 
-    public static XgMatchInfo ExtractMatchInfo(XgFile file);
+    public static XgMatchInfo? ExtractMatchInfo(XgFile file);
 }
 
 public sealed class XgIteratorState
@@ -326,6 +330,20 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `AppContext.BaseDirectory` moves relative to the repo root (e.g. a csproj
   layout change), the five-`..` walk breaks and every file-touching test
   fails. Fix by adjusting `TestPaths`, not by moving `TestData`.
+* **Iteration throws on malformed match headers.** Both `Iterate` and
+  `IterateDiagramRequests` throw `InvalidDataException` when
+  `ExtractMatchInfo` returns `null` — files without a readable match
+  header are not silently processed with default player names and a
+  zero-length match. The throw is paired with — and in practice shadowed
+  by — `MatchContext`'s pre-existing `InvalidDataException` on
+  `records[0] is not MatchHeaderRecord`, which fires first on standard
+  fixtures. The iteration-boundary throw is the contract-correct
+  fallback for the more permissive scan ordering of `ExtractMatchInfo`
+  (which finds a header at any position) versus `MatchContext` (which
+  requires one at index 0). Consumers iterating directories of unknown
+  files must catch this if they want log-and-skip semantics; the
+  producer's `Iterate*Directory` helpers swallow only
+  `XgFileReader.ReadFile` failures, not iterator-time errors.
 * **Sentinel-only analyses are filtered at the iterator boundary, not in
   the leaves.** XG emits two known patterns where the lone "candidate" in
   `BestMoveAnalysis.Moves[best]` is a non-play sentinel pair:

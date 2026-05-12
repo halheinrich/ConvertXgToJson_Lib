@@ -44,7 +44,10 @@ public static class XgDecisionIterator
     {
         var context = new MatchContext(file.Records, sourceFile);
 
-        var matchInfo = ExtractMatchInfo(file);
+        var matchInfo = ExtractMatchInfo(file)
+            ?? throw new InvalidDataException(
+                $"XG file '{sourceFile ?? "<unnamed>"}' has no readable match header — cannot iterate decisions.");
+
         if (state != null)
         {
             state.MatchInfo = matchInfo;
@@ -143,7 +146,10 @@ public static class XgDecisionIterator
     {
         var context = new MatchContext(file.Records, sourceFile);
 
-        var matchInfo = ExtractMatchInfo(file);
+        var matchInfo = ExtractMatchInfo(file)
+            ?? throw new InvalidDataException(
+                $"XG file '{sourceFile ?? "<unnamed>"}' has no readable match header — cannot iterate decisions.");
+
         if (state != null)
         {
             state.MatchInfo = matchInfo;
@@ -760,7 +766,15 @@ public static class XgDecisionIterator
     //  Match info helper
     // -----------------------------------------------------------------------
 
-    public static XgMatchInfo ExtractMatchInfo(XgFile file)
+    /// <summary>
+    /// Scans <paramref name="file"/>'s records for the first
+    /// <see cref="MatchHeaderRecord"/> and returns an <see cref="XgMatchInfo"/>
+    /// populated from it, or <c>null</c> if no match header is present.
+    /// Callers that previously relied on a default-constructed return (empty
+    /// strings, <c>MatchLength = 0</c>) should treat <c>null</c> as
+    /// "match header unreadable" rather than as a zero-length money match.
+    /// </summary>
+    public static XgMatchInfo? ExtractMatchInfo(XgFile file)
     {
         foreach (var r in file.Records)
         {
@@ -774,7 +788,7 @@ public static class XgDecisionIterator
                 };
             }
         }
-        return new XgMatchInfo();
+        return null;
     }
 
     // -----------------------------------------------------------------------
