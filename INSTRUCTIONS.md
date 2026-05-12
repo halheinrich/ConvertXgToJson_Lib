@@ -6,7 +6,9 @@
 
 ## Stack
 
-C# / .NET 10 / Class Library / xUnit. Parses XG Gammon `.xg` and `.xgp` binary files into records defined by `BgDataTypes_Lib`.
+C# / .NET 10 / Class Library / xUnit.
+
+Parses eXtreme Gammon `.xg` and `.xgp` binary files into records defined by `BgDataTypes_Lib`.
 
 ## Solution
 
@@ -18,8 +20,8 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 
 ## Depends on
 
-* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`. Also the `Move` / `Play` value types — these moved here from `BgMoveGen` so non-move-gen consumers can use them without dragging in the generator.
-* **BgMoveGen** — `MoveNotationFormatter` for rendering candidate plays as standard backgammon notation. The producer-side bridge between XG's raw `sbyte[]` move encoding and the shared `Play` primitive lives here in `XgMoveTranslator`.
+* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`. The `Move` / `Play` value types also live here, so non-move-gen consumers can use them without dragging in the generator.
+* **BgMoveGen** — `MoveNotationFormatter` for rendering candidate plays as standard backgammon notation. `XgMoveTranslator` is the producer-side bridge between XG's raw `sbyte[]` move encoding and the shared `Play` primitive.
 
 ## Directory tree
 
@@ -84,8 +86,9 @@ Entry points:
   the `MatchHeaderRecord`. Used when a caller only needs match metadata.
 * `ReadGameHeaders` — fast path. Reads the first zlib stream and yields
   `XgGameInfo` entries; populates `XgIteratorState.MatchInfo` before the
-  first yield. To stop early, the consumer breaks out of the foreach —
-  disposing the enumerator stops further yields. No imperative skip flag.
+  first yield. To stop early, the consumer breaks out of the foreach;
+  disposing the enumerator stops further yields. There is no imperative
+  skip flag.
 
 ### XgDecisionIterator
 
@@ -102,9 +105,10 @@ both `*.xg` (match files) and `*.xgp` (position files) — both formats
 are XG-native and `XgFileReader` handles them uniformly, so callers
 that point at a directory of mixed XG content get all decisions
 regardless of extension. `IterateJsonDirectory` is the parallel
-entry point for `*.json` exports. Two explicit `Directory.EnumerateFiles`
-calls rather than a `*.xg*` glob: the broader pattern would also match
-hypothetical `.xgz` / `.xgr` files we don't assume are XG-format.
+entry point for `*.json` exports. The implementation uses two explicit
+`Directory.EnumerateFiles` calls rather than a `*.xg*` glob — the broader
+pattern would also match hypothetical `.xgz` / `.xgr` files we don't
+assume are XG-format.
 
 Both surfaces report the "best play" as the **highest-equity** candidate in
 `analysis.Evals[]`, not XG-native rank 0. `BgDecisionData.Plays[0]`,
@@ -113,8 +117,8 @@ convention. XG's stored ranking is not always strict equity-descending, so
 rank 0 and best-by-equity disagree on a subset of decisions. Use
 `FindBestByEquityIndex(analysis)` to locate the best candidate when adding
 code that reads from `analysis.Evals`, `analysis.Moves`,
-`analysis.PositionsPlayed`, or `analysis.EvalLevels` (all four are
-rank-coupled with the same index).
+`analysis.PositionsPlayed`, or `analysis.EvalLevels`. All four arrays
+are rank-coupled with the same index.
 
 Supporting helpers:
 
@@ -172,17 +176,15 @@ encoding XG stores in `BestMoveAnalysis.Moves[i]` into a
 `BgDataTypes_Lib.Move.ToPt`'s sign so
 `BgMoveGen.MoveNotationFormatter.Format(Play)` can render notation
 without seeing a board. The translator also performs the
-on-roll-board mutation (sending hit blots to the bar), which the
-local `MoveNotationFormatter` used to do inline. The translator's
-output is consumed once per candidate by `BuildMoveDiagramRequest`
-and feeds both `PlayCandidate.MoveNotation` (rendered) and
-`PlayCandidate.Play` (structural) — single producer call, single
-scratch-board mutation. Sentinel handling matches
-`Parsing/AfterBoardBuilder` (`from == -1` terminator,
-`from == 24` bar entry, `to < 0` bear off including XG overshoot
-encodings); the `(0, 0)` "dance" sentinel is **not** recognized —
-preserving the prior local formatter's "1/1" garbage rendering of
-no-legal-move decisions, deferred to a follow-up.
+on-roll-board mutation (sending hit blots to the bar). Its output is
+consumed once per candidate by `BuildMoveDiagramRequest` and feeds
+both `PlayCandidate.MoveNotation` (rendered) and `PlayCandidate.Play`
+(structural). One producer call per candidate; one scratch-board
+mutation. Sentinel handling matches `Parsing/AfterBoardBuilder`
+(`from == -1` terminator, `from == 24` bar entry, `to < 0` bear off
+including XG overshoot encodings). The `(0, 0)` "dance" sentinel is
+**not** recognized at this layer; sentinel-only emission is gated
+upstream — see Pitfalls.
 
 ### MatchContext
 
@@ -227,7 +229,7 @@ no second taker-perspective row.
 `.xgp` files (positions-only) encode "no analysis" differently from `.xg`
 match files:
 
-* `MoveError` and `ErrorCube` use sentinel value `-1000` to mean "unanalysed".
+* `MoveError` and `ErrorCube` use sentinel value `-1000` to mean "unanalyzed".
 * `IsAnalysed` is gated on the analysis-level field, not on error presence.
 * Error fields are treated as present when `> -999.0` (anything above the
   sentinel).
@@ -238,8 +240,8 @@ match files:
 
 ### TestData
 
-* Shared at `backgammon\TestData`. `TestPaths._root` resolves it via
-  five `..` segments from `AppContext.BaseDirectory`.
+* Shared at `backgammon\TestData`. `TestPaths._root` resolves it by
+  walking up from `AppContext.BaseDirectory` to the repo root.
 * All file-touching tests use `[Collection("FileIO")]`.
 
 ## Public API
@@ -303,12 +305,12 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   converts between them and is applied only at the XGID encoding boundary.
 * **Cube and play decisions are 1:1 with emitted rows.** Both `Iterate`
   and `IterateDiagramRequests` produce exactly one `DecisionRow` /
-  `BgDecisionData` per analysed decision. The earlier two-row "doubler
-  + taker" emission for cube decisions is gone; consumers that count or
-  filter on the assumption of one row per decision are correct.
-* **`.xgp` sentinel handling is easy to regress.** `-1000` means "unanalysed"
+  `BgDecisionData` per analyzed decision. For cube decisions this is
+  the doubler's board (no flip); there is no second taker-perspective
+  row. Consumers may safely count one row per decision.
+* **`.xgp` sentinel handling is easy to regress.** `-1000` means "unanalyzed"
   for `MoveError` / `ErrorCube`; anything `> -999.0` is a real error. Using
-  `!= 0` or `.HasValue` checks on raw fields will silently treat unanalysed
+  `!= 0` or `.HasValue` checks on raw fields will silently treat unanalyzed
   positions as zero-error.
 * **Cube `IsAnalysed` must gate on `Analysis.Level`, not `LevelRequest`.** XG
   writes `LevelRequest` when the user *asks* for an analysis and `Level` when
@@ -334,16 +336,17 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `IterateDiagramRequests` throw `InvalidDataException` when
   `ExtractMatchInfo` returns `null` — files without a readable match
   header are not silently processed with default player names and a
-  zero-length match. The throw is paired with — and in practice shadowed
-  by — `MatchContext`'s pre-existing `InvalidDataException` on
-  `records[0] is not MatchHeaderRecord`, which fires first on standard
-  fixtures. The iteration-boundary throw is the contract-correct
-  fallback for the more permissive scan ordering of `ExtractMatchInfo`
-  (which finds a header at any position) versus `MatchContext` (which
-  requires one at index 0). Consumers iterating directories of unknown
-  files must catch this if they want log-and-skip semantics; the
-  producer's `Iterate*Directory` helpers swallow only
-  `XgFileReader.ReadFile` failures, not iterator-time errors.
+  zero-length match. The throw is paired with `MatchContext`'s
+  pre-existing `InvalidDataException` on `records[0] is not
+  MatchHeaderRecord`, which fires first on standard fixtures and in
+  practice shadows the iteration-boundary throw. The iteration-boundary
+  throw is the contract-correct fallback for the more permissive scan
+  ordering of `ExtractMatchInfo`. `ExtractMatchInfo` finds a header at
+  any position; `MatchContext` requires one at index 0. Consumers
+  iterating directories of unknown files must catch this if they want
+  log-and-skip semantics; the producer's `Iterate*Directory` helpers
+  swallow only `XgFileReader.ReadFile` failures, not iterator-time
+  errors.
 * **Sentinel-only analyses are filtered at the iterator boundary, not in
   the leaves.** XG emits two known patterns where the lone "candidate" in
   `BestMoveAnalysis.Moves[best]` is a non-play sentinel pair:
@@ -357,15 +360,13 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   glitch (the `(0, 0)` case in `XgMoveTranslator.Translate`). Both surfaces
   (`Iterate` and `IterateDiagramRequests`) gate emission through
   `IsSentinelOnlyAnalysis` so neither leaf ever sees a sentinel. The
-  existing `(0, 0)` no-op branch in `AfterBoardBuilder` is retained as
-  defense-in-depth — it is unreachable on the standard iterator path but
+  existing `(0, 0)` no-op branch in `AfterBoardBuilder` is retained for
+  defense in depth; it is unreachable on the standard iterator path but
   still exercised by `AfterBoardBuilderTests`. Do not add a `(-100, -100)`
-  branch to either leaf; the encapsulation principle is that sentinel
+  branch to either leaf. The encapsulation principle is that sentinel
   semantics belong with the iterator that decides what to emit, not with
   the leaf that operates on the resulting move encoding.
 
 ## Subproject-internal next steps
 
-None. Cross-cutting items (downstream bug reports, feature proposals spanning
-multiple subprojects) belong in the umbrella `INSTRUCTIONS.md`
-"Next up" / "Pending" sections, not here.
+None.
