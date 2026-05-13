@@ -100,6 +100,33 @@ Two iteration surfaces over the same underlying record stream:
   yield exactly **one** `BgDecisionData` per decision (see "Cube decisions"
   below for the producer-perspective contract).
 
+Every emitted `DecisionRow` / `BgDecisionData` is stamped with a
+`BgDataTypes_Lib.DecisionId` in its `Id` field. The stamp is built by the
+internal `BuildDecisionId(sourceFile, game, moveNumber, isCube)` helper
+called from each of the four `Build*` sites (`BuildMoveRow`,
+`BuildMoveDiagramRequest`, `BuildCubeRows`, `BuildCubeDiagramRequests`).
+Extension dispatch is case-insensitive invariant:
+
+* `.xg` and `.json` → `XgDecisionId(Filename, Game, MoveNumber, IsCube)`
+  — the multi-decision tuple shape. `.json` is treated as an
+  XG-format-equivalent serialization (produced by
+  `XgFileReader.WriteJsonAsync`, consumed via `XgFileReader.ReadJson`);
+  record-level structure is identical to `.xg`, so the same Id shape
+  applies. The resulting Id's `Filename` ends in `.json` by design — a
+  `.xg` and a `.json` of the same content are distinct on-disk artifacts
+  and legitimately carry different Ids. Cross-format Id identity is not
+  an invariant; this parallels the existing `.xg` ↔ `.xgp` asymmetry
+  (same decision, different storage shape, different Id).
+* `.xgp` → `XgpDecisionId(Filename)` — filename-only. `.xgp` files are
+  single-decision-per-file by XG's design, so within-file coordinates
+  are not part of the Id.
+
+Cube emissions stamp with `ctx.MoveNumber + 1` so the Id's `MoveNumber`
+agrees with the emitted `DecisionRow.MoveNumber` /
+`DescriptiveData.MoveNumber`, not the raw underlying counter. The
+contract is that the Id's coordinate tuple matches the emitted row's
+published fields, record-for-record.
+
 `IterateXgDirectory` is the directory-level entry point: it enumerates
 both `*.xg` (match files) and `*.xgp` (position files) — both formats
 are XG-native and `XgFileReader` handles them uniformly, so callers
@@ -332,6 +359,26 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `AppContext.BaseDirectory` moves relative to the repo root (e.g. a csproj
   layout change), the five-`..` walk breaks and every file-touching test
   fails. Fix by adjusting `TestPaths`, not by moving `TestData`.
+* **Null `sourceFile` is rejected eagerly, not deferred.** `Iterate`
+  and `IterateDiagramRequests` throw `InvalidOperationException`
+  synchronously at the call site when `sourceFile` is null — before
+  any deferred enumeration begins. This is the LINQ-style two-method
+  pattern: the public surface validates and delegates to
+  `IterateCore` / `IterateDiagramRequestsCore`, whose signatures carry
+  the non-nullable post-validation invariant. Required because every
+  yielded row carries a `DecisionId` stamped from `sourceFile`. The
+  public parameter remains typed `string?` for source-compat with
+  method-group conversions in `XgFilter_Lib.FilteredDecisionIterator`
+  (which uses `Func<XgFile, string?, …>` delegate slots); the runtime
+  contract is strictly non-null. Distinct from the
+  `InvalidDataException` for missing match headers below — that throw
+  is content-level and remains deferred to first `MoveNext`; this one
+  is caller-contract and fires immediately. Unsupported source-file
+  extensions (anything other than `.xg`, `.xgp`, or `.json`) throw
+  `InvalidOperationException` from `BuildDecisionId` on first stamp;
+  that path is deferred (it fires during enumeration, when a candidate
+  reaches a `Build*` site) and is enforced per-record rather than at
+  the API boundary.
 * **Iteration throws on malformed match headers.** Both `Iterate` and
   `IterateDiagramRequests` throw `InvalidDataException` when
   `ExtractMatchInfo` returns `null` — files without a readable match
