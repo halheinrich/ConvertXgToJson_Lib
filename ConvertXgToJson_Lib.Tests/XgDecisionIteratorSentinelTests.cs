@@ -47,7 +47,7 @@ public class XgDecisionIteratorSentinelTests
     {
         var file = BuildFileWithSentinelOnlyMove((sbyte)from, (sbyte)to);
 
-        var rows = XgDecisionIterator.Iterate(file, sourceFile: null).ToList();
+        var rows = XgDecisionIterator.Iterate(file, sourceFile: "synthetic.xg").ToList();
 
         rows.Should().BeEmpty(
             "the only MoveRecord in the file carries a sentinel-only analysis " +
@@ -61,7 +61,7 @@ public class XgDecisionIteratorSentinelTests
     {
         var file = BuildFileWithSentinelOnlyMove((sbyte)from, (sbyte)to);
 
-        var requests = XgDecisionIterator.IterateDiagramRequests(file, sourceFile: null).ToList();
+        var requests = XgDecisionIterator.IterateDiagramRequests(file, sourceFile: "synthetic.xg").ToList();
 
         requests.Should().BeEmpty(
             "the only MoveRecord in the file carries a sentinel-only analysis " +
@@ -80,7 +80,7 @@ public class XgDecisionIteratorSentinelTests
         // hits and no bear-offs. The active player is on point 24.
         var file = BuildFileWithMoves((sbyte)23, (sbyte)22);
 
-        var rows = XgDecisionIterator.Iterate(file, sourceFile: null).ToList();
+        var rows = XgDecisionIterator.Iterate(file, sourceFile: "synthetic.xg").ToList();
 
         rows.Should().HaveCount(1);
     }

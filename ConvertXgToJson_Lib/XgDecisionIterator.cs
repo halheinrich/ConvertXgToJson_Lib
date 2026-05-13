@@ -20,9 +20,12 @@ public static class XgDecisionIterator
     /// </summary>
     /// <param name="file">The parsed XG file.</param>
     /// <param name="sourceFile">
-    /// Originating file name including extension (e.g. "match.xg"), or null for
-    /// stream/programmatic parses with no filename context. Copied verbatim onto
-    /// every yielded <see cref="DecisionRow.SourceFile"/>.
+    /// Originating file name including extension (e.g. <c>"match.xg"</c> or
+    /// <c>"position.xgp"</c>). Must be non-null — the iterator stamps a
+    /// <see cref="DecisionId"/> on every yielded row, and the extension
+    /// drives the discrimination between <see cref="XgDecisionId"/> and
+    /// <see cref="XgpDecisionId"/>. Copied verbatim onto every yielded
+    /// <see cref="DecisionRow.SourceFile"/>.
     /// </param>
     /// <param name="state">
     /// Optional read-only observer. The iterator populates
@@ -36,17 +39,35 @@ public static class XgDecisionIterator
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/> for
     /// the boundaries at which each predicate fires.
     /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown eagerly (before any deferred enumeration) when
+    /// <paramref name="sourceFile"/> is <see langword="null"/>. DecisionId
+    /// stamping requires a filename; this is a producer-contract violation,
+    /// not a content-level parse error.
+    /// </exception>
     public static IEnumerable<DecisionRow> Iterate(
         XgFile file,
         string? sourceFile,
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null)
     {
+        if (sourceFile == null)
+            throw new InvalidOperationException(
+                "XgDecisionIterator.Iterate requires a non-null sourceFile for DecisionId stamping.");
+        return IterateCore(file, sourceFile, state, callbacks);
+    }
+
+    private static IEnumerable<DecisionRow> IterateCore(
+        XgFile file,
+        string sourceFile,
+        XgIteratorState? state,
+        XgIteratorCallbacks? callbacks)
+    {
         var context = new MatchContext(file.Records, sourceFile);
 
         var matchInfo = ExtractMatchInfo(file)
             ?? throw new InvalidDataException(
-                $"XG file '{sourceFile ?? "<unnamed>"}' has no readable match header — cannot iterate decisions.");
+                $"XG file '{sourceFile}' has no readable match header — cannot iterate decisions.");
 
         if (state != null)
         {
@@ -90,7 +111,7 @@ public static class XgDecisionIterator
 
             if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
             {
-                var row = BuildMoveRow(move, context, file.Rollouts);
+                var row = BuildMoveRow(move, context, sourceFile, file.Rollouts);
                 if (row != null)
                 {
                     yield return row;
@@ -102,7 +123,7 @@ public static class XgDecisionIterator
             }
             else if (record is CubeRecord cube && IsAnalysed(cube))
             {
-                foreach (var row in BuildCubeRows(cube, context, file.Rollouts))
+                foreach (var row in BuildCubeRows(cube, context, sourceFile, file.Rollouts))
                 {
                     yield return row;
                     if (callbacks?.StopMatchAfter?.Invoke(row) == true)
@@ -125,9 +146,12 @@ public static class XgDecisionIterator
     /// </summary>
     /// <param name="file">The parsed XG file.</param>
     /// <param name="sourceFile">
-    /// Originating file name including extension (e.g. "match.xg"), or null for
-    /// stream/programmatic parses with no filename context. Copied verbatim onto
-    /// every yielded <see cref="DescriptiveData.SourceFile"/>.
+    /// Originating file name including extension (e.g. <c>"match.xg"</c> or
+    /// <c>"position.xgp"</c>). Must be non-null — same contract as
+    /// <see cref="Iterate"/>; the iterator stamps a <see cref="DecisionId"/>
+    /// on every yielded record, and the extension drives the discrimination
+    /// between <see cref="XgDecisionId"/> and <see cref="XgpDecisionId"/>.
+    /// Copied verbatim onto every yielded <see cref="DescriptiveData.SourceFile"/>.
     /// </param>
     /// <param name="state">
     /// Optional read-only observer. Behaves identically to
@@ -138,17 +162,35 @@ public static class XgDecisionIterator
     /// <param name="callbacks">
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/>.
     /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown eagerly (before any deferred enumeration) when
+    /// <paramref name="sourceFile"/> is <see langword="null"/>. DecisionId
+    /// stamping requires a filename; this is a producer-contract violation,
+    /// not a content-level parse error.
+    /// </exception>
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
         XgFile file,
         string? sourceFile,
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null)
     {
+        if (sourceFile == null)
+            throw new InvalidOperationException(
+                "XgDecisionIterator.IterateDiagramRequests requires a non-null sourceFile for DecisionId stamping.");
+        return IterateDiagramRequestsCore(file, sourceFile, state, callbacks);
+    }
+
+    private static IEnumerable<BgDecisionData> IterateDiagramRequestsCore(
+        XgFile file,
+        string sourceFile,
+        XgIteratorState? state,
+        XgIteratorCallbacks? callbacks)
+    {
         var context = new MatchContext(file.Records, sourceFile);
 
         var matchInfo = ExtractMatchInfo(file)
             ?? throw new InvalidDataException(
-                $"XG file '{sourceFile ?? "<unnamed>"}' has no readable match header — cannot iterate decisions.");
+                $"XG file '{sourceFile}' has no readable match header — cannot iterate decisions.");
 
         if (state != null)
         {
@@ -190,7 +232,7 @@ public static class XgDecisionIterator
 
             if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
             {
-                var req = BuildMoveDiagramRequest(move, context, file.Rollouts);
+                var req = BuildMoveDiagramRequest(move, context, sourceFile, file.Rollouts);
                 if (req != null)
                 {
                     yield return req;
@@ -202,7 +244,7 @@ public static class XgDecisionIterator
             }
             else if (record is CubeRecord cube && IsAnalysed(cube))
             {
-                foreach (var req in BuildCubeDiagramRequests(cube, context, file.Rollouts))
+                foreach (var req in BuildCubeDiagramRequests(cube, context, sourceFile, file.Rollouts))
                 {
                     yield return req;
                     if (callbacks?.StopMatchAfter?.Invoke(req) == true)
@@ -278,7 +320,7 @@ public static class XgDecisionIterator
     //  Move record — DecisionRow
     // -----------------------------------------------------------------------
 
-    private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
+    private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
     {
         var analysis = move.Analysis;
         if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
@@ -323,6 +365,7 @@ public static class XgDecisionIterator
 
         return new DecisionRow
         {
+            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber, isCube: false),
             Xgid = xgid,
             Error = move.MoveError > -999.0 ? Math.Abs(move.MoveError) : 0.0,
             OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
@@ -347,7 +390,7 @@ public static class XgDecisionIterator
     //  Move record — DiagramRequest
     // -----------------------------------------------------------------------
 
-    private static BgDecisionData? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, List<RolloutContext> rollouts)
+    private static BgDecisionData? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
     {
         var analysis = move.Analysis;
         if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
@@ -424,6 +467,7 @@ public static class XgDecisionIterator
 
         return new BgDecisionData
         {
+            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber, isCube: false),
             Position = new PositionData
             {
                 Mop = board,
@@ -466,7 +510,7 @@ public static class XgDecisionIterator
     //  Cube record — DecisionRow
     // -----------------------------------------------------------------------
 
-    private static IEnumerable<DecisionRow> BuildCubeRows(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
+    private static IEnumerable<DecisionRow> BuildCubeRows(CubeRecord cube, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
     {
         var analysis = cube.Analysis;
 
@@ -502,6 +546,7 @@ public static class XgDecisionIterator
 
         yield return new DecisionRow
         {
+            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true),
             Xgid = xgid,
             Error = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : 0.0,
             OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
@@ -528,7 +573,7 @@ public static class XgDecisionIterator
     //  Cube record — DiagramRequest
     // -----------------------------------------------------------------------
 
-    private static IEnumerable<BgDecisionData> BuildCubeDiagramRequests(CubeRecord cube, MatchContext ctx, List<RolloutContext> rollouts)
+    private static IEnumerable<BgDecisionData> BuildCubeDiagramRequests(CubeRecord cube, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
     {
         var analysis = cube.Analysis;
 
@@ -545,6 +590,7 @@ public static class XgDecisionIterator
         // Doubler row
         yield return new BgDecisionData
         {
+            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true),
             Position = new PositionData
             {
                 Mop = board,
@@ -884,6 +930,77 @@ public static class XgDecisionIterator
     private static IEnumerable<string> EnumerateXgFormatFiles(string xgDir) =>
         Directory.EnumerateFiles(xgDir, "*.xg")
             .Concat(Directory.EnumerateFiles(xgDir, "*.xgp"));
+
+    /// <summary>
+    /// Builds the <see cref="DecisionId"/> stamped onto every yielded
+    /// <see cref="DecisionRow"/> / <see cref="BgDecisionData"/> by
+    /// dispatching on the source file's extension.
+    ///
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <c>.xgp</c> → <see cref="XgpDecisionId"/> keyed on the bare
+    ///     filename. <c>.xgp</c> files are single-decision-per-file by
+    ///     XG's design, so within-file coordinates are not part of the Id.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>.xg</c> → <see cref="XgDecisionId"/> carrying the within-file
+    ///     tuple <c>(Filename, Game, MoveNumber, IsCube)</c>.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>.json</c> → <see cref="XgDecisionId"/> with the same tuple
+    ///     shape as <c>.xg</c>. <c>.json</c> is treated as an
+    ///     XG-format-equivalent serialization — multi-decision content
+    ///     written through <see cref="XgFileReader.WriteJsonAsync"/> and
+    ///     parsed back through <see cref="XgFileReader.ReadJson"/>; the
+    ///     record-level structure (game / move / cube) is identical to
+    ///     <c>.xg</c>. The resulting Id's <c>Filename</c> ends in
+    ///     <c>.json</c> by design: a <c>.xg</c> and <c>.json</c> of the
+    ///     same content are distinct on-disk artifacts and legitimately
+    ///     carry different Ids. This parallels the existing
+    ///     <c>.xg</c> ↔ <c>.xgp</c> Id asymmetry — same decision, different
+    ///     storage shape, different Id. Cross-format Id identity is not a
+    ///     goal of this design.
+    ///   </description></item>
+    /// </list>
+    ///
+    /// <para>
+    /// The cube emission path passes <c>ctx.MoveNumber + 1</c> for
+    /// <paramref name="moveNumber"/> so the Id agrees with the emitted
+    /// <c>DecisionRow.MoveNumber</c> / <c>DescriptiveData.MoveNumber</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Extension match is case-insensitive invariant — <c>.XG</c> and
+    /// <c>.xg</c> on Windows clones both route to the <see cref="XgDecisionId"/>
+    /// shape. Any other extension is a producer-side contract violation;
+    /// <see cref="Iterate"/> / <see cref="IterateDiagramRequests"/> validate
+    /// <c>sourceFile</c> non-null at iteration entry, but the extension is
+    /// only verified once a candidate reaches a <c>Build*</c> site.
+    /// </para>
+    ///
+    /// <para>
+    /// Internal-not-private so test code can drive the unknown-extension
+    /// path directly without synthesizing a full <see cref="XgFile"/>.
+    /// Parallel to <see cref="IsSentinelOnlyAnalysis"/> and
+    /// <see cref="FindBestByEquityIndex"/>.
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="sourceFile"/>'s extension is none of
+    /// <c>.xg</c>, <c>.xgp</c>, or <c>.json</c>.
+    /// </exception>
+    internal static DecisionId BuildDecisionId(
+        string sourceFile, int game, int moveNumber, bool isCube)
+    {
+        string ext = Path.GetExtension(sourceFile);
+        if (string.Equals(ext, ".xgp", StringComparison.OrdinalIgnoreCase))
+            return new XgpDecisionId(sourceFile);
+        if (string.Equals(ext, ".xg", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
+            return new XgDecisionId(sourceFile, game, moveNumber, isCube);
+        throw new InvalidOperationException(
+            $"Unsupported file extension '{ext}' for DecisionId stamping; expected '.xg', '.xgp', or '.json' (sourceFile='{sourceFile}').");
+    }
 
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;
