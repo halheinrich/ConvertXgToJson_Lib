@@ -984,6 +984,84 @@ public class DiagramRequestIteratorTests
     }
 
     // -----------------------------------------------------------------------
+    //  Game propagation
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Every emitted diagram request across the .xg corpus has
+    /// <c>Descriptive.Game &gt;= 1</c>. Both stamp sites
+    /// (<c>BuildMoveDiagramRequest</c> and <c>BuildCubeDiagramRequests</c>)
+    /// source from <c>ctx.GameNumber</c>, which MatchContext increments to
+    /// 1 at the first <c>GameHeaderRecord</c>. A request with Game == 0
+    /// indicates the new Descriptive field was not populated at one of
+    /// the two sites.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_AllRequests_DescriptiveGameAtLeastOne()
+    {
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile))
+            {
+                req.Descriptive.Game.Should().BeGreaterThanOrEqualTo(1,
+                    $"{sourceFile}: every diagram request must have Descriptive.Game >= 1");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Pairs <see cref="XgDecisionIterator.Iterate"/> and
+    /// <see cref="XgDecisionIterator.IterateDiagramRequests"/> 1:1 in order
+    /// across the .xg corpus and asserts <c>req.Descriptive.Game</c> equals
+    /// <c>row.Game</c> on every record. Pins the per-record semantic value
+    /// (not just the >= 1 floor) for both stamp sites — a regression that
+    /// hard-coded Game = 1 would pass the floor test but fail this one as
+    /// soon as the corpus crosses a game boundary. Multi-game fixtures in
+    /// the corpus (e.g. match35041658.xg, which includes a Crawford game 4)
+    /// guarantee at least one record with Game > 1.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_DescriptiveGame_MatchesDecisionRowGame()
+    {
+        int recordsChecked = 0;
+        int maxGameSeen = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            var rows = XgDecisionIterator.Iterate(file, sourceFile).ToList();
+            var requests = XgDecisionIterator.IterateDiagramRequests(file, sourceFile).ToList();
+
+            requests.Count.Should().Be(rows.Count,
+                $"{sourceFile}: Iterate and IterateDiagramRequests are 1:1 by contract");
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                requests[i].Descriptive.Game.Should().Be(rows[i].Game,
+                    $"{sourceFile} record [{i}] (game {rows[i].Game} move {rows[i].MoveNumber}, " +
+                    $"IsCube={rows[i].IsCube}): " +
+                    "Descriptive.Game must match the paired DecisionRow.Game");
+                recordsChecked++;
+                if (rows[i].Game > maxGameSeen) maxGameSeen = rows[i].Game;
+            }
+        }
+
+        recordsChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed decision; " +
+            "otherwise this test passes vacuously.");
+        maxGameSeen.Should().BeGreaterThan(1,
+            "the .xg corpus must include at least one record from a Game > 1; " +
+            "otherwise a hard-coded Game = 1 would pass this test vacuously.");
+    }
+
+    // -----------------------------------------------------------------------
     //  BgDecisionData sample output
     // -----------------------------------------------------------------------
 
