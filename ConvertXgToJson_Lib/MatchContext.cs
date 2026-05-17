@@ -98,5 +98,5 @@ internal sealed class MatchContext
     /// <paramref name="activePlayer"/>. Returns 0 for money games.
     /// </summary>
     public int NeedsFor(int activePlayer) =>
-        MatchLength == 0 ? 0 : MatchLength - (activePlayer >= 0 ? Score1 : Score2);
+        BackgammonConstants.AwayScore(MatchLength, activePlayer >= 0 ? Score1 : Score2);
 }

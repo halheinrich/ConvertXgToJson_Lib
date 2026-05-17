@@ -54,4 +54,13 @@ internal static class BackgammonConstants
             flipped[i] = -board[25 - i];
         return flipped;
     }
+
+    /// <summary>
+    /// A player's "away" score — points still needed to win — for a match of
+    /// <paramref name="matchLength"/> with the player at <paramref name="score"/>.
+    /// 0 for money games (<paramref name="matchLength"/> 0). The single source
+    /// of the away-score rule.
+    /// </summary>
+    internal static int AwayScore(int matchLength, int score)
+        => matchLength == 0 ? 0 : matchLength - score;
 }

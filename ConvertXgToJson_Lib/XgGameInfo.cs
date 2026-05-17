@@ -39,15 +39,11 @@ public sealed class XgGameInfo
     /// file reader and the decision iterator. <paramref name="matchLength"/> is
     /// the normalized match length (0 for money sessions).
     /// </summary>
-    internal static XgGameInfo From(GameHeaderRecord gh, int matchLength)
+    internal static XgGameInfo From(GameHeaderRecord gh, int matchLength) => new()
     {
-        bool isMoney = matchLength == 0;
-        return new XgGameInfo
-        {
-            Away1 = isMoney ? 0 : matchLength - gh.Score1,
-            Away2 = isMoney ? 0 : matchLength - gh.Score2,
-            IsCrawfordGame = gh.CrawfordApplies,
-            IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition),
-        };
-    }
+        Away1 = BackgammonConstants.AwayScore(matchLength, gh.Score1),
+        Away2 = BackgammonConstants.AwayScore(matchLength, gh.Score2),
+        IsCrawfordGame = gh.CrawfordApplies,
+        IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition),
+    };
 }
