@@ -265,25 +265,8 @@ public static class XgDecisionIterator
             rolloutIndex: bestIdx < move.RolloutIndices.Length ? move.RolloutIndices[bestIdx] : -1,
             rollouts: rollouts);
 
-        var xgidPosition = move.ActivePlayer >= 0
-            ? move.InitialPosition
-            : FlipPosition(move.InitialPosition);
-
-        int xgidCubePos = move.ActivePlayer >= 0
-            ? ctx.CubePosition
-            : -ctx.CubePosition;
-
-        string xgid = XgidEncoder.Encode(
-            position: xgidPosition,
-            cubeValue: ctx.CubeValue,
-            cubePos: xgidCubePos,
-            turn: 1,
-            dice: dice,
-            score1: move.ActivePlayer >= 0 ? ctx.Score1 : ctx.Score2,
-            score2: move.ActivePlayer >= 0 ? ctx.Score2 : ctx.Score1,
-            crawfordJacoby: ctx.XgidCrawfordJacobyField,
-            matchLength: ctx.MatchLength,
-            maxCubeLog2: ctx.MaxCubeLimit);
+        string xgid = BuildXgid(
+            move.InitialPosition, move.ActivePlayer, ctx.CubeValue, ctx.CubePosition, dice, ctx);
 
         int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
         int userPlayIndex = FindUserPlayIndex(analysis, move.FinalPosition);
@@ -448,25 +431,8 @@ public static class XgDecisionIterator
         int cubeActual = CubeValueActual(cube.CubeValue);
         int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
 
-        var xgidPosition = cube.ActivePlayer >= 0
-            ? cube.Position
-            : FlipPosition(cube.Position);
-
-        int xgidCubePos = cube.ActivePlayer >= 0
-            ? cubePos
-            : -cubePos;
-
-        string xgid = XgidEncoder.Encode(
-            position: xgidPosition,
-            cubeValue: cubeActual,
-            cubePos: xgidCubePos,
-            turn: 1,
-            dice: 0,
-            score1: cube.ActivePlayer >= 0 ? ctx.Score1 : ctx.Score2,
-            score2: cube.ActivePlayer >= 0 ? ctx.Score2 : ctx.Score1,
-            crawfordJacoby: ctx.XgidCrawfordJacobyField,
-            matchLength: ctx.MatchLength,
-            maxCubeLog2: ctx.MaxCubeLimit);
+        string xgid = BuildXgid(
+            cube.Position, cube.ActivePlayer, cubeActual, cubePos, dice: 0, ctx);
 
         int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
 
@@ -600,6 +566,32 @@ public static class XgDecisionIterator
         for (int i = 0; i < 26; i++)
             flipped[i] = (sbyte)-pos.Points[25 - i];
         return new PositionEngine { Points = flipped };
+    }
+
+    /// <summary>
+    /// Builds the XGID string for a decision. When <paramref name="activePlayer"/>
+    /// is negative the position is flipped, the cube position negated, and the
+    /// two scores swapped so the XGID reads from the on-roll player's side.
+    /// Shared by the move-row and cube-row builders.
+    /// </summary>
+    private static string BuildXgid(
+        PositionEngine position, int activePlayer, int cubeValue, int cubePosition,
+        int dice, MatchContext ctx)
+    {
+        var xgidPosition = activePlayer >= 0 ? position : FlipPosition(position);
+        int xgidCubePos = activePlayer >= 0 ? cubePosition : -cubePosition;
+
+        return XgidEncoder.Encode(
+            position: xgidPosition,
+            cubeValue: cubeValue,
+            cubePos: xgidCubePos,
+            turn: 1,
+            dice: dice,
+            score1: activePlayer >= 0 ? ctx.Score1 : ctx.Score2,
+            score2: activePlayer >= 0 ? ctx.Score2 : ctx.Score1,
+            crawfordJacoby: ctx.XgidCrawfordJacobyField,
+            matchLength: ctx.MatchLength,
+            maxCubeLog2: ctx.MaxCubeLimit);
     }
 
     /// <summary>
