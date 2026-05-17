@@ -8,7 +8,7 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// </summary>
 internal static class RolloutContextParser
 {
-    private const int RecordSize = 2184;
+    internal const int RecordSize = 2184;
 
     public static List<RolloutContext> ReadAll(Stream stream)
     {

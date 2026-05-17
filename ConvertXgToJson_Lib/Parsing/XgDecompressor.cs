@@ -17,9 +17,8 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// </summary>
 internal static class XgDecompressor
 {
-    private const int SaveRecordSize = 2560;
-    private const int XgiSize = 2 * SaveRecordSize;  // 5120
-    private const int RolloutRecordSize = 2184;
+    // Record sizes are owned by the parsers; referenced here for stream sizing.
+    private const int XgiSize = 2 * SaveRecordParser.RecordSize;  // 5120
 
     public static XgDecompressedStreams Decompress(Stream compressedStream)
     {
@@ -36,8 +35,8 @@ internal static class XgDecompressor
             int len = s.Length;
             if (len == 0) continue;
 
-            bool isSaveRecMultiple = len % SaveRecordSize == 0;
-            bool isRolloutMultiple = len % RolloutRecordSize == 0;
+            bool isSaveRecMultiple = len % SaveRecordParser.RecordSize == 0;
+            bool isRolloutMultiple = len % RolloutContextParser.RecordSize == 0;
 
             if (isSaveRecMultiple)
             {
