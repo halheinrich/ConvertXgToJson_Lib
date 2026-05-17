@@ -429,7 +429,7 @@ public static class XgDecisionIterator
             rollouts: rollouts);
 
         int cubeActual = CubeValueActual(cube.CubeValue);
-        int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
+        int cubePos = Math.Sign(cube.CubeValue);
 
         string xgid = BuildXgid(
             cube.Position, cube.ActivePlayer, cubeActual, cubePos, dice: 0, ctx);
@@ -474,7 +474,7 @@ public static class XgDecisionIterator
             rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
 
-        int cubePos = cube.CubeValue == 0 ? 0 : (cube.CubeValue > 0 ? 1 : -1);
+        int cubePos = Math.Sign(cube.CubeValue);
 
         int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);

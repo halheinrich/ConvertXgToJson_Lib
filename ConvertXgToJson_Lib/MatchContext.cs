@@ -76,7 +76,7 @@ internal sealed class MatchContext
             case MoveRecord mv:
                 MoveNumber++;
                 CubeValue = XgDecisionIterator.CubeValueActual(mv.CubeValue);
-                CubePosition = mv.CubeValue == 0 ? 0 : (mv.CubeValue > 0 ? 1 : -1);
+                CubePosition = Math.Sign(mv.CubeValue);
                 break;
 
             case CubeRecord cb:
