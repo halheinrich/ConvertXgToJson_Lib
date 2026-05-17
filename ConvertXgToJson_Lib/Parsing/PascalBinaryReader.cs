@@ -99,8 +99,16 @@ internal sealed class PascalBinaryReader(Stream stream) : IDisposable
     public string ReadWideCharArray(int elementCount)
     {
         AlignTo(2);
-        byte[] raw = _reader.ReadBytes(elementCount * 2);
-        // Find first #0 terminator
+        return DecodeWideCharArray(_reader.ReadBytes(elementCount * 2), elementCount);
+    }
+
+    /// <summary>
+    /// Decodes a fixed-size UTF-16LE buffer (<paramref name="elementCount"/>
+    /// WideChars) into a string, stopping at the first #0 terminator. Shared
+    /// by this reader and <see cref="RichGameHeaderParser"/>.
+    /// </summary>
+    internal static string DecodeWideCharArray(byte[] raw, int elementCount)
+    {
         int terminator = 0;
         while (terminator < elementCount && (raw[terminator * 2] != 0 || raw[terminator * 2 + 1] != 0))
             terminator++;
@@ -118,14 +126,19 @@ internal sealed class PascalBinaryReader(Stream stream) : IDisposable
     //  TGUID  – 16 bytes, packed (D1=uint32, D2=uint16, D3=uint16, D4=8 bytes)
     // ------------------------------------------------------------------ //
 
-    public Guid ReadGuid()
-    {
-        uint  d1 = _reader.ReadUInt32();
-        ushort d2 = _reader.ReadUInt16();
-        ushort d3 = _reader.ReadUInt16();
-        byte[] d4 = _reader.ReadBytes(8);
-        return new Guid((int)d1, (short)d2, (short)d3, d4);
-    }
+    public Guid ReadGuid() => DecodeGuid(_reader.ReadBytes(16));
+
+    /// <summary>
+    /// Builds a <see cref="Guid"/> from a packed 16-byte TGUID layout
+    /// (little-endian uint32 + uint16 + uint16 + 8 bytes). Shared by this
+    /// reader and <see cref="RichGameHeaderParser"/>.
+    /// </summary>
+    internal static Guid DecodeGuid(byte[] raw16)
+        => new(
+            BitConverter.ToInt32(raw16, 0),
+            BitConverter.ToInt16(raw16, 4),
+            BitConverter.ToInt16(raw16, 6),
+            raw16[8..]);
 
     // ------------------------------------------------------------------ //
     //  Raw byte block (e.g. for reading a whole fixed record at once)

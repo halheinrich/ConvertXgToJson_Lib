@@ -67,20 +67,8 @@ internal static class RichGameHeaderParser
 
     // TGUID is always 16 bytes, packed (no alignment issues inside the packed header)
     private static Guid ReadGuidPacked(System.IO.BinaryReader br)
-    {
-        uint   d1 = br.ReadUInt32();
-        ushort d2 = br.ReadUInt16();
-        ushort d3 = br.ReadUInt16();
-        byte[] d4 = br.ReadBytes(8);
-        return new Guid((int)d1, (short)d2, (short)d3, d4);
-    }
+        => PascalBinaryReader.DecodeGuid(br.ReadBytes(16));
 
     private static string ReadWideCharArray(System.IO.BinaryReader br, int elementCount)
-    {
-        byte[] raw = br.ReadBytes(elementCount * 2);
-        int end = 0;
-        while (end < elementCount && (raw[end * 2] != 0 || raw[end * 2 + 1] != 0))
-            end++;
-        return System.Text.Encoding.Unicode.GetString(raw, 0, end * 2);
-    }
+        => PascalBinaryReader.DecodeWideCharArray(br.ReadBytes(elementCount * 2), elementCount);
 }
