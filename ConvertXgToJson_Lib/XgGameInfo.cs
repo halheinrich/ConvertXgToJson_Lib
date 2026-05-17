@@ -1,4 +1,6 @@
-﻿namespace ConvertXgToJson_Lib;
+﻿using ConvertXgToJson_Lib.Models;
+
+namespace ConvertXgToJson_Lib;
 
 /// <summary>
 /// Game-level metadata extracted from <see cref="GameHeaderRecord"/> and
@@ -30,4 +32,22 @@ public sealed class XgGameInfo
     /// Used to filter for opening move decisions.
     /// </summary>
     public bool IsStandardStart { get; init; }
+
+    /// <summary>
+    /// Projects a parsed <see cref="GameHeaderRecord"/> to game-level metadata.
+    /// The single header-to-<see cref="XgGameInfo"/> projection, shared by the
+    /// file reader and the decision iterator. <paramref name="matchLength"/> is
+    /// the normalized match length (0 for money sessions).
+    /// </summary>
+    internal static XgGameInfo From(GameHeaderRecord gh, int matchLength)
+    {
+        bool isMoney = matchLength == 0;
+        return new XgGameInfo
+        {
+            Away1 = isMoney ? 0 : matchLength - gh.Score1,
+            Away2 = isMoney ? 0 : matchLength - gh.Score2,
+            IsCrawfordGame = gh.CrawfordApplies,
+            IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition),
+        };
+    }
 }

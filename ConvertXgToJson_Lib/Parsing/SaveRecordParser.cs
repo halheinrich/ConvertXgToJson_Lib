@@ -53,6 +53,18 @@ internal static class SaveRecordParser
             ?? throw new InvalidDataException("Expected the first record to be a MatchHeaderRecord.");
     }
 
+    /// <summary>
+    /// Parses the record at <paramref name="offset"/> in <paramref name="data"/>
+    /// as a <see cref="GameHeaderRecord"/>. The fast-path reader uses this so the
+    /// game-header byte layout lives only in <see cref="ReadHeaderGame"/>.
+    /// </summary>
+    internal static GameHeaderRecord ReadGameHeaderRecord(byte[] data, int offset)
+    {
+        using var ms = new MemoryStream(data, offset, RecordSize);
+        return ReadOne(ms) as GameHeaderRecord
+            ?? throw new InvalidDataException("Expected a GameHeaderRecord.");
+    }
+
     private static SaveRecord ReadOne(Stream stream)
     {
         // We wrap a subsection of the stream in a PascalBinaryReader.

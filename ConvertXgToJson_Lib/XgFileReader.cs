@@ -199,43 +199,9 @@ public static class XgFileReader
                 continue;
 
             state.GameInfo = null;
-            var gameInfo = ParseGameInfoFromRecord(data, offset, matchLength);
+            var gameInfo = XgGameInfo.From(SaveRecordParser.ReadGameHeaderRecord(data, offset), matchLength);
             state.GameInfo = gameInfo;
             yield return gameInfo;
         }
-    }
-
-    private static XgGameInfo ParseGameInfoFromRecord(byte[] data, int offset, int matchLength)
-    {
-        using var ms = new MemoryStream(data, offset, SaveRecordParser.RecordSize);
-        using var sub = new SubStream(ms, 0, SaveRecordParser.RecordSize, leaveOpen: true);
-        using var r = new PascalBinaryReader(sub);
-
-        // Skip preamble: Previous(4) + Next(4) + EntryType(1) = 9 bytes
-        r.ReadDword();
-        r.ReadDword();
-        r.ReadByte();
-
-        // Score1, Score2: integers (4-byte align, offset 9 → pad 3 → 12)
-        int score1 = r.ReadInteger();
-        int score2 = r.ReadInteger();
-
-        // CrawfordApplies: bool (no align)
-        bool crawford = r.ReadBoolean();
-
-        // InitialPosition: array[0..25] of ShortInt = 26 bytes (no align)
-        var points = new sbyte[26];
-        for (int i = 0; i < 26; i++) points[i] = r.ReadShortInt();
-        var position = new PositionEngine { Points = points };
-
-        bool isMoney = matchLength == 0;
-
-        return new XgGameInfo
-        {
-            Away1 = isMoney ? 0 : matchLength - score1,
-            Away2 = isMoney ? 0 : matchLength - score2,
-            IsCrawfordGame = crawford,
-            IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(position),
-        };
     }
 }

@@ -86,14 +86,7 @@ public static class XgDecisionIterator
             {
                 context.Update(record); // must be before GameInfo so MatchLength is current
 
-                bool isMoney = context.MatchLength == 0;
-                var gameInfo = new XgGameInfo
-                {
-                    Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
-                    Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
-                    IsCrawfordGame = gh.CrawfordApplies,
-                    IsStandardStart = context.IsStandardStart,
-                };
+                var gameInfo = XgGameInfo.From(gh, context.MatchLength);
 
                 if (state != null)
                     state.GameInfo = gameInfo;
@@ -209,14 +202,7 @@ public static class XgDecisionIterator
             {
                 context.Update(record);
 
-                bool isMoney = context.MatchLength == 0;
-                var gameInfo = new XgGameInfo
-                {
-                    Away1 = isMoney ? 0 : context.MatchLength - gh.Score1,
-                    Away2 = isMoney ? 0 : context.MatchLength - gh.Score2,
-                    IsCrawfordGame = gh.CrawfordApplies,
-                    IsStandardStart = context.IsStandardStart,
-                };
+                var gameInfo = XgGameInfo.From(gh, context.MatchLength);
 
                 if (state != null)
                     state.GameInfo = gameInfo;
