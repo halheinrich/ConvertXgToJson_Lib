@@ -69,11 +69,5 @@ internal static class AfterBoardBuilder
     /// Returns the POV-flipped copy of a 26-element on-roll-POV board:
     /// mirrors index order and negates all values.
     /// </summary>
-    internal static int[] FlipBoard(int[] board)
-    {
-        var flipped = new int[26];
-        for (int i = 0; i < 26; i++)
-            flipped[i] = -board[25 - i];
-        return flipped;
-    }
+    internal static int[] FlipBoard(int[] board) => BackgammonConstants.Flip(board);
 }

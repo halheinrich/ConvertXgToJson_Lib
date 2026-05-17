@@ -1,4 +1,5 @@
-﻿using ConvertXgToJson_Lib.Models;
+﻿using System.Numerics;
+using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
 
@@ -38,5 +39,19 @@ internal static class BackgammonConstants
             if (position.Points[i] != StandardOpeningPosition[i])
                 return false;
         return true;
+    }
+
+    /// <summary>
+    /// Returns a 26-element copy of <paramref name="board"/> flipped to the
+    /// opposite player's perspective: index <c>i</c> swapped with <c>25 - i</c>,
+    /// every value negated. The single source of the perspective flip, used
+    /// for both raw position arrays and on-roll board arrays.
+    /// </summary>
+    internal static T[] Flip<T>(IReadOnlyList<T> board) where T : INumber<T>
+    {
+        var flipped = new T[26];
+        for (int i = 0; i < 26; i++)
+            flipped[i] = -board[25 - i];
+        return flipped;
     }
 }

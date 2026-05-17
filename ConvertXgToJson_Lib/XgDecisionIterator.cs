@@ -544,29 +544,14 @@ public static class XgDecisionIterator
 
     private static int[] ToBoard(sbyte[] points, int activePlayer)
     {
-        if (activePlayer >= 0)
-        {
-            var board = new int[26];
-            for (int i = 0; i < 26; i++)
-                board[i] = points[i];
-            return board;
-        }
-        else
-        {
-            var board = new int[26];
-            for (int i = 0; i < 26; i++)
-                board[i] = -points[25 - i];
-            return board;
-        }
+        var board = new int[26];
+        for (int i = 0; i < 26; i++)
+            board[i] = points[i];
+        return activePlayer >= 0 ? board : BackgammonConstants.Flip(board);
     }
 
     private static PositionEngine FlipPosition(PositionEngine pos)
-    {
-        var flipped = new sbyte[26];
-        for (int i = 0; i < 26; i++)
-            flipped[i] = (sbyte)-pos.Points[25 - i];
-        return new PositionEngine { Points = flipped };
-    }
+        => new() { Points = BackgammonConstants.Flip(pos.Points) };
 
     /// <summary>
     /// Builds the XGID string for a decision. When <paramref name="activePlayer"/>
