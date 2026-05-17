@@ -41,6 +41,18 @@ internal static class SaveRecordParser
         return records;
     }
 
+    /// <summary>
+    /// Parses the first record of <paramref name="bytes"/> as a
+    /// <see cref="MatchHeaderRecord"/>. The fast-path readers use this so the
+    /// match-header byte layout lives only in <see cref="ReadHeaderMatch"/>.
+    /// </summary>
+    internal static MatchHeaderRecord ReadMatchHeaderRecord(byte[] bytes)
+    {
+        using var ms = new MemoryStream(bytes);
+        return ReadOne(ms) as MatchHeaderRecord
+            ?? throw new InvalidDataException("Expected the first record to be a MatchHeaderRecord.");
+    }
+
     private static SaveRecord ReadOne(Stream stream)
     {
         // We wrap a subsection of the stream in a PascalBinaryReader.

@@ -827,14 +827,7 @@ public static class XgDecisionIterator
         foreach (var r in file.Records)
         {
             if (r is MatchHeaderRecord hm)
-            {
-                return new XgMatchInfo
-                {
-                    Player1 = hm.Player1,
-                    Player2 = hm.Player2,
-                    MatchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength,
-                };
-            }
+                return XgMatchInfo.From(hm);
         }
         return null;
     }

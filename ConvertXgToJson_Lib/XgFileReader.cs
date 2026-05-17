@@ -142,7 +142,7 @@ public static class XgFileReader
         if (firstStream[8] != (byte)RecordType.HeaderMatch)
             return null;
 
-        return ParseMatchInfoFromRecord(firstStream);
+        return XgMatchInfo.From(SaveRecordParser.ReadMatchHeaderRecord(firstStream));
     }
 
     private static byte[] ReadAllCompressedBytes(Stream stream)
@@ -152,36 +152,6 @@ public static class XgFileReader
         return ms.ToArray();
     }
 
-    private static XgMatchInfo ParseMatchInfoFromRecord(byte[] record)
-    {
-        using var ms = new MemoryStream(record);
-        using var sub = new SubStream(ms, 0, record.Length, leaveOpen: true);
-        using var r = new PascalBinaryReader(sub);
-
-        // Skip preamble: Previous(4) + Next(4) + EntryType(1) = 9 bytes
-        r.ReadDword();
-        r.ReadDword();
-        r.ReadByte();
-
-        // Player1Ansi: string[40] = 41 bytes (offset 9)
-        _ = r.ReadPascalAnsiString(40);  // offset 50
-                                         // Player2Ansi: string[40] = 41 bytes (offset 50)
-        _ = r.ReadPascalAnsiString(40);  // offset 91
-
-        // MatchLength: integer (4-byte align, offset 91 → pad 1 → 92)
-        int matchLength = r.ReadInteger();  // offset 96
-
-        sub.Position = 880;
-        string player1 = r.ReadShortUnicodeString();  // AlignTo(2) → 880 already even → reads 258 bytes
-        string player2 = r.ReadShortUnicodeString();
-
-        return new XgMatchInfo
-        {
-            Player1 = player1,
-            Player2 = player2,
-            MatchLength = matchLength >= 99999 ? 0 : matchLength,
-        };
-    }
     /// <summary>
     /// Streaming overload of <see cref="ReadGameHeaders(string)"/>.
     /// Yields one <see cref="XgGameInfo"/> per game in the file, populating
@@ -212,7 +182,7 @@ public static class XgFileReader
         int matchLength = 0;
         if (data[8] == (byte)RecordType.HeaderMatch)
         {
-            state.MatchInfo = ParseMatchInfoFromRecord(data);
+            state.MatchInfo = XgMatchInfo.From(SaveRecordParser.ReadMatchHeaderRecord(data));
             matchLength = state.MatchInfo.MatchLength;
         }
 
