@@ -4,7 +4,7 @@ using ConvertXgToJson_Lib.Models;
 namespace ConvertXgToJson_Lib;
 
 /// <summary>
-/// Shared backgammon constants and position utilities.
+/// Shared backgammon constants and stateless helpers.
 /// </summary>
 internal static class BackgammonConstants
 {

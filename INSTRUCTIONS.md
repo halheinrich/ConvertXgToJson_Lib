@@ -225,9 +225,16 @@ helper consumed by `XgidEncoder`.
 
 ### BackgammonConstants
 
+Shared backgammon constants and stateless helpers.
+
 * `StandardOpeningPosition` — `internal static readonly sbyte[26]` holding
   the standard starting position in the canonical 26-point layout.
 * `IsStandardOpeningPosition` — comparison helper against that constant.
+* `Flip<T>` — single source of the perspective flip: mirror index `i`
+  with `25 - i`, negate every value. Generic (`T : INumber<T>`) so it
+  serves both `sbyte` position arrays and `int` board arrays.
+* `AwayScore` — single source of the away-score rule
+  (`matchLength - score`, 0 for money games).
 
 ### Board format
 
