@@ -813,12 +813,12 @@ public static class XgDecisionIterator
                          : ctx.Level1 > 0 ? ctx.Level1
                          : ctx.LevelTrunc;
             int innerPly = plyLevel + 1;
-            string label = $"Rollout: {ctx.GamesRolled} trials. {LevelLabel((short)plyLevel)}";
+            string label = $"Rollout: {ctx.GamesRolled} trials. {LevelInfo((short)plyLevel).Label}";
             string abbrev = $"{innerPly}p{ctx.GamesRolled}";
             int rank = 100 + innerPly;
             return (label, abbrev, rank);
         }
-        return (LevelLabel(evalLevel), LevelAbbreviation(evalLevel), LevelRank(evalLevel));
+        return LevelInfo(evalLevel);
     }
 
     /// <summary>
@@ -1005,87 +1005,50 @@ public static class XgDecisionIterator
     internal static int CubeValueActual(int raw) =>
         raw == 0 ? 1 : (int)Math.Pow(2, Math.Abs(raw));
 
-    private static string LevelLabel(short level) => level switch
-    {
-        0 => "1-ply",
-        1 => "2-ply",
-        2 => "3-ply",
-        12 => "3-ply red",
-        3 => "4-ply",
-        4 => "5-ply",
-        5 => "6-ply",
-        6 => "7-ply",
-        100 => "Rollout",
-        1000 => "XG Roller",
-        1001 => "XG Roller+",
-        1002 => "XG Roller++",
-        998 => "Book V1",
-        999 => "Book V2",
-        _ => $"level-{level}",
-    };
-
     /// <summary>
-    /// Compact display form of <see cref="LevelLabel"/>, sized for narrow
-    /// table cells. N-ply labels are kept intact (short enough already);
-    /// XG Roller family collapses to R / R+ / R++; Book V1 and Book V2
-    /// both collapse to "Book" — the version distinction is preserved in
-    /// the full <see cref="LevelLabel"/> but isn't surfaced in the
-    /// compact column. The Rollout sentinel (<c>short 100</c>) without a
-    /// matching rollout context abbreviates to "Ro" — the normal rollout
-    /// path goes through <see cref="ResolveDepthInfo"/>'s rollout branch
-    /// and never hits this code.
-    /// </summary>
-    private static string LevelAbbreviation(short level) => level switch
-    {
-        0 => "1-ply",
-        1 => "2-ply",
-        2 => "3-ply",
-        12 => "3-ply red",
-        3 => "4-ply",
-        4 => "5-ply",
-        5 => "6-ply",
-        6 => "7-ply",
-        100 => "Ro",
-        1000 => "R",
-        1001 => "R+",
-        1002 => "R++",
-        998 => "Book",
-        999 => "Book",
-        _ => $"level-{level}",
-    };
-
-    /// <summary>
-    /// Ordinal ranking of the analysis depth; higher = deeper / more
-    /// rigorous. Consumed by <see cref="BackgammonDiagram_Lib"/> to flag
-    /// out-of-order analysis across adjacent sorted-by-equity plays.
+    /// Resolves an XG analysis level into its three display / ordering forms:
+    /// the full <c>Label</c>, a compact <c>Abbreviation</c> for narrow table
+    /// cells, and an ordinal <c>Rank</c> (higher = deeper / more rigorous).
+    /// Single source of the level taxonomy — <see cref="ResolveDepthInfo"/>
+    /// projects whichever forms a caller needs.
     ///
     /// <para>
-    /// Numeric gaps between categories leave room for future depths
-    /// without renumbering: N-ply occupies 1..7, XG Roller family 20..22,
-    /// rollouts 100+inner-ply (see <see cref="ResolveDepthInfo"/>). Book
-    /// V1/V2 and any unrecognised level rank 0 — the lowest slot —
-    /// because a static book lookup is not an analysis of this position.
-    /// "3-ply red" shares rank 3 with plain 3-ply: reduced variance
-    /// doesn't deepen search, it only narrows the candidate set.
+    /// Abbreviation: N-ply labels are short enough to keep intact; the XG
+    /// Roller family collapses to R / R+ / R++; Book V1 and V2 both collapse
+    /// to "Book" (the version distinction survives only in <c>Label</c>). The
+    /// Rollout sentinel (<c>short 100</c>) without a matching rollout context
+    /// abbreviates to "Ro" — the normal rollout path goes through
+    /// <see cref="ResolveDepthInfo"/>'s rollout branch and never reaches here.
+    /// </para>
+    ///
+    /// <para>
+    /// Rank: numeric gaps between categories leave room for future depths
+    /// without renumbering — N-ply occupies 1..7, the XG Roller family 20..22,
+    /// rollouts 100 + inner-ply (see <see cref="ResolveDepthInfo"/>). Book
+    /// V1/V2 and any unrecognised level rank 0 — a static book lookup is not
+    /// an analysis of the position. "3-ply red" shares rank 3 with plain
+    /// 3-ply: reduced variance narrows the candidate set, it does not deepen
+    /// search. The rank lets downstream rendering flag out-of-order analysis
+    /// across adjacent sorted-by-equity plays.
     /// </para>
     /// </summary>
-    private static int LevelRank(short level) => level switch
+    private static (string Label, string Abbreviation, int Rank) LevelInfo(short level) => level switch
     {
-        0 => 1,
-        1 => 2,
-        2 => 3,
-        12 => 3,
-        3 => 4,
-        4 => 5,
-        5 => 6,
-        6 => 7,
-        100 => 100,
-        1000 => 20,
-        1001 => 21,
-        1002 => 22,
-        998 => 0,
-        999 => 0,
-        _ => 0,
+        0    => ("1-ply",        "1-ply",     1),
+        1    => ("2-ply",        "2-ply",     2),
+        2    => ("3-ply",        "3-ply",     3),
+        12   => ("3-ply red",    "3-ply red", 3),
+        3    => ("4-ply",        "4-ply",     4),
+        4    => ("5-ply",        "5-ply",     5),
+        5    => ("6-ply",        "6-ply",     6),
+        6    => ("7-ply",        "7-ply",     7),
+        100  => ("Rollout",      "Ro",        100),
+        1000 => ("XG Roller",    "R",         20),
+        1001 => ("XG Roller+",   "R+",        21),
+        1002 => ("XG Roller++",  "R++",       22),
+        998  => ("Book V1",      "Book",      0),
+        999  => ("Book V2",      "Book",      0),
+        _    => ($"level-{level}", $"level-{level}", 0),
     };
 
 }
