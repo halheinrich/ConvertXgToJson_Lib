@@ -177,11 +177,12 @@ internal static class XgFileBuilder
         string player1 = "Alice",
         string player2 = "Bob",
         int matchLength = 7,
-        DateTime? date = null)
+        DateTime? date = null,
+        string location = "Monaco")
     {
         var matchDate = date ?? new DateTime(2024, 1, 15, 14, 30, 0, DateTimeKind.Utc);
 
-        byte[] xgBytes = BuildXgStream(player1, player2, matchLength, matchDate);
+        byte[] xgBytes = BuildXgStream(player1, player2, matchLength, matchDate, location);
         byte[] xgiBytes = BuildXgiStream(xgBytes);
         byte[] xgrBytes = [];
         byte[] xgcBytes = Encoding.Latin1.GetBytes("Match comment\r\n");
@@ -218,9 +219,9 @@ internal static class XgFileBuilder
 
     // ------------------------------------------------------------------
 
-    private static byte[] BuildXgStream(string p1, string p2, int matchLen, DateTime date)
+    private static byte[] BuildXgStream(string p1, string p2, int matchLen, DateTime date, string location = "Monaco")
     {
-        byte[] rec0 = BuildMatchHeaderRecord(p1, p2, matchLen, date);
+        byte[] rec0 = BuildMatchHeaderRecord(p1, p2, matchLen, date, location);
         byte[] rec1 = BuildMatchFooterRecord(matchLen);
         return [.. rec0, .. rec1];
     }
@@ -250,7 +251,7 @@ internal static class XgFileBuilder
     // ------------------------------------------------------------------
 
     internal static byte[] BuildMatchHeaderRecord(
-        string p1, string p2, int matchLen, DateTime date)
+        string p1, string p2, int matchLen, DateTime date, string location = "Monaco")
     {
         const int MagicNumber = 0x494C4D44;
 
@@ -282,7 +283,7 @@ internal static class XgFileBuilder
          .Bool(true)                    // CountForElo
          .Bool(true)                    // AddToProfile1
          .Bool(true)                    // AddToProfile2
-         .PascalAnsiString("Monaco", 128)
+         .PascalAnsiString(location, 128)
          .Int32((int)ConvertXgToJson_Lib.Models.GameMode.Competition)
          .Bool(false)                   // Imported
          .PascalAnsiString("Final", 128)
@@ -311,7 +312,7 @@ internal static class XgFileBuilder
         b.ShortUnicodeString("World Championship")
          .ShortUnicodeString(p1)
          .ShortUnicodeString(p2)
-         .ShortUnicodeString("Monaco")
+         .ShortUnicodeString(location)
          .ShortUnicodeString("Final");
 
         b.Int32(0)    // ClockType = None

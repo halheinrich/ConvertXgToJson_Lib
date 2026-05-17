@@ -198,12 +198,14 @@ internal static class SaveRecordParser
         // Transcriber: TShortUnicodeString (2-byte align, offset 1964 → no pad)
         string transcriber = r.ReadShortUnicodeString();    // offset 2222
 
+        bool isGalaxyMoneyGame = IsGalaxyMoneyGame(locationAnsi, matchLength, crawford);
+
         return new MatchHeaderRecord
         {
             EntryType              = type,
             Player1Ansi            = player1Ansi,
             Player2Ansi            = player2Ansi,
-            MatchLength            = matchLength,
+            MatchLength            = isGalaxyMoneyGame ? 0 : matchLength,
             Variation              = variation,
             Crawford               = crawford,
             Jacoby                 = jacoby,
@@ -235,7 +237,7 @@ internal static class SaveRecordParser
             UnratedImport          = unratedImp,
             CommentHeaderMatchIndex = commentHeader,
             CommentFooterMatchIndex = commentFooter,
-            IsMoneyMatch           = isMoneyMatch,
+            IsMoneyMatch           = isMoneyMatch || isGalaxyMoneyGame,
             WinMoney               = winMoney,
             LoseMoney              = loseMoney,
             Currency               = currency,
@@ -258,6 +260,19 @@ internal static class SaveRecordParser
             Transcriber            = transcriber,
         };
     }
+
+    /// <summary>
+    /// True when a parsed match header is a Backgammon Galaxy money game.
+    /// Galaxy exports money games with an illegal Crawford flag and a real,
+    /// even match length (it abuses the field as a cube-size limit) instead
+    /// of XG's 99999 money sentinel, so without this check they parse as
+    /// rated matches. The location compare is ordinal and trimmed; Galaxy
+    /// writes the site name into the ANSI location field.
+    /// </summary>
+    internal static bool IsGalaxyMoneyGame(string locationAnsi, int matchLength, bool crawford) =>
+        string.Equals(locationAnsi.Trim(), "BackgammonGalaxy", StringComparison.Ordinal)
+        && matchLength % 2 == 0
+        && crawford;
 
     // ------------------------------------------------------------------
     //  tsHeaderGame

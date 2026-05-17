@@ -201,7 +201,7 @@ public sealed class MatchHeaderRecord : SaveRecord
     // ANSI (XG1 compat)
     public string   Player1Ansi    { get; init; } = "";
     public string   Player2Ansi    { get; init; } = "";
-    public int      MatchLength    { get; init; }   // 99999 = unlimited
+    public int      MatchLength    { get; init; }   // 99999 = unlimited; 0 for Galaxy money games
     public int      Variation      { get; init; }   // 0=BG,1=Nack,2=Hyper,3=Longgammon
     public bool     Crawford       { get; init; }
     public bool     Jacoby         { get; init; }
@@ -233,7 +233,7 @@ public sealed class MatchHeaderRecord : SaveRecord
     public bool     UnratedImport  { get; init; }
     public int      CommentHeaderMatchIndex { get; init; }
     public int      CommentFooterMatchIndex { get; init; }
-    public bool     IsMoneyMatch   { get; init; }
+    public bool     IsMoneyMatch   { get; init; }   // money-match flag; parser OR's in Galaxy money-game detection
     public float    WinMoney       { get; init; }
     public float    LoseMoney      { get; init; }
     public CurrencyId Currency     { get; init; }
