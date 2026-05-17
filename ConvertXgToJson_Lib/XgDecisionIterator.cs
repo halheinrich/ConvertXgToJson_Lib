@@ -249,7 +249,7 @@ public static class XgDecisionIterator
     private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
     {
         var analysis = move.Analysis;
-        if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
+        if (!IsAnalysed(move))
             return null;
 
         // XG's native rank 0 is not always the highest-equity candidate;
@@ -302,7 +302,7 @@ public static class XgDecisionIterator
     private static BgDecisionData? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
     {
         var analysis = move.Analysis;
-        if (analysis.MoveCount == 0 || analysis.Evals.Length == 0)
+        if (!IsAnalysed(move))
             return null;
         int dice = DiceToInt(move.Dice);
         if (dice == 0) return null;
