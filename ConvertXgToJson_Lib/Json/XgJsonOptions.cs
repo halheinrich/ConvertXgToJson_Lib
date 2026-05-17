@@ -73,10 +73,7 @@ internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
 
         string typeName = typeProp.GetString() ?? "";
 
-        // Build inner options without this converter to avoid recursion
-        var innerOptions = new JsonSerializerOptions(options);
-        innerOptions.Converters.Remove(
-            innerOptions.Converters.First(c => c is SaveRecordConverter));
+        var innerOptions = WithoutSelf(options);
 
         string json = root.GetRawText();
 
@@ -98,11 +95,7 @@ internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
         // Write discriminator first
         writer.WriteString("$type", value.EntryType.ToString());
 
-        // Serialize the concrete type using options WITHOUT this converter
-        // to avoid infinite recursion.
-        var innerOptions = new JsonSerializerOptions(options);
-        innerOptions.Converters.Remove(
-            innerOptions.Converters.First(c => c is SaveRecordConverter));
+        var innerOptions = WithoutSelf(options);
 
         using var doc = JsonSerializer.SerializeToDocument(value, value.GetType(), innerOptions);
         foreach (var prop in doc.RootElement.EnumerateObject())
@@ -112,5 +105,17 @@ internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
         }
 
         writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// Clones <paramref name="options"/> without this converter, so the inner
+    /// (de)serialization of a concrete SaveRecord type does not recurse back
+    /// into SaveRecordConverter.
+    /// </summary>
+    private static JsonSerializerOptions WithoutSelf(JsonSerializerOptions options)
+    {
+        var inner = new JsonSerializerOptions(options);
+        inner.Converters.Remove(inner.Converters.First(c => c is SaveRecordConverter));
+        return inner;
     }
 }
