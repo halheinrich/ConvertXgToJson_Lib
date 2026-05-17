@@ -124,16 +124,8 @@ public static class XgFileReader
     /// </returns>
     public static XgMatchInfo? ReadMatchInfo(string path)
     {
-        using var stream = File.OpenRead(path);
-
-        // Strip the RichGameFormat outer header and seek to compressed payload.
-        var (_, contentOffset) = RichGameHeaderParser.Read(stream);
-        stream.Position = contentOffset;
-
-        // Read only the first zlib stream (the xg game-records sub-stream).
-        // The MatchHeaderRecord is always the first record in that stream.
-        byte[] raw = ReadAllCompressedBytes(stream);
-        byte[]? firstStream = XgDecompressor.DecompressFirstStream(raw);
+        // The MatchHeaderRecord is always the first record of the first stream.
+        byte[]? firstStream = ReadFirstDecompressedStream(path);
         if (firstStream == null || firstStream.Length < SaveRecordParser.RecordSize)
             return null;
 
@@ -153,6 +145,20 @@ public static class XgFileReader
     }
 
     /// <summary>
+    /// Opens <paramref name="path"/>, strips the RichGameFormat outer header,
+    /// and decompresses only the first zlib stream — the xg game-records
+    /// sub-stream that begins with the match header. Returns <c>null</c> when
+    /// that stream is unreadable.
+    /// </summary>
+    private static byte[]? ReadFirstDecompressedStream(string path)
+    {
+        using var stream = File.OpenRead(path);
+        var (_, contentOffset) = RichGameHeaderParser.Read(stream);
+        stream.Position = contentOffset;
+        return XgDecompressor.DecompressFirstStream(ReadAllCompressedBytes(stream));
+    }
+
+    /// <summary>
     /// Streaming overload of <see cref="ReadGameHeaders(string)"/>.
     /// Yields one <see cref="XgGameInfo"/> per game in the file, populating
     /// <see cref="XgIteratorState.MatchInfo"/> before the first yield.
@@ -168,13 +174,7 @@ public static class XgFileReader
     {
         state.MatchInfo = null;
 
-        using var stream = File.OpenRead(path);
-
-        var (_, contentOffset) = RichGameHeaderParser.Read(stream);
-        stream.Position = contentOffset;
-
-        byte[] raw = ReadAllCompressedBytes(stream);
-        byte[]? data = XgDecompressor.DecompressFirstStream(raw);
+        byte[]? data = ReadFirstDecompressedStream(path);
         if (data == null || data.Length < SaveRecordParser.RecordSize)
             yield break;
 
