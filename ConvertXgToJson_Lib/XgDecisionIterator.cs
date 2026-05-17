@@ -54,14 +54,26 @@ public static class XgDecisionIterator
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.Iterate requires a non-null sourceFile for DecisionId stamping.");
-        return IterateCore(file, sourceFile, state, callbacks);
+        return IterateCore<DecisionRow>(file, sourceFile, state, callbacks, BuildMoveRow, BuildCubeRows);
     }
 
-    private static IEnumerable<DecisionRow> IterateCore(
+    /// <summary>
+    /// Shared iteration skeleton for both decision surfaces. Walks the record
+    /// stream once — match-info extraction, state population, the skip / stop
+    /// callbacks, game-header handling — and delegates only the per-decision
+    /// row construction to <paramref name="buildMove"/> /
+    /// <paramref name="buildCube"/>. <c>Iterate</c> supplies the
+    /// <see cref="DecisionRow"/> builders; <c>IterateDiagramRequests</c> the
+    /// <see cref="BgDecisionData"/> builders.
+    /// </summary>
+    private static IEnumerable<T> IterateCore<T>(
         XgFile file,
         string sourceFile,
         XgIteratorState? state,
-        XgIteratorCallbacks? callbacks)
+        XgIteratorCallbacks? callbacks,
+        Func<MoveRecord, MatchContext, string, List<RolloutContext>, T?> buildMove,
+        Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
+        where T : class, IDecisionFilterData
     {
         var context = new MatchContext(file.Records, sourceFile);
 
@@ -104,7 +116,7 @@ public static class XgDecisionIterator
 
             if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
             {
-                var row = BuildMoveRow(move, context, sourceFile, file.Rollouts);
+                var row = buildMove(move, context, sourceFile, file.Rollouts);
                 if (row != null)
                 {
                     yield return row;
@@ -116,7 +128,7 @@ public static class XgDecisionIterator
             }
             else if (record is CubeRecord cube && IsAnalysed(cube))
             {
-                foreach (var row in BuildCubeRows(cube, context, sourceFile, file.Rollouts))
+                foreach (var row in buildCube(cube, context, sourceFile, file.Rollouts))
                 {
                     yield return row;
                     if (callbacks?.StopMatchAfter?.Invoke(row) == true)
@@ -170,79 +182,7 @@ public static class XgDecisionIterator
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.IterateDiagramRequests requires a non-null sourceFile for DecisionId stamping.");
-        return IterateDiagramRequestsCore(file, sourceFile, state, callbacks);
-    }
-
-    private static IEnumerable<BgDecisionData> IterateDiagramRequestsCore(
-        XgFile file,
-        string sourceFile,
-        XgIteratorState? state,
-        XgIteratorCallbacks? callbacks)
-    {
-        var context = new MatchContext(file.Records, sourceFile);
-
-        var matchInfo = ExtractMatchInfo(file)
-            ?? throw new InvalidDataException(
-                $"XG file '{sourceFile}' has no readable match header — cannot iterate decisions.");
-
-        if (state != null)
-        {
-            state.MatchInfo = matchInfo;
-            state.GameInfo = null;
-        }
-
-        if (callbacks?.SkipMatchAt?.Invoke(matchInfo) == true)
-            yield break;
-
-        bool skipCurrentGame = false;
-
-        foreach (var record in file.Records)
-        {
-            if (record is GameHeaderRecord gh)
-            {
-                context.Update(record);
-
-                var gameInfo = XgGameInfo.From(gh, context.MatchLength);
-
-                if (state != null)
-                    state.GameInfo = gameInfo;
-
-                skipCurrentGame = callbacks?.SkipGameAt?.Invoke(gameInfo) == true;
-                continue;
-            }
-
-            context.Update(record);
-
-            if (skipCurrentGame)
-                continue;
-
-            if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
-            {
-                var req = BuildMoveDiagramRequest(move, context, sourceFile, file.Rollouts);
-                if (req != null)
-                {
-                    yield return req;
-                    if (callbacks?.StopMatchAfter?.Invoke(req) == true)
-                        yield break;
-                    if (callbacks?.StopGameAfter?.Invoke(req) == true)
-                        skipCurrentGame = true;
-                }
-            }
-            else if (record is CubeRecord cube && IsAnalysed(cube))
-            {
-                foreach (var req in BuildCubeDiagramRequests(cube, context, sourceFile, file.Rollouts))
-                {
-                    yield return req;
-                    if (callbacks?.StopMatchAfter?.Invoke(req) == true)
-                        yield break;
-                    if (callbacks?.StopGameAfter?.Invoke(req) == true)
-                    {
-                        skipCurrentGame = true;
-                        break;
-                    }
-                }
-            }
-        }
+        return IterateCore<BgDecisionData>(file, sourceFile, state, callbacks, BuildMoveDiagramRequest, BuildCubeDiagramRequests);
     }
 
     // -----------------------------------------------------------------------
