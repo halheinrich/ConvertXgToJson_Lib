@@ -1,4 +1,5 @@
 using BgDataTypes_Lib;
+using ConvertXgToJson_Lib.Parsing;
 
 namespace ConvertXgToJson_Lib;
 
@@ -16,7 +17,7 @@ namespace ConvertXgToJson_Lib;
 /// <list type="bullet">
 ///   <item><description><c>from == -1</c> — terminator (stop)</description></item>
 ///   <item><description><c>from == 24</c> — bar entry → <c>FrPt = 25</c></description></item>
-///   <item><description><c>to &lt; 0</c> — bear off → <c>ToPt = 0</c>. XG encodes overshoots as <c>to = from - die</c> and so can emit <c>-2, -3, …</c>; treating any negative as bear-off matches <see cref="ConvertXgToJson_Lib.Parsing.AfterBoardBuilder"/>.</description></item>
+///   <item><description><c>to &lt; 0</c> — bear off → <c>ToPt = 0</c>. XG encodes overshoots as <c>to = from - die</c> and so can emit <c>-2, -3, …</c>; treating any negative as bear-off. Point-index resolution is shared with <see cref="ConvertXgToJson_Lib.Parsing.AfterBoardBuilder"/> via <see cref="ConvertXgToJson_Lib.Parsing.XgMoveEncoding"/>.</description></item>
 ///   <item><description>otherwise — regular point, <c>FrPt = from + 1</c>, <c>ToPt = to + 1</c></description></item>
 /// </list>
 ///
@@ -53,25 +54,21 @@ internal static class XgMoveTranslator
             sbyte to = moves[i + 1];
             if (from == -1) break;
 
-            int frPt = from == 24 ? 25 : from + 1;
+            var (frPt, toLabel, isBearOff) = XgMoveEncoding.DecodeMovePair(from, to);
             int toPt;
-            if (to < 0)
+            if (isBearOff)
             {
                 toPt = 0;
             }
+            else if (boardOnRollPov[toLabel] == -1)
+            {
+                boardOnRollPov[toLabel] = 0;
+                boardOnRollPov[0] -= 1;
+                toPt = -toLabel;
+            }
             else
             {
-                int label = to + 1;
-                if (boardOnRollPov[label] == -1)
-                {
-                    boardOnRollPov[label] = 0;
-                    boardOnRollPov[0] -= 1;
-                    toPt = -label;
-                }
-                else
-                {
-                    toPt = label;
-                }
+                toPt = toLabel;
             }
             play.Add(new Move(frPt, toPt));
         }

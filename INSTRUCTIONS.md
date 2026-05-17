@@ -51,6 +51,7 @@ ConvertXgToJson_Lib/
     RolloutContextParser.cs
     SaveRecordParser.cs
     XgDecompressor.cs
+    XgMoveEncoding.cs
 ConvertXgToJson_Lib.Tests/
   ConvertXgToJson_Lib.Tests.csproj
   BoardTests.cs
@@ -207,9 +208,11 @@ on-roll-board mutation (sending hit blots to the bar). Its output is
 consumed once per candidate by `BuildMoveDiagramRequest` and feeds
 both `PlayCandidate.MoveNotation` (rendered) and `PlayCandidate.Play`
 (structural). One producer call per candidate; one scratch-board
-mutation. Sentinel handling matches `Parsing/AfterBoardBuilder`
-(`from == -1` terminator, `from == 24` bar entry, `to < 0` bear off
-including XG overshoot encodings). The `(0, 0)` "dance" sentinel is
+mutation. Point-index decoding (`from == 24` bar entry, `to < 0`
+bear off including XG overshoot encodings) is shared with
+`Parsing/AfterBoardBuilder` via `Parsing/XgMoveEncoding`. The
+`from == -1` terminator is loop control kept by each consumer. The
+`(0, 0)` "dance" sentinel is
 **not** recognized at this layer; sentinel-only emission is gated
 upstream — see Pitfalls.
 

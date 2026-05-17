@@ -47,12 +47,11 @@ internal static class AfterBoardBuilder
             if (from == -1) break;
             if (from == 0 && to == 0) break; // "no legal moves" — dance
 
-            int fromIdx = from == 24 ? 25 : from + 1;
+            var (fromIdx, toIdx, isBearOff) = XgMoveEncoding.DecodeMovePair(from, to);
             board[fromIdx]--;
 
-            if (to < 0) continue; // bear off — no destination side-effects
+            if (isBearOff) continue; // bear off — no destination side-effects
 
-            int toIdx = to + 1;
             if (board[toIdx] == -1)
             {
                 // Opponent blot at destination: hit sends it to the opponent
