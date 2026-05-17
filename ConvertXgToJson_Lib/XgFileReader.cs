@@ -137,13 +137,6 @@ public static class XgFileReader
         return XgMatchInfo.From(SaveRecordParser.ReadMatchHeaderRecord(firstStream));
     }
 
-    private static byte[] ReadAllCompressedBytes(Stream stream)
-    {
-        using var ms = new MemoryStream();
-        stream.CopyTo(ms);
-        return ms.ToArray();
-    }
-
     /// <summary>
     /// Opens <paramref name="path"/>, strips the RichGameFormat outer header,
     /// and decompresses only the first zlib stream — the xg game-records
@@ -155,7 +148,7 @@ public static class XgFileReader
         using var stream = File.OpenRead(path);
         var (_, contentOffset) = RichGameHeaderParser.Read(stream);
         stream.Position = contentOffset;
-        return XgDecompressor.DecompressFirstStream(ReadAllCompressedBytes(stream));
+        return XgDecompressor.DecompressFirstStream(XgDecompressor.ReadAllBytes(stream));
     }
 
     /// <summary>

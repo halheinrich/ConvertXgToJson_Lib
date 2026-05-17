@@ -73,7 +73,7 @@ internal static class XgDecompressor
 
     // -----------------------------------------------------------------------
 
-    private static byte[] ReadAllBytes(Stream source)
+    internal static byte[] ReadAllBytes(Stream source)
     {
         using var ms = new MemoryStream();
         source.CopyTo(ms);
