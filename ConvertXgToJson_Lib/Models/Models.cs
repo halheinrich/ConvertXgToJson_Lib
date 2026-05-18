@@ -201,7 +201,7 @@ public sealed class MatchHeaderRecord : SaveRecord
     // ANSI (XG1 compat)
     public string   Player1Ansi    { get; init; } = "";
     public string   Player2Ansi    { get; init; } = "";
-    public int      MatchLength    { get; init; }   // 99999 = unlimited; 0 for Galaxy money games
+    public int      MatchLength    { get; init; }   // 99999 = unlimited / money (Galaxy money games normalized here)
     public int      Variation      { get; init; }   // 0=BG,1=Nack,2=Hyper,3=Longgammon
     public bool     Crawford       { get; init; }
     public bool     Jacoby         { get; init; }

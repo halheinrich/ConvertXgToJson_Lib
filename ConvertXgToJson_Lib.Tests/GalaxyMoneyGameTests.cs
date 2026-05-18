@@ -9,9 +9,11 @@ namespace ConvertXgToJson_Lib.Tests;
 /// Backgammon Galaxy exports money games by abusing <c>MatchLength</c> as a
 /// cube-size limit (a real, even value) and setting an illegal Crawford flag,
 /// instead of XG's 99999 money sentinel — so without detection they parse as
-/// rated matches. <see cref="SaveRecordParser"/> detects them and overwrites
-/// <c>MatchLength</c> to 0; it also forces <c>IsMoneyMatch</c> true, because
-/// the raw XG money byte reads false on these files.
+/// rated matches. <see cref="SaveRecordParser"/> detects them and rewrites
+/// <c>MatchLength</c> to 99999 (XG's canonical money sentinel); it also forces
+/// <c>IsMoneyMatch</c> true, because the raw XG money byte reads false on these
+/// files. Past the parser a Galaxy money game is indistinguishable from a
+/// native XG money game.
 /// </summary>
 [Collection("FileIO")]
 public class GalaxyMoneyGameTests
@@ -49,14 +51,14 @@ public class GalaxyMoneyGameTests
     // ------------------------------------------------------------------ //
 
     [Fact]
-    public void Parser_GalaxyMoneyGame_MatchLengthOverwrittenToZero_IsMoneyMatchTrue()
+    public void Parser_GalaxyMoneyGame_MatchLengthRewrittenToSentinel_IsMoneyMatchTrue()
     {
         var file = XgFileReader.ReadStream(
             XgFileBuilder.BuildMinimalXgFile(matchLength: 16, location: "BackgammonGalaxy"));
         var header = file.Records.OfType<MatchHeaderRecord>().First();
 
-        header.MatchLength.Should().Be(0,
-            "a Galaxy money game's match length is a cube-limit kludge, normalized to 0");
+        header.MatchLength.Should().Be(99999,
+            "a Galaxy money game's kludged match length is rewritten to XG's 99999 money sentinel");
         header.IsMoneyMatch.Should().BeTrue(
             "a detected Galaxy money game forces IsMoneyMatch true even when the raw XG byte is false");
     }
@@ -104,9 +106,10 @@ public class GalaxyMoneyGameTests
 
     /// <summary>
     /// <c>match38254396.xg</c> is the reported Backgammon Galaxy money game,
-    /// exported with <c>MatchLength = 16</c>. Pins that the full parse and the
-    /// <see cref="XgFileReader.ReadMatchInfo"/> fast path both surface a
-    /// normalized match length of 0.
+    /// exported with <c>MatchLength = 16</c>. Pins that the full parse rewrites
+    /// the record's <c>MatchLength</c> to the 99999 money sentinel, and the
+    /// <see cref="XgFileReader.ReadMatchInfo"/> fast path surfaces the
+    /// downstream-normalized 0.
     /// </summary>
     [Fact]
     public void RealFixture_Match38254396_IsDetectedAsGalaxyMoneyGame()
@@ -120,12 +123,12 @@ public class GalaxyMoneyGameTests
         var file = XgFileReader.ReadFile(path);
         var header = file.Records.OfType<MatchHeaderRecord>().First();
 
-        header.MatchLength.Should().Be(0,
-            "match38254396 is a Backgammon Galaxy money game; its kludged match length normalizes to 0");
+        header.MatchLength.Should().Be(99999,
+            "match38254396 is a Backgammon Galaxy money game; its kludged match length is rewritten to XG's money sentinel");
         header.IsMoneyMatch.Should().BeTrue(
             "a detected Galaxy money game forces IsMoneyMatch true");
 
         XgFileReader.ReadMatchInfo(path)!.MatchLength.Should().Be(0,
-            "the ReadMatchInfo fast path must agree with the full parse");
+            "the ReadMatchInfo fast path normalizes the 99999 sentinel to 0");
     }
 }

@@ -423,19 +423,20 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   branch to either leaf. The encapsulation principle is that sentinel
   semantics belong with the iterator that decides what to emit, not with
   the leaf that operates on the resulting move encoding.
-* **Backgammon Galaxy money games are detected and normalized at parse
+* **Backgammon Galaxy money games are detected and repaired at parse
   time.** Galaxy exports money games by abusing `MatchLength` as a
   cube-size limit (a real, even value) and setting an illegal Crawford
   flag, rather than writing XG's `99999` money sentinel.
   `SaveRecordParser.IsGalaxyMoneyGame` detects them — ANSI location
   `BackgammonGalaxy` (ordinal, trimmed), even `MatchLength`, `Crawford`
-  set — and the match-header parser then writes `MatchLength = 0` and
-  `IsMoneyMatch = true` into the `MatchHeaderRecord`. Consequences for
-  consumers: `MatchHeaderRecord.IsMoneyMatch` is *not* the raw XG byte —
-  it is that byte OR'd with Galaxy detection; and `MatchLength` for a
-  Galaxy money game is `0`, not the on-disk value. XG's native `99999`
-  sentinel is a separate case left raw on the record — `XgMatchInfo.From`
-  and `MatchContext` still normalize it via their `>= 99999 ? 0` checks.
+  set — and the match-header parser then rewrites `MatchLength` to
+  `99999` (XG's canonical money sentinel) and sets `IsMoneyMatch = true`
+  on the `MatchHeaderRecord`. Past the parser a Galaxy money game is
+  indistinguishable from a native XG money game: one money representation
+  on the record, normalized to `0` downstream by the existing
+  `>= 99999 ? 0` checks in `XgMatchInfo.From` and `MatchContext`. One
+  consequence for consumers: `MatchHeaderRecord.IsMoneyMatch` is *not*
+  the raw XG byte — it is that byte OR'd with Galaxy detection.
 
 ## Subproject-internal next steps
 
