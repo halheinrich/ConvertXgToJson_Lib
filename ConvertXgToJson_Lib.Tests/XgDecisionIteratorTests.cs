@@ -641,6 +641,196 @@ public class XgDecisionIteratorTests
     }
 
     // -----------------------------------------------------------------------
+    //  Xgid — cross-surface agreement
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The diagram surface (<see cref="XgDecisionIterator.IterateDiagramRequests"/>)
+    /// and the CSV surface (<see cref="XgDecisionIterator.Iterate"/>) must stamp
+    /// the same XGID on the same decision. Pairs the two by their shared
+    /// <see cref="DecisionId"/> across the whole .xg corpus and asserts
+    /// <c>BgDecisionData.Xgid == DecisionRow.Xgid</c>. Fixture-agnostic — no
+    /// hardcoded XGID — and would fail outright if the diagram builders left
+    /// <c>Xgid</c> at its default empty string.
+    ///
+    /// <para>
+    /// Direction: the diagram set is a subset of the CSV set (the checker
+    /// diagram builder additionally drops <c>dice == 0</c> rows), so every
+    /// <c>BgDecisionData.Id</c> is expected to resolve against the CSV-row
+    /// dictionary, not vice versa.
+    /// </para>
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void DiagramRequests_Xgid_MatchesDecisionRowXgid()
+    {
+        bool anyPaired = false;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            string sourceFile = Path.GetFileName(path);
+            var file = XgFileReader.ReadFile(path);
+
+            var rowXgidById = XgDecisionIterator
+                .Iterate(file, sourceFile)
+                .ToDictionary(r => r.Id, r => r.Xgid);
+
+            foreach (var data in XgDecisionIterator.IterateDiagramRequests(file, sourceFile))
+            {
+                rowXgidById.TryGetValue(data.Id, out var rowXgid).Should().BeTrue(
+                    $"{sourceFile}: BgDecisionData {data.Id} must pair with a DecisionRow of the same Id");
+                data.Xgid.Should().NotBeNullOrEmpty(
+                    $"{sourceFile} {data.Id}: BgDecisionData.Xgid must be populated");
+                data.Xgid.Should().Be(rowXgid,
+                    $"{sourceFile} {data.Id}: diagram and CSV surfaces must agree on XGID");
+                anyPaired = true;
+            }
+        }
+
+        anyPaired.Should().BeTrue("the .xg corpus should yield at least one decision");
+    }
+
+    // -----------------------------------------------------------------------
+    //  Comment / Flagged — DescriptiveData population
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="DescriptiveData.Comment"/> and <see cref="DescriptiveData.Flagged"/>
+    /// are populated from the source record's <c>CommentIndex</c> /
+    /// <c>Flagged</c> and the file's comment table. Synthetic — a minimal
+    /// match-header + analysed-cube file with a known <c>Comments</c> list —
+    /// so it does not depend on any corpus file happening to carry a comment
+    /// or a flag. Exercises the in-range join, the <c>-1</c> no-comment
+    /// sentinel, and the out-of-range bounds guard.
+    /// </summary>
+    [Fact]
+    public void DiagramRequests_CommentAndFlagged_PopulatedFromRecordAndCommentTable()
+    {
+        const string sourceFile = "synthetic.xg";
+        var comments = new List<string> { "comment zero", "comment one", "the flagged note" };
+
+        BgDecisionData Build(bool flagged, int commentIndex)
+        {
+            var header = new MatchHeaderRecord
+            {
+                MatchLength = 7,
+                Player1 = "Alice",
+                Player2 = "Bob",
+            };
+            var cube = new CubeRecord
+            {
+                ActivePlayer = 1,
+                CubeValue = 0,
+                Position = new PositionEngine
+                {
+                    Points = (sbyte[])BackgammonConstants.StandardOpeningPosition.Clone(),
+                },
+                Analysis = new DoubleActionAnalysis { Level = 1 },
+                Flagged = flagged,
+                CommentIndex = commentIndex,
+            };
+            var file = new XgFile
+            {
+                Records = new List<SaveRecord> { header, cube },
+                Comments = comments,
+            };
+            return XgDecisionIterator.IterateDiagramRequests(file, sourceFile).Single();
+        }
+
+        // Flagged + an in-range comment index → both fields populated.
+        var flaggedWithComment = Build(flagged: true, commentIndex: 2);
+        flaggedWithComment.Descriptive.Flagged.Should().BeTrue(
+            "Flagged must pass through from the source record");
+        flaggedWithComment.Descriptive.Comment.Should().Be("the flagged note",
+            "Comment must join CommentIndex against the file's comment table");
+
+        // Not flagged + a different in-range index → joins the correct entry.
+        var plain = Build(flagged: false, commentIndex: 0);
+        plain.Descriptive.Flagged.Should().BeFalse();
+        plain.Descriptive.Comment.Should().Be("comment zero");
+
+        // XG's "no comment" sentinel (-1) must map to empty, NOT Comments[0].
+        Build(flagged: false, commentIndex: -1).Descriptive.Comment.Should().BeEmpty(
+            "CommentIndex -1 is XG's no-comment sentinel and must not alias Comments[0]");
+
+        // An out-of-range index is bounds-guarded to empty.
+        Build(flagged: false, commentIndex: 99).Descriptive.Comment.Should().BeEmpty(
+            "an out-of-range CommentIndex must be bounds-guarded to empty");
+    }
+
+    // -----------------------------------------------------------------------
+    //  Cubeless equities — cube DecisionData population
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// On cube decisions, <see cref="DecisionData.CubelessNoDoubleEquity"/> and
+    /// <see cref="DecisionData.CubelessDoubleTakeEquity"/> are sourced from the
+    /// analysis's cubeless evals (<c>EvalNoDouble.Equity</c> /
+    /// <c>EvalDoubleTake.Equity</c>), under the same <c>IsUsable</c> guard the
+    /// cubeful pair uses. Pairs raw cube records with diagram requests
+    /// sequentially (both surfaces emit one cube decision per
+    /// <c>Analysis.Level &gt; 0</c> cube record, in record order) and checks the
+    /// wired value against the source field.
+    ///
+    /// <para>
+    /// Gating: requires at least one cube decision whose cubeless equity is
+    /// non-zero and whose cubeless N/D differs from the cubeful N/D
+    /// (<c>EquityNoDouble</c>) — otherwise the test would pass even if the
+    /// fields were left at default <c>0.0</c> or mis-wired to the cubeful
+    /// source.
+    /// </para>
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void DiagramRequests_CubeDecisions_CubelessEquitiesMatchAnalysis()
+    {
+        // Mirror of XgDecisionIterator.IsUsable (private): NaN / infinity /
+        // -999 sentinel → 0.0, matching the producer's guard exactly.
+        static double Usable(float v) =>
+            !float.IsNaN(v) && !float.IsInfinity(v) && v > -999f ? v : 0.0;
+
+        int nonZero = 0;
+        int divergesFromCubeful = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            string sourceFile = Path.GetFileName(path);
+            var file = XgFileReader.ReadFile(path);
+
+            using var cubeData = XgDecisionIterator
+                .IterateDiagramRequests(file, sourceFile)
+                .Where(d => d.Decision.IsCube)
+                .GetEnumerator();
+
+            foreach (var cube in file.Records.OfType<CubeRecord>().Where(c => c.Analysis.Level > 0))
+            {
+                cubeData.MoveNext().Should().BeTrue(
+                    $"{sourceFile}: expected a cube BgDecisionData for each analysed cube record");
+                var analysis = cube.Analysis;
+                var decision = cubeData.Current.Decision;
+
+                double expectedNd = Usable(analysis.EvalNoDouble.Equity);
+                double expectedDt = Usable(analysis.EvalDoubleTake.Equity);
+
+                decision.CubelessNoDoubleEquity.Should().Be(expectedNd,
+                    $"{sourceFile}: CubelessNoDoubleEquity must come from EvalNoDouble.Equity");
+                decision.CubelessDoubleTakeEquity.Should().Be(expectedDt,
+                    $"{sourceFile}: CubelessDoubleTakeEquity must come from EvalDoubleTake.Equity");
+
+                if (expectedNd != 0.0) nonZero++;
+                if (expectedNd != Usable(analysis.EquityNoDouble)) divergesFromCubeful++;
+            }
+        }
+
+        nonZero.Should().BeGreaterThan(0,
+            "corpus must contain a cube decision with non-zero cubeless equity, " +
+            "else this test passes even with the fields left at default 0.0");
+        divergesFromCubeful.Should().BeGreaterThan(0,
+            "cubeless N/D must differ from cubeful N/D on at least one decision, " +
+            "else a mis-wire to the cubeful source would pass undetected");
+    }
+
+    // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------
 

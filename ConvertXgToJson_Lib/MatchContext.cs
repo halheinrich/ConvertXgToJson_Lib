@@ -35,9 +35,15 @@ internal sealed class MatchContext
     private string _player1 = "Player 1";
     private string _player2 = "Player 2";
 
-    public MatchContext(List<SaveRecord> records, string? sourceFile)
+    // File-level comment table (temp.xgc), keyed by each record's CommentIndex.
+    // Held here alongside the other per-file metadata (player names, match
+    // length) so the comment join — and its bounds guard — lives in one place.
+    private readonly List<string> _comments;
+
+    public MatchContext(List<SaveRecord> records, string? sourceFile, List<string> comments)
     {
         SourceFile = sourceFile;
+        _comments = comments;
         if (records.Count == 0 || records[0] is not MatchHeaderRecord hm)
             throw new InvalidDataException("XG file must begin with a MatchHeaderRecord.");
         _player1 = hm.Player1;
@@ -92,6 +98,18 @@ internal sealed class MatchContext
 
     public string PlayerName(int activePlayer) =>
         activePlayer >= 0 ? _player1 : _player2;
+
+    /// <summary>
+    /// Resolves a record's <c>CommentIndex</c> against the file's comment table.
+    /// XG's "no comment" sentinel is <c>-1</c> (the same convention the match
+    /// header's comment indices use); that, and any out-of-range index, map to
+    /// <see cref="string.Empty"/> rather than indexing the table — so a missing
+    /// comment never aliases <c>Comments[0]</c>.
+    /// </summary>
+    public string CommentAt(int commentIndex) =>
+        commentIndex >= 0 && commentIndex < _comments.Count
+            ? _comments[commentIndex]
+            : string.Empty;
 
     /// <summary>
     /// Returns the "away" score (points needed to win) from the perspective of

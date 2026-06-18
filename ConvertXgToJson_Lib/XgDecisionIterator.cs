@@ -75,7 +75,7 @@ public static class XgDecisionIterator
         Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
         where T : class, IDecisionFilterData
     {
-        var context = new MatchContext(file.Records, sourceFile);
+        var context = new MatchContext(file.Records, sourceFile, file.Comments);
 
         var matchInfo = ExtractMatchInfo(file)
             ?? throw new InvalidDataException(
@@ -307,6 +307,9 @@ public static class XgDecisionIterator
         int dice = DiceToInt(move.Dice);
         if (dice == 0) return null;
 
+        string xgid = BuildXgid(
+            move.InitialPosition, move.ActivePlayer, ctx.CubeValue, ctx.CubePosition, dice, ctx);
+
         int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
 
@@ -377,6 +380,7 @@ public static class XgDecisionIterator
         return new BgDecisionData
         {
             Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber, isCube: false),
+            Xgid = xgid,
             Position = new PositionData
             {
                 Mop = board,
@@ -406,6 +410,8 @@ public static class XgDecisionIterator
                 Game = ctx.GameNumber,
                 MoveNumber = ctx.MoveNumber,
                 IsStandardStart = ctx.IsStandardStart,
+                Comment = ctx.CommentAt(move.CommentIndex),
+                Flagged = move.Flagged,
             },
             Outcome = new PlayOutcomeData
             {
@@ -475,6 +481,10 @@ public static class XgDecisionIterator
             rollouts: rollouts);
 
         int cubePos = Math.Sign(cube.CubeValue);
+        int cubeActual = CubeValueActual(cube.CubeValue);
+
+        string xgid = BuildXgid(
+            cube.Position, cube.ActivePlayer, cubeActual, cubePos, dice: 0, ctx);
 
         int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
@@ -483,6 +493,7 @@ public static class XgDecisionIterator
         yield return new BgDecisionData
         {
             Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true),
+            Xgid = xgid,
             Position = new PositionData
             {
                 Mop = board,
@@ -490,7 +501,7 @@ public static class XgDecisionIterator
                 OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
                 OnRollPipCount = onRollPips,
                 OpponentPipCount = opponentPips,
-                CubeSize = CubeValueActual(cube.CubeValue),
+                CubeSize = cubeActual,
                 CubeOwner = CubeOwnerFor(cubePos, cube.ActivePlayer),
                 IsCrawford = ctx.IsCrawford,
             },
@@ -500,6 +511,8 @@ public static class XgDecisionIterator
                 Dice = [0, 0],
                 NoDoubleEquity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0.0,
                 DoubleTakeEquity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0.0,
+                CubelessNoDoubleEquity = IsUsable(analysis.EvalNoDouble.Equity) ? analysis.EvalNoDouble.Equity : 0.0,
+                CubelessDoubleTakeEquity = IsUsable(analysis.EvalDoubleTake.Equity) ? analysis.EvalDoubleTake.Equity : 0.0,
                 WinPctAfterNoDouble = analysis.EvalNoDouble.WinSingle,
                 GammonPctAfterNoDouble = analysis.EvalNoDouble.WinGammon,
                 BgPctAfterNoDouble = analysis.EvalNoDouble.WinBackgammon,
@@ -527,6 +540,8 @@ public static class XgDecisionIterator
                 Game = ctx.GameNumber,
                 MoveNumber = ctx.MoveNumber + 1,
                 IsStandardStart = ctx.IsStandardStart,
+                Comment = ctx.CommentAt(cube.CommentIndex),
+                Flagged = cube.Flagged,
             },
             // Cube decisions carry no play; PlayOutcomeData contract requires
             // both after-boards empty. Explicit for producer intent.

@@ -142,7 +142,7 @@ public class MatchContextTests
             },
         };
 
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null);
+        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
         ctx.Update(gh);
 
         ctx.IsStandardStart.Should().BeTrue();
@@ -160,7 +160,7 @@ public class MatchContextTests
         var hm = new MatchHeaderRecord { MatchLength = 7 };
         var gh = new GameHeaderRecord(); // default InitialPosition is all-zero
 
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null);
+        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
         ctx.Update(gh);
 
         ctx.IsStandardStart.Should().BeFalse();
@@ -186,7 +186,7 @@ public class MatchContextTests
         };
         var nonStandardGh = new GameHeaderRecord();
 
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null);
+        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
         ctx.Update(standardGh);
         ctx.IsStandardStart.Should().BeTrue("standard-start game should set IsStandardStart=true");
         ctx.Update(nonStandardGh);
@@ -216,7 +216,7 @@ public class MatchContextTests
             CrawfordApplies = crawfordApplies,
         };
 
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null);
+        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
         ctx.Update(gh);
         return ctx;
     }
