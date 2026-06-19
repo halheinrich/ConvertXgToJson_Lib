@@ -171,20 +171,24 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
             var fastInfos = XgFileReader.ReadGameHeaders(path, state).ToList();
 
             // --- Full parse path ---
+            // ReadGameHeaders yields one XgGameInfo per game header. Rebuild the
+            // reference list the same way — capture every game header through the
+            // iterator's SkipGameAt callback, which fires once per game (before any
+            // rows) and receives the same XgGameInfo projection the fast path emits.
+            // A row-derived oracle would only see games that produced at least one
+            // analysed decision row, undercounting games with none and misaligning
+            // the positional comparison below; every game has a header, so capturing
+            // at the header is the contract ReadGameHeaders implements.
             var file = XgFileReader.ReadFile(path);
-            var fullState = new XgIteratorState();
             var fullInfos = new List<XgGameInfo>();
-            int? lastGame = null;
-
-            foreach (var row in XgDecisionIterator.Iterate(
-                file, Path.GetFileName(path), fullState))
-            {
-                if (row.Game != lastGame)
+            var captureGames = new XgIteratorCallbacks(
+                SkipGameAt: gameInfo =>
                 {
-                    fullInfos.Add(fullState.GameInfo!);
-                    lastGame = row.Game;
-                }
-            }
+                    fullInfos.Add(gameInfo);
+                    return true; // header captured; skip the game's rows
+                });
+            XgDecisionIterator.Iterate(
+                file, Path.GetFileName(path), callbacks: captureGames).ToList();
 
             fastInfos.Count.Should().Be(fullInfos.Count,
                 $"game count mismatch in {Path.GetFileName(path)}");
