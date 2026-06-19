@@ -93,7 +93,9 @@ File discovery (which paths are XG-format input):
 
 Entry points:
 
-* `ReadFile` — full parse of a `.xg` file, yielding all records.
+* `ReadFile` — full parse of a `.xg` or `.xgp` file, yielding all records.
+  Format is detected from file content, so `IterateXgDirectory` routes both
+  extensions through it uniformly.
 * `ReadMatchInfo` — fast path. Reads only the first zlib stream and stops at
   the `MatchHeaderRecord`. Used when a caller only needs match metadata.
 * `ReadGameHeaders` — fast path. Reads the first zlib stream and yields
@@ -296,11 +298,28 @@ match files:
 ```csharp
 public static class XgFileReader
 {
+    // File discovery
     public static IReadOnlyList<string>   XgFormatExtensions { get; }   // [".xg", ".xgp"]
     public static bool                    IsXgFormatFile(string path);
     public static IEnumerable<string>     EnumerateXgFormatFiles(string directory);
 
+    // Full parse (.xg / .xgp — format detected from content)
     public static XgFile                ReadFile(string path);
+    public static XgFile                ReadStream(Stream stream);
+
+    // JSON serialization round-trip. ReadJson is load-bearing:
+    // XgDecisionIterator.IterateJsonDirectory parses each export through it.
+    public static string                ToJson(XgFile file, JsonSerializerOptions? options = null);
+    public static string                ReadFileAsJson(string path, JsonSerializerOptions? options = null);
+    public static Task                  WriteJsonAsync(XgFile file, string outputPath,
+                                            JsonSerializerOptions? options = null,
+                                            CancellationToken cancellationToken = default);
+    public static Task                  ReadFileToJsonFileAsync(string inputPath, string outputPath,
+                                            JsonSerializerOptions? options = null,
+                                            CancellationToken cancellationToken = default);
+    public static XgFile                ReadJson(string path);
+
+    // Fast paths (first zlib stream only)
     public static XgMatchInfo?          ReadMatchInfo(string path);
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state);
 }

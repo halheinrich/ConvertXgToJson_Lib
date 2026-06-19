@@ -5,9 +5,12 @@ using ConvertXgToJson_Lib.Parsing;
 namespace ConvertXgToJson_Lib;
 
 /// <summary>
-/// Iterates over XgFile records and yields a <see cref="DecisionRow"/> for
-/// every checker-play (MoveRecord) and cube decision (CubeRecord) that has
-/// been analysed by XG.
+/// Iterates over XgFile records and yields one row per analysed decision —
+/// every checker-play (MoveRecord) and cube decision (CubeRecord) XG has
+/// analysed. Two surfaces over the same decision set: <see cref="Iterate"/>
+/// yields flat <see cref="DecisionRow"/> records (CSV-shaped), while
+/// <see cref="IterateDiagramRequests"/> yields <see cref="BgDecisionData"/>
+/// records (diagram-shaped).
 /// </summary>
 public static class XgDecisionIterator
 {
@@ -489,7 +492,6 @@ public static class XgDecisionIterator
         int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
 
-        // Doubler row
         yield return new BgDecisionData
         {
             Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true),
