@@ -18,6 +18,53 @@ namespace ConvertXgToJson_Lib;
 public static class XgFileReader
 {
     // ------------------------------------------------------------------ //
+    //  XG-format file discovery
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// The file extensions this library recognizes as XG-format input:
+    /// <c>.xg</c> (match files) and <c>.xgp</c> (position files), in that
+    /// order. Single source of truth for <see cref="IsXgFormatFile"/> and
+    /// <see cref="EnumerateXgFormatFiles"/> — the order here is the
+    /// enumeration order those members observe.
+    /// </summary>
+    public static IReadOnlyList<string> XgFormatExtensions { get; } = [".xg", ".xgp"];
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="path"/>'s extension is an
+    /// XG-format extension (<c>.xg</c> or <c>.xgp</c>), matched
+    /// case-insensitively against <see cref="XgFormatExtensions"/>. Pure path
+    /// inspection: the file need not exist and its contents are never read.
+    /// </summary>
+    /// <param name="path">A file path or name; only its extension is examined.</param>
+    public static bool IsXgFormatFile(string path)
+    {
+        string ext = Path.GetExtension(path);
+        foreach (string formatExt in XgFormatExtensions)
+            if (string.Equals(ext, formatExt, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Enumerates every XG-format file in <paramref name="directory"/>: both
+    /// <c>*.xg</c> match files and <c>*.xgp</c> position files. Order is all
+    /// <c>.xg</c> files first, then all <c>.xgp</c> files; within each
+    /// extension, filesystem order (non-deterministic per OS). Implemented as
+    /// one <see cref="Directory.EnumerateFiles(string, string)"/> pass per
+    /// entry in <see cref="XgFormatExtensions"/> rather than a single
+    /// <c>*.xg*</c> glob — the broader pattern would also match hypothetical
+    /// <c>.xgz</c> / <c>.xgr</c> files, which are not assumed to be XG-format.
+    /// </summary>
+    /// <param name="directory">Directory to scan for .xg and/or .xgp files.</param>
+    public static IEnumerable<string> EnumerateXgFormatFiles(string directory)
+    {
+        foreach (string ext in XgFormatExtensions)
+            foreach (string path in Directory.EnumerateFiles(directory, "*" + ext))
+                yield return path;
+    }
+
+    // ------------------------------------------------------------------ //
     //  Public API
     // ------------------------------------------------------------------ //
 

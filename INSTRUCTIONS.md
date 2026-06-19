@@ -80,6 +80,17 @@ record payloads lives under `Parsing/` (`SaveRecordParser`,
 
 ### XgFileReader
 
+File discovery (which paths are XG-format input):
+
+* `XgFormatExtensions` — the canonical extension set `[".xg", ".xgp"]`, in
+  that order. Single source of truth for the two members below.
+* `IsXgFormatFile(path)` — case-insensitive extension check against
+  `XgFormatExtensions`. Pure path inspection; the file need not exist.
+* `EnumerateXgFormatFiles(directory)` — yields all `.xg` then all `.xgp`
+  files (filesystem order within each), one `Directory.EnumerateFiles` pass
+  per extension rather than a `*.xg*` glob. This is the single producer-side
+  copy of the discovery rule; `IterateXgDirectory` routes through it.
+
 Entry points:
 
 * `ReadFile` — full parse of a `.xg` file, yielding all records.
@@ -132,11 +143,10 @@ published fields, record-for-record.
 both `*.xg` (match files) and `*.xgp` (position files) — both formats
 are XG-native and `XgFileReader` handles them uniformly, so callers
 that point at a directory of mixed XG content get all decisions
-regardless of extension. `IterateJsonDirectory` is the parallel
-entry point for `*.json` exports. The implementation uses two explicit
-`Directory.EnumerateFiles` calls rather than a `*.xg*` glob — the broader
-pattern would also match hypothetical `.xgz` / `.xgr` files we don't
-assume are XG-format.
+regardless of extension. File discovery is delegated to
+`XgFileReader.EnumerateXgFormatFiles` (see XgFileReader above) — the
+single source of the `.xg`-then-`.xgp` rule. `IterateJsonDirectory` is
+the parallel entry point for `*.json` exports.
 
 Both surfaces report the "best play" as the **highest-equity** candidate in
 `analysis.Evals[]`, not XG-native rank 0. `BgDecisionData.Plays[0]`,
@@ -286,6 +296,10 @@ match files:
 ```csharp
 public static class XgFileReader
 {
+    public static IReadOnlyList<string>   XgFormatExtensions { get; }   // [".xg", ".xgp"]
+    public static bool                    IsXgFormatFile(string path);
+    public static IEnumerable<string>     EnumerateXgFormatFiles(string directory);
+
     public static XgFile                ReadFile(string path);
     public static XgMatchInfo?          ReadMatchInfo(string path);
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state);

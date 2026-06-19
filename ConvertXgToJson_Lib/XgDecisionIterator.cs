@@ -207,7 +207,7 @@ public static class XgDecisionIterator
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null)
     {
-        foreach (var path in EnumerateXgFormatFiles(xgDir))
+        foreach (var path in XgFileReader.EnumerateXgFormatFiles(xgDir))
         {
             XgFile file;
             try { file = XgFileReader.ReadFile(path); }
@@ -828,19 +828,6 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// Enumerates all XG-format files in a directory: both <c>*.xg</c>
-    /// (match files) and <c>*.xgp</c> (position files). Order is .xg
-    /// first then .xgp; within each extension, filesystem order
-    /// (non-deterministic per OS). Two separate enumerations rather than
-    /// a <c>*.xg*</c> glob — the broader pattern would also match
-    /// hypothetical .xgz, .xgr, etc. files, which we don't assume are
-    /// XG-format.
-    /// </summary>
-    private static IEnumerable<string> EnumerateXgFormatFiles(string xgDir) =>
-        Directory.EnumerateFiles(xgDir, "*.xg")
-            .Concat(Directory.EnumerateFiles(xgDir, "*.xgp"));
 
     /// <summary>
     /// Builds the <see cref="DecisionId"/> stamped onto every yielded
