@@ -52,7 +52,7 @@ internal static class XgMoveTranslator
         {
             sbyte from = moves[i];
             sbyte to = moves[i + 1];
-            if (from == -1) break;
+            if (XgMoveEncoding.IsTerminator(from)) break;
 
             var (frPt, toLabel, isBearOff) = XgMoveEncoding.DecodeMovePair(from, to);
             int toPt;

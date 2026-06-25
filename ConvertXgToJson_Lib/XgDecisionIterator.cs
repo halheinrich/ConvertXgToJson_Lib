@@ -1,6 +1,8 @@
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ConvertXgToJson_Lib;
 
@@ -42,6 +44,14 @@ public static class XgDecisionIterator
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/> for
     /// the boundaries at which each predicate fires.
     /// </param>
+    /// <param name="logger">
+    /// Optional logger. When a decision is skipped because XG stamped its
+    /// played candidate with the illegal-play marker (see
+    /// <see cref="SentinelKind.IllegalPlay"/>), a <c>Warning</c> is emitted
+    /// naming the source file, game, move, and roll. Defaults to
+    /// <see cref="NullLogger.Instance"/> — silent, and suppressible by log
+    /// level. Dance ((0, 0)) skips remain silent (normal, not an error).
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown eagerly (before any deferred enumeration) when
     /// <paramref name="sourceFile"/> is <see langword="null"/>. DecisionId
@@ -52,12 +62,13 @@ public static class XgDecisionIterator
         XgFile file,
         string? sourceFile,
         XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null)
+        XgIteratorCallbacks? callbacks = null,
+        ILogger? logger = null)
     {
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.Iterate requires a non-null sourceFile for DecisionId stamping.");
-        return IterateCore<DecisionRow>(file, sourceFile, state, callbacks, BuildMoveRow, BuildCubeRows);
+        return IterateCore<DecisionRow>(file, sourceFile, state, callbacks, logger, BuildMoveRow, BuildCubeRows);
     }
 
     /// <summary>
@@ -74,10 +85,13 @@ public static class XgDecisionIterator
         string sourceFile,
         XgIteratorState? state,
         XgIteratorCallbacks? callbacks,
+        ILogger? logger,
         Func<MoveRecord, MatchContext, string, List<RolloutContext>, T?> buildMove,
         Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
         where T : class, IDecisionFilterData
     {
+        logger ??= NullLogger.Instance;
+
         var context = new MatchContext(file.Records, sourceFile, file.Comments);
 
         var matchInfo = ExtractMatchInfo(file)
@@ -117,8 +131,23 @@ public static class XgDecisionIterator
             if (skipCurrentGame)
                 continue;
 
-            if (record is MoveRecord move && IsAnalysed(move) && !IsSentinelOnlyAnalysis(move.Analysis))
+            if (record is MoveRecord move && IsAnalysed(move))
             {
+                // Skip XG's non-play sentinels before they reach a move leaf:
+                // an illegal-play marker historically crashed AfterBoardBuilder,
+                // a dance rendered as "1/1" garbage. Illegal plays are worth a
+                // contextual warning; dances are normal and skip silently.
+                switch (ClassifySentinelAnalysis(move.Analysis))
+                {
+                    case SentinelKind.IllegalPlay:
+                        logger.LogWarning(
+                            "Illegal play in {SourceFile}, game {Game}, move {MoveNumber}, roll {Roll}",
+                            sourceFile, context.GameNumber, context.MoveNumber, DiceToInt(move.Dice));
+                        continue;
+                    case SentinelKind.Dance:
+                        continue;
+                }
+
                 var row = buildMove(move, context, sourceFile, file.Rollouts);
                 if (row != null)
                 {
@@ -170,6 +199,11 @@ public static class XgDecisionIterator
     /// <param name="callbacks">
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/>.
     /// </param>
+    /// <param name="logger">
+    /// Optional logger. Behaves identically to <see cref="Iterate"/>: an
+    /// illegal-play skip emits a contextual <c>Warning</c>; dances skip
+    /// silently. Defaults to <see cref="NullLogger.Instance"/>.
+    /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown eagerly (before any deferred enumeration) when
     /// <paramref name="sourceFile"/> is <see langword="null"/>. DecisionId
@@ -180,12 +214,13 @@ public static class XgDecisionIterator
         XgFile file,
         string? sourceFile,
         XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null)
+        XgIteratorCallbacks? callbacks = null,
+        ILogger? logger = null)
     {
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.IterateDiagramRequests requires a non-null sourceFile for DecisionId stamping.");
-        return IterateCore<BgDecisionData>(file, sourceFile, state, callbacks, BuildMoveDiagramRequest, BuildCubeDiagramRequests);
+        return IterateCore<BgDecisionData>(file, sourceFile, state, callbacks, logger, BuildMoveDiagramRequest, BuildCubeDiagramRequests);
     }
 
     // -----------------------------------------------------------------------
@@ -907,39 +942,20 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// Returns <c>true</c> when any candidate in <paramref name="analysis"/>'s
-    /// <c>Moves</c> array starts with a known XG non-play sentinel pair. Used
-    /// by <see cref="Iterate"/> and <see cref="IterateDiagramRequests"/> to
-    /// skip these decisions before they reach
+    /// <c>Moves</c> array is a known XG non-play sentinel. Used by
+    /// <see cref="Iterate"/> and <see cref="IterateDiagramRequests"/> to skip
+    /// these decisions before they reach
     /// <see cref="Parsing.AfterBoardBuilder.ComputeAfterBoard"/> or
     /// <see cref="XgMoveTranslator.Translate"/>: feeding either leaf the
     /// sentinel encoding has historically produced an
-    /// <see cref="IndexOutOfRangeException"/> (the <c>(-100, -100)</c>
-    /// pattern) or a "1/1" notation glitch (the <c>(0, 0)</c> pattern).
-    ///
-    /// <para>
-    /// Two known sentinel pairs:
-    /// </para>
-    /// <list type="bullet">
-    ///   <item><description>
-    ///     <c>(-100, -100)</c> — XG's <b>illegal-play workaround</b>. When
-    ///     the recorded play in the source file is illegal, XG forces the
-    ///     next position rather than refusing to load, and emits this
-    ///     sentinel at the user-play slot in <c>Moves</c> while leaving
-    ///     other candidates as real legal plays.
-    ///   </description></item>
-    ///   <item><description>
-    ///     <c>(0, 0)</c> — XG's <b>no-legal-move</b> (dance) encoding,
-    ///     emitted when the on-roll player has no legal play.
-    ///   </description></item>
-    /// </list>
-    ///
-    /// <para>
-    /// Predicate scans every entry in <c>analysis.Moves</c> rather than just
-    /// the best-by-equity candidate, because the illegal-play workaround
-    /// places the sentinel at the user-play index — and
-    /// <see cref="ComputeMoveAfterBoards"/> reads both the best-by-equity
-    /// and user-play slots. Either contains the sentinel, the leaf trips.
-    /// </para>
+    /// <see cref="IndexOutOfRangeException"/> (the illegal-play marker) or a
+    /// "1/1" notation glitch (the <c>(0, 0)</c> dance). A thin
+    /// <c>!= </c><see cref="SentinelKind.None"/> projection of
+    /// <see cref="ClassifySentinelAnalysis"/> — see that method and the
+    /// single-sourced <see cref="XgMoveEncoding.ClassifyCandidate"/> for the
+    /// recognition rules (illegal play keys on <c>from ==
+    /// </c><see cref="XgMoveEncoding.IllegalPlayMarker"/>, covering both
+    /// <c>(-100, -100)</c> and <c>(-100, X)</c>; dance is <c>(0, 0)</c>).
     ///
     /// <para>
     /// Internal-not-private so test code that pairs raw <c>MoveRecord</c>s
@@ -948,22 +964,46 @@ public static class XgDecisionIterator
     /// shift downstream iterator-pairing indices.
     /// </para>
     /// </summary>
-    internal static bool IsSentinelOnlyAnalysis(BestMoveAnalysis analysis)
+    internal static bool IsSentinelOnlyAnalysis(BestMoveAnalysis analysis) =>
+        ClassifySentinelAnalysis(analysis) != SentinelKind.None;
+
+    /// <summary>
+    /// Classifies an analysis by the first non-play sentinel among its real
+    /// candidates, driving both the iterator skip and (for
+    /// <see cref="SentinelKind.IllegalPlay"/>) the contextual warning. Returns
+    /// <see cref="SentinelKind.None"/> for an ordinary analysis.
+    ///
+    /// <para>
+    /// An illegal-play marker outranks a dance: the marker is the error-worthy
+    /// condition and, in real files, sits at the user-play slot alongside other
+    /// legal candidates, so it can co-occur with neither — but should it, the
+    /// log-worthy kind wins. Recognition of each pair is delegated to the
+    /// single-sourced <see cref="XgMoveEncoding.ClassifyCandidate"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// Scans only the first <c>MoveCount</c> slots: <c>Moves</c> is
+    /// fixed-length with <c>(0, 0, …)</c> zero-padding, which would otherwise
+    /// read as a dance sentinel and falsely trigger on every analysis with
+    /// fewer than the maximum candidate count.
+    /// </para>
+    /// </summary>
+    internal static SentinelKind ClassifySentinelAnalysis(BestMoveAnalysis analysis)
     {
-        // Moves is fixed-length 32 with zero-padded unused entries; only the
-        // first MoveCount slots are real candidates. Scanning past MoveCount
-        // would read the (0, 0, …) padding as a dance sentinel and falsely
-        // trigger on every analysis with fewer than 32 candidates.
         int n = Math.Min(analysis.MoveCount, analysis.Moves.Length);
+        SentinelKind found = SentinelKind.None;
         for (int i = 0; i < n; i++)
         {
-            sbyte[] candidate = analysis.Moves[i];
-            if (candidate.Length < 2) continue;
-            if ((candidate[0] == -100 && candidate[1] == -100)
-                || (candidate[0] == 0 && candidate[1] == 0))
-                return true;
+            switch (XgMoveEncoding.ClassifyCandidate(analysis.Moves[i]))
+            {
+                case SentinelKind.IllegalPlay:
+                    return SentinelKind.IllegalPlay; // log-worthy; outranks a dance
+                case SentinelKind.Dance:
+                    found = SentinelKind.Dance;
+                    break;
+            }
         }
-        return false;
+        return found;
     }
 
     // LevelRequest reflects what the user asked XG to compute, not what XG ran:

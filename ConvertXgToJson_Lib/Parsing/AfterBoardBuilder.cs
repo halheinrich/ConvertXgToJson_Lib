@@ -9,10 +9,11 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// <para>
 /// Input is the same raw encoding as <see cref="Models.BestMoveAnalysis.Moves"/>:
 /// adjacent <c>(from, to)</c> pairs in active-player POV, 0-indexed point values.
-/// Sentinels:
-///   <c>from == -1</c> terminates; <c>(from, to) == (0, 0)</c> is XG's
-///   "no legal moves" (dance) encoding — the whole move list is a no-op;
-///   <c>from == 24</c> is bar entry;
+/// Sentinel vocabulary is single-sourced in <see cref="XgMoveEncoding"/>:
+///   <see cref="XgMoveEncoding.Terminator"/> terminates a candidate's pairs;
+///   a <see cref="SentinelKind.Dance"/> candidate (XG's <c>(0, 0)</c>
+///   "no legal moves" encoding) is treated as a whole-list board no-op;
+///   <see cref="XgMoveEncoding.Bar"/> is bar entry;
 ///   any <c>to &lt; 0</c> is a bear off (XG encodes overshoot bear-offs as
 ///   <c>to = from - die</c>, which can be <c>-2, -3, …</c>); otherwise the
 ///   point is <c>value + 1</c>.
@@ -40,12 +41,18 @@ internal static class AfterBoardBuilder
         for (int i = 0; i < 26; i++)
             board[i] = priorBoardOnRollPov[i];
 
+        // A dance ("no legal moves") moves no checkers — the board is unchanged
+        // but for the POV flip. Illegal-play markers must never reach here (the
+        // decision iterator skips them); if one does, the per-pair domain check
+        // in DecodeMovePair fails fast rather than underflowing a board index.
+        if (XgMoveEncoding.ClassifyCandidate(moves) == SentinelKind.Dance)
+            return FlipBoard(board);
+
         for (int i = 0; i + 1 < moves.Length; i += 2)
         {
             sbyte from = moves[i];
             sbyte to   = moves[i + 1];
-            if (from == -1) break;
-            if (from == 0 && to == 0) break; // "no legal moves" — dance
+            if (XgMoveEncoding.IsTerminator(from)) break;
 
             var (fromIdx, toIdx, isBearOff) = XgMoveEncoding.DecodeMovePair(from, to);
             board[fromIdx]--;
