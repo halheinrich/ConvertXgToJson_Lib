@@ -9,13 +9,13 @@
     <AssemblyName>ConvertXgToJson_Lib.Tests</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="xunit" Version="2.9.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.*">
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.*" />
-    <PackageReference Include="FluentAssertions" Version="6.12.*" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="FluentAssertions" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib\BgDataTypes_Lib.csproj" />
