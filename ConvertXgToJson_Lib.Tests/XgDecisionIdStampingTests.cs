@@ -102,8 +102,10 @@ public class XgDecisionIdStampingTests
     /// Every <see cref="DecisionRow"/> emitted from a <c>.xgp</c> file in
     /// <c>TestData/xgp/</c> carries an <see cref="XgpDecisionId"/> whose
     /// <see cref="XgpDecisionId.Filename"/> equals the bare source
-    /// filename. <c>.xgp</c> files are single-decision-per-file by XG's
-    /// design — game / move / cube coordinates are not part of the Id.
+    /// filename — game / move / cube coordinates are not part of the Id.
+    /// The iterator's emission policy is what keeps that key unique: an
+    /// <c>.xgp</c> yields at most one decision. See
+    /// <c>XgpAnalysisFilterTests</c>.
     /// </summary>
     [Fact]
     public void Iterate_XgpCorpus_EmitsXgpDecisionIdWithBareFilename()

@@ -13,6 +13,12 @@ namespace ConvertXgToJson_Lib;
 /// yields flat <see cref="DecisionRow"/> records (CSV-shaped), while
 /// <see cref="IterateDiagramRequests"/> yields <see cref="BgDecisionData"/>
 /// records (diagram-shaped).
+///
+/// <para>
+/// <c>.xgp</c> position files are the exception: they yield <em>at most one</em>
+/// decision. See <see cref="SelectXgpDecision"/> for the policy and its
+/// rationale.
+/// </para>
 /// </summary>
 public static class XgDecisionIterator
 {
@@ -22,6 +28,12 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// Yields all decisions from a single already-parsed <see cref="XgFile"/>.
+    ///
+    /// <para>
+    /// When <paramref name="sourceFile"/> names an <c>.xgp</c> position file,
+    /// at most one decision is yielded — the analysed checker-play if there is
+    /// one, else the analysed cube. See <see cref="SelectXgpDecision"/>.
+    /// </para>
     /// </summary>
     /// <param name="file">The parsed XG file.</param>
     /// <param name="sourceFile">
@@ -72,6 +84,86 @@ public static class XgDecisionIterator
     }
 
     /// <summary>
+    /// Single entry point behind both decision surfaces. Walks the record
+    /// stream once via <see cref="IterateAnalysedDecisions"/>, then — for
+    /// <c>.xgp</c> position files only — narrows the result to a single
+    /// decision through <see cref="SelectXgpDecision"/>.
+    ///
+    /// <para>
+    /// Placing the <c>.xgp</c> emission policy here, rather than in either
+    /// caller, is what guarantees <see cref="Iterate"/> and
+    /// <see cref="IterateDiagramRequests"/> can never disagree about which
+    /// decision an <c>.xgp</c> represents.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<T> IterateCore<T>(
+        XgFile file,
+        string sourceFile,
+        XgIteratorState? state,
+        XgIteratorCallbacks? callbacks,
+        ILogger? logger,
+        Func<MoveRecord, MatchContext, string, List<RolloutContext>, T?> buildMove,
+        Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
+        where T : class, IDecisionFilterData
+    {
+        var decisions = IterateAnalysedDecisions(
+            file, sourceFile, state, callbacks, logger, buildMove, buildCube);
+
+        return IsXgpSource(sourceFile) ? SelectXgpDecision(decisions) : decisions;
+    }
+
+    /// <summary>
+    /// Applies the <c>.xgp</c> single-decision emission policy: emit the
+    /// checker-play if the file has an analysed, non-sentinel one; otherwise
+    /// emit the analysed cube, if any; otherwise emit nothing.
+    ///
+    /// <para>
+    /// An <c>.xgp</c>'s move pane exists only because dice were rolled, so
+    /// dice in the file mean the saved decision <em>is</em> the play. XG
+    /// nonetheless always writes a cube pane, which is incidental — a
+    /// curated cube problem is a pre-roll position and carries no move pane
+    /// at all. Analysis depth is deliberately not compared: an analysed play
+    /// wins even against a more deeply analysed cube.
+    /// </para>
+    ///
+    /// <para>
+    /// This is what makes the bare-filename <see cref="XgpDecisionId"/> a
+    /// valid key. Before the policy existed, an <c>.xgp</c> with analysis in
+    /// both panes yielded two decisions stamped with the same Id.
+    /// </para>
+    ///
+    /// <para>
+    /// A sentinel-skipped play (illegal play / dance) never reaches this
+    /// filter — <see cref="IterateAnalysedDecisions"/> drops it upstream — so
+    /// it does not suppress an otherwise analysed cube.
+    /// </para>
+    ///
+    /// <para>
+    /// Look-ahead is bounded and <c>.xgp</c>-scoped: at most one cube is held
+    /// while scanning for a play, and the first play short-circuits the walk.
+    /// <c>.xg</c> iteration bypasses this filter entirely and stays streaming.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<T> SelectXgpDecision<T>(IEnumerable<T> decisions)
+        where T : class, IDecisionFilterData
+    {
+        T? cube = null;
+
+        foreach (var decision in decisions)
+        {
+            if (!decision.IsCube)
+            {
+                yield return decision;
+                yield break;
+            }
+            cube ??= decision;
+        }
+
+        if (cube != null)
+            yield return cube;
+    }
+
+    /// <summary>
     /// Shared iteration skeleton for both decision surfaces. Walks the record
     /// stream once — match-info extraction, state population, the skip / stop
     /// callbacks, game-header handling — and delegates only the per-decision
@@ -80,7 +172,7 @@ public static class XgDecisionIterator
     /// <see cref="DecisionRow"/> builders; <c>IterateDiagramRequests</c> the
     /// <see cref="BgDecisionData"/> builders.
     /// </summary>
-    private static IEnumerable<T> IterateCore<T>(
+    private static IEnumerable<T> IterateAnalysedDecisions<T>(
         XgFile file,
         string sourceFile,
         XgIteratorState? state,
@@ -180,6 +272,12 @@ public static class XgDecisionIterator
     /// cube decision in <paramref name="file"/>. Analogous to <see cref="Iterate"/>
     /// but produces diagram data directly from the raw parse records rather than
     /// converting from <see cref="DecisionRow"/>.
+    ///
+    /// <para>
+    /// The <c>.xgp</c> single-decision emission policy applies identically here
+    /// — both surfaces route through the same <see cref="IterateCore"/>. See
+    /// <see cref="SelectXgpDecision"/>.
+    /// </para>
     /// </summary>
     /// <param name="file">The parsed XG file.</param>
     /// <param name="sourceFile">
@@ -874,8 +972,12 @@ public static class XgDecisionIterator
     /// <list type="bullet">
     ///   <item><description>
     ///     <c>.xgp</c> → <see cref="XgpDecisionId"/> keyed on the bare
-    ///     filename. <c>.xgp</c> files are single-decision-per-file by
-    ///     XG's design, so within-file coordinates are not part of the Id.
+    ///     filename, with no within-file coordinates. XG itself does
+    ///     <em>not</em> guarantee one decision per <c>.xgp</c> — it always
+    ///     writes a cube pane alongside the move pane, and both can carry
+    ///     analysis. What makes the bare filename a valid key is
+    ///     <see cref="SelectXgpDecision"/>, the iterator's emission policy,
+    ///     which reduces every <c>.xgp</c> to at most one decision.
     ///   </description></item>
     ///   <item><description>
     ///     <c>.xg</c> → <see cref="XgDecisionId"/> carrying the within-file
@@ -927,15 +1029,27 @@ public static class XgDecisionIterator
     internal static DecisionId BuildDecisionId(
         string sourceFile, int game, int moveNumber, bool isCube)
     {
-        string ext = Path.GetExtension(sourceFile);
-        if (string.Equals(ext, ".xgp", StringComparison.OrdinalIgnoreCase))
+        if (IsXgpSource(sourceFile))
             return new XgpDecisionId(sourceFile);
+
+        string ext = Path.GetExtension(sourceFile);
         if (string.Equals(ext, ".xg", StringComparison.OrdinalIgnoreCase)
             || string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
             return new XgDecisionId(sourceFile, game, moveNumber, isCube);
         throw new InvalidOperationException(
             $"Unsupported file extension '{ext}' for DecisionId stamping; expected '.xg', '.xgp', or '.json' (sourceFile='{sourceFile}').");
     }
+
+    /// <summary>
+    /// Single source of the <c>.xgp</c> recognition rule. Both the emission
+    /// policy (<see cref="SelectXgpDecision"/>, applied in
+    /// <see cref="IterateCore"/>) and Id stamping
+    /// (<see cref="BuildDecisionId"/>) key off this predicate, so a file can
+    /// never be treated as an <c>.xgp</c> by one and not the other. Extension
+    /// match is case-insensitive invariant.
+    /// </summary>
+    private static bool IsXgpSource(string sourceFile) =>
+        string.Equals(Path.GetExtension(sourceFile), ".xgp", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;

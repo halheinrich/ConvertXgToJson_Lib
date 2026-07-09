@@ -131,9 +131,17 @@ Extension dispatch is case-insensitive invariant:
   and legitimately carry different Ids. Cross-format Id identity is not
   an invariant; this parallels the existing `.xg` ↔ `.xgp` asymmetry
   (same decision, different storage shape, different Id).
-* `.xgp` → `XgpDecisionId(Filename)` — filename-only. `.xgp` files are
-  single-decision-per-file by XG's design, so within-file coordinates
-  are not part of the Id.
+* `.xgp` → `XgpDecisionId(Filename)` — filename-only; within-file
+  coordinates are not part of the Id. XG itself does *not* guarantee one
+  decision per `.xgp`: it always writes a cube pane alongside the move
+  pane, and a position saved after the dice were rolled can carry analysis
+  in both. What makes the bare filename a valid key is the iterator's
+  emission policy — an `.xgp` yields **at most one** decision: the analysed
+  checker-play if there is one, else the analysed cube. The move pane exists
+  only because dice were rolled, so dice in the file mean the saved decision
+  is the play; the cube pane is XG's incidental. Depth is not compared. A
+  curated cube problem is a pre-roll position and carries no move pane at
+  all.
 
 Cube emissions stamp with `ctx.MoveNumber + 1` so the Id's `MoveNumber`
 agrees with the emitted `DecisionRow.MoveNumber` /
