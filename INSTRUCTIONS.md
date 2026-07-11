@@ -8,7 +8,9 @@
 
 C# / .NET 10 / Class Library / xUnit.
 
-Parses eXtreme Gammon `.xg` and `.xgp` binary files into records defined by `BgDataTypes_Lib`.
+Parses eXtreme Gammon `.xg` and `.xgp` binary files into records defined by
+`BgDataTypes_Lib`, and writes XG binary files back out — including `.xgp`
+position export from a `BgDecisionData` (the ecosystem's XG-format writer).
 
 ## Solution
 
@@ -33,12 +35,14 @@ ConvertXgToJson_Lib/
   MatchContext.cs
   XgDecisionIterator.cs
   XgFileReader.cs
+  XgFileWriter.cs
   XgGameInfo.cs
   XgidEncoder.cs
   XgIteratorCallbacks.cs
   XgIteratorState.cs
   XgMatchInfo.cs
   XgMoveTranslator.cs
+  XgpExporter.cs
   Json/
     XgJsonOptions.cs
   Models/
@@ -52,6 +56,13 @@ ConvertXgToJson_Lib/
     SaveRecordParser.cs
     XgDecompressor.cs
     XgMoveEncoding.cs
+  Writing/
+    CommentWriter.cs
+    PascalBinaryWriter.cs
+    RichGameHeaderWriter.cs
+    RolloutContextWriter.cs
+    SaveRecordWriter.cs
+    XgContainerWriter.cs
 ConvertXgToJson_Lib.Tests/
   ConvertXgToJson_Lib.Tests.csproj
   BoardTests.cs
@@ -61,8 +72,11 @@ ConvertXgToJson_Lib.Tests/
   GlobalUsings.cs
   ReadMatchInfoBenchmarkTests.cs
   RealFileTests.cs
+  SaveRecordWriterTests.cs
   TestPaths.cs
   XgDecisionIteratorTests.cs
+  XgFileWriterTests.cs
+  XgpExporterTests.cs
 ```
 
 The test directory lists principal classes only; additional `*Tests.cs`
@@ -103,6 +117,59 @@ Entry points:
   first yield. To stop early, the consumer breaks out of the foreach;
   disposing the enumerator stops further yields. There is no imperative
   skip flag.
+
+### Writing (XgFileWriter / XgpExporter)
+
+The reader's mirror. Layered exactly like the read path:
+
+* `Writing/` internals mirror `Parsing/` file-for-file:
+  `PascalBinaryWriter` (alignment-mirroring primitive writes; padding is
+  explicit zeros), `SaveRecordWriter` (all six TSaveRec variants → complete
+  zero-padded 2560-byte records), `RolloutContextWriter` (2184-byte records),
+  `CommentWriter` (CRLF lines, `#1#2` escape), `RichGameHeaderWriter`
+  (8232-byte packed outer header, thumbnail always omitted — the model does
+  not carry its bytes), `XgContainerWriter` (concatenated zlib streams plus
+  the trailing manifest).
+* **`XgFileWriter`** (public) — record-level serializer: `XgFile` →
+  stream / bytes / file. Format-generic by construction (it writes whatever
+  record list the model holds, so full-`.xg` output works), but only the
+  `.xgp` shape is validated against real XG imports.
+* **`XgpExporter`** (public) — decision-level export: `BgDecisionData` →
+  `.xgp` bytes. "Exporter" per the ecosystem convention (MatExporter
+  precedent): an Exporter translates semantics, a Writer/Reader mirrors
+  byte layout. Consumers never touch record internals.
+
+Container facts the reader never needed (writer-only knowledge, decoded from
+the fixture corpus and pinned by `XgFileWriterTests`):
+
+* Physical stream order is `temp.xg`, `temp.xgr` (only when rollouts exist),
+  `temp.xgi`, `temp.xgc` (only when comments exist), then a manifest stream.
+* The manifest is one 532-byte entry per inner file, in stream order, the
+  manifest itself unlisted: Pascal ANSI filename padded to 512 bytes, then
+  uncompressed size, compressed size, offset relative to content start,
+  CRC32 (IEEE) of the uncompressed bytes, and constant `0x200`.
+* `temp.xgi` holds exactly two records: byte-copies of the first and last
+  records of the emitted stream. (Real XG writes its session's first/last —
+  the "last" often isn't in the `.xgp` at all — so XG demonstrably does not
+  validate the pair; self-consistent first/last is the clean choice.)
+* Real XG stamps one constant GUID into every `.xgp` RichGameHeader
+  (`2f5af5e1-e021-4832-a423-ef480ec58a0b`, stable 2010→current); the
+  exporter reproduces it.
+
+`XgpExporter` emits a **clean unanalyzed position**: match header + game
+header (game "starts" at the saved position, XG's position-editor pattern) +
+cube record, plus a move record carrying the dice when the decision is a
+play. Analysis blocks hold XG's own never-analysed sentinels (`Level = -100`,
+errors `-1000`). XG re-analyzes on import. Money games recover Jacoby/Beaver
+from XGID field 8 when the decision carries an XGID, else default to XG's
+money defaults (Jacoby on, Beaver off). Output is byte-deterministic — no
+timestamps or random ids.
+
+**XG-import-only, by design:** because exports are unanalyzed, this
+library's own iterator yields **zero** decisions for them (rule 1 of the
+`.xgp` emission policy). The ecosystem's re-ingestible format remains
+`BgDecisionData` JSON. Analysis carry-through is a booked follow-up — see
+"Subproject-internal next steps".
 
 ### XgDecisionIterator
 
@@ -332,6 +399,24 @@ public static class XgFileReader
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state);
 }
 
+public static class XgFileWriter
+{
+    // Record-level serializer (reader's mirror). Semantic round-trip, not
+    // byte identity: ReadStream(Write(f)) parses to an equal model.
+    public static void   Write(XgFile file, Stream output);
+    public static byte[] ToBytes(XgFile file);
+    public static void   WriteFile(XgFile file, string path);
+}
+
+public static class XgpExporter
+{
+    // Decision-level .xgp export (clean unanalyzed position; XG-import-only —
+    // the iterator yields zero decisions for exports, by design).
+    public static void   Write(BgDecisionData decision, Stream output);
+    public static byte[] ToBytes(BgDecisionData decision);
+    public static void   WriteFile(BgDecisionData decision, string path);
+}
+
 public static class XgDecisionIterator
 {
     public static IEnumerable<DecisionRow> Iterate(
@@ -464,6 +549,39 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   branch to either leaf. The encapsulation principle is that sentinel
   semantics belong with the iterator that decides what to emit, not with
   the leaf that operates on the resulting move encoding.
+* **The TSaveRec byte layout is encoded twice — parser and writer.** A
+  deliberate serializer duality: `Parsing/SaveRecordParser` and
+  `Writing/SaveRecordWriter` (likewise the rollout, comment, and outer-header
+  pairs) must change together, field-for-field and alignment-for-alignment.
+  The guard is `SaveRecordWriterTests` (distinct value in every field, so a
+  transposition cannot cancel) plus the corpus round-trip in
+  `XgFileWriterTests`. Do not "single-source" this with a declarative field
+  map — evaluated and rejected as over-engineering for Pascal variant
+  records.
+* **Exported `.xgp` files yield zero iterator decisions — by design.**
+  `XgpExporter` writes clean unanalyzed positions; rule 1 of the `.xgp`
+  emission policy ("skip unanalysed") makes them invisible to `Iterate` /
+  `IterateDiagramRequests`. The zero-rows assertions in `XgpExporterTests`
+  pin the intended XG-import-only boundary; making exports visible means
+  carrying analysis through (the booked follow-up), not changing the tests.
+* **`TDateTime` is a double of days — only quantized dates round-trip
+  tick-for-tick.** Dates parsed from real files are already double-quantized
+  and round-trip exactly; a synthetic `DateTime` in a writer test must use a
+  binary-exact day fraction (midnight, noon, 18:00) or the re-read value can
+  differ by a tick or two.
+* **The RichGameHeader is packed; the container manifest is writer-only
+  knowledge.** `ThumbnailOffset` (an Int64 at offset 12) must be written raw
+  — an aligned 8-byte write would insert padding and corrupt the header. And
+  because `XgFileReader` finds streams by scanning for zlib headers, it
+  ignores the trailing manifest entirely; a reader-level round-trip passes
+  even with a corrupt manifest. Real XG is presumed to consume it, so
+  `XgFileWriterTests` asserts sizes / offsets / CRC32s against the raw
+  written bytes — keep that test when refactoring the container writer.
+* **A centred cube above 1 is not exportable.** The record encodes cube
+  ownership in the sign of a log2 field, so "centred, above 1" (auto-doubled
+  money positions) has no representation without XG's auto-double
+  bookkeeping; `XgpExporter` throws `NotSupportedException` rather than
+  misencode.
 * **Backgammon Galaxy money games are detected and repaired at parse
   time.** Galaxy exports money games by abusing `MatchLength` as a
   cube-size limit (a real, even value) and setting an illegal Crawford
@@ -481,4 +599,16 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 
 ## Subproject-internal next steps
 
-None.
+* **`.xgp` analysis carry-through (Option B of the exporter design).**
+  Reconstruct `BestMoveAnalysis` / `DoubleActionAnalysis` from
+  `PlayCandidate` / `DecisionData` so exports are visible to our own
+  iterator (and show analysis in XG without re-analyzing). Feasible:
+  both cube-pane eval vectors and per-candidate probabilities/equities are
+  carried by `BgDecisionData`; after-boards are recomputable; the sbyte
+  move encoding is invertible. **First decision of that session — the
+  rollout-depth policy:** rollout contexts are unrecoverable from
+  `BgDecisionData`, so a rollout-depth candidate must either be written as
+  level 1002 with `RolloutIndex = -1` (XG-legal — the `DoubleAnalysis.xgp`
+  fixture is exactly that shape, but unverified for move panes) or
+  downgraded to its base ply (dishonest depth label). Static levels invert
+  exactly via the `LevelInfo` taxonomy.
