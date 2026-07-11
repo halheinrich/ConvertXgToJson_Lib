@@ -77,6 +77,8 @@ ConvertXgToJson_Lib.Tests/
   XgDecisionIteratorTests.cs
   XgFileWriterTests.cs
   XgpExporterTests.cs
+  XgpExportXgAgreementTests.cs
+  XgpSliceExportTests.cs
 ```
 
 The test directory lists principal classes only; additional `*Tests.cs`
@@ -134,10 +136,11 @@ The reader's mirror. Layered exactly like the read path:
   stream / bytes / file. Format-generic by construction (it writes whatever
   record list the model holds, so full-`.xg` output works), but only the
   `.xgp` shape is validated against real XG imports.
-* **`XgpExporter`** (public) — decision-level export: `BgDecisionData` →
-  `.xgp` bytes. "Exporter" per the ecosystem convention (MatExporter
-  precedent): an Exporter translates semantics, a Writer/Reader mirrors
-  byte layout. Consumers never touch record internals.
+* **`XgpExporter`** (public) — decision-level export, two surfaces chosen
+  by what the caller holds (see below). "Exporter" per the ecosystem
+  convention (MatExporter precedent): an Exporter translates semantics, a
+  Writer/Reader mirrors byte layout. Consumers never touch record
+  internals.
 
 Container facts the reader never needed (writer-only knowledge, decoded from
 the fixture corpus and pinned by `XgFileWriterTests`):
@@ -156,35 +159,53 @@ the fixture corpus and pinned by `XgFileWriterTests`):
   (`2f5af5e1-e021-4832-a423-ef480ec58a0b`, stable 2010→current); the
   exporter reproduces it.
 
-`XgpExporter` emits a **clean unanalyzed position**: match header + game
-header (game "starts" at the saved position, XG's position-editor pattern) +
-cube record, plus a move record carrying the dice when the decision is a
-play. Analysis blocks hold XG's own never-analysed sentinels (`Level = -100`,
-errors `-1000`). XG re-analyzes on import. Money games recover Jacoby/Beaver
-from XGID field 8 when the decision carries an XGID, else default to XG's
-money defaults (Jacoby on, Beaver off). Output is byte-deterministic — no
-timestamps or random ids.
+**Clean-position export** (`Write(BgDecisionData, …)`) — for callers that
+hold only the consumer-level decision record (JSON-sourced). Emits a
+**clean unanalyzed position**: match header + game header (game "starts"
+at the saved position, XG's position-editor pattern) + cube record, plus a
+move record carrying the dice when the decision is a play. Analysis blocks
+hold XG's own never-analysed sentinels (`Level = -100`, errors `-1000`).
+XG re-analyzes on import. Money games recover Jacoby/Beaver from XGID
+field 8 when the decision carries an XGID, else default to XG's money
+defaults (Jacoby on, Beaver off). On-roll player is normalized to
+player 1. Output is byte-deterministic — no timestamps or random ids.
+Clean exports **self-identify** via the match header's Location fields
+(`"ConvertXgToJson_Lib"`) — Location is the ecosystem's producer
+fingerprint (Galaxy writes `"BackgammonGalaxy"` there and
+`IsGalaxyMoneyGame` keys on it), so the string is provenance and a stable
+hook for ever special-casing our own exports; treat changing it as a
+breaking change (`Export_SelfIdentifiesInLocation` pins it).
 
-Exports **self-identify** via the match header's Location fields
-(`"ConvertXgToJson_Lib"`). Location is the ecosystem's producer fingerprint
-— Galaxy writes `"BackgammonGalaxy"` there and `IsGalaxyMoneyGame` keys on
-it — so the string is provenance and a stable hook for ever special-casing
-our own exports; treat changing it as a breaking change
-(`Export_SelfIdentifiesInLocation` pins it).
+**Slice export** (`Write(XgFile, game, moveNumber, isCube, …)`) — for
+callers that hold the parsed source file plus the decision's coordinates
+(the same user-level selectors an `XgDecisionId` carries). Emits XG's own
+save-from-match shape, learned from the XG-authored agreement fixtures:
+match header and game header shared **verbatim** (source perspective,
+player order, and metadata preserved — including a foreign Location like
+`"BackgammonGalaxy"`), decision records copied **with analysis panes
+intact**, referenced rollout contexts carried over with indices remapped
+(a cube rollout is an adjacent context *pair* with the record pointing at
+the second leg — both legs travel), comment indices cleared (comments not
+carried). A play slice carries the real same-turn cube record when the
+source has one, else synthesizes the incidental unanalysed pane.
 
-Ground-truth oracle beyond round-trips: `XgpExportXgAgreementTests` compares
-exports field-level against two XG-authored `.xgp` saves of decisions whose
-source `.xg` is also pinned (`MTCH4064_1_22.xgp`,
-`match35253054_2_37.xgp` — the latter saved with player 2 on roll,
-exercising perspective normalization; XG preserves the source match's
-perspective and metadata verbatim, ours normalizes on-roll → player 1, so
-the comparison runs through the on-roll lens, never byte identity).
+**Iterator visibility differs by path, deliberately.** A clean export is
+**XG-import-only**: unanalyzed, so this library's own iterator yields
+**zero** decisions for it (rule 1 of the `.xgp` emission policy); the
+ecosystem's re-ingestible format for analysis-less decisions remains
+`BgDecisionData` JSON. A sliced analyzed decision is **visible** — exactly
+one decision, analysis and rollout depth intact — because the panes travel
+with it.
 
-**XG-import-only, by design:** because exports are unanalyzed, this
-library's own iterator yields **zero** decisions for them (rule 1 of the
-`.xgp` emission policy). The ecosystem's re-ingestible format remains
-`BgDecisionData` JSON. Analysis carry-through is a booked follow-up — see
-"Subproject-internal next steps".
+Ground-truth oracle beyond round-trips: `XgpExportXgAgreementTests`
+compares exports field-level against two XG-authored `.xgp` saves of
+decisions whose source `.xg` is also pinned (`MTCH4064_1_22.xgp`, a play;
+`match35253054_2_37.xgp`, a rolled-out cube saved with player 2 on roll).
+Clean-path comparisons run through the on-roll lens (XG preserves source
+perspective, the clean path normalizes); slice comparisons are direct
+record equivalence — analysis included — with one documented exclusion:
+the tutor family (`ErrorTutor*`, `TutorPosition`), which XG initializes at
+runtime while imported sources carry zeros. Never byte identity.
 
 ### XgDecisionIterator
 
@@ -425,11 +446,19 @@ public static class XgFileWriter
 
 public static class XgpExporter
 {
-    // Decision-level .xgp export (clean unanalyzed position; XG-import-only —
-    // the iterator yields zero decisions for exports, by design).
+    // Clean-position path (caller holds only the decision record):
+    // unanalyzed position, XG-import-only — the iterator yields zero
+    // decisions for these exports, by design.
     public static void   Write(BgDecisionData decision, Stream output);
     public static byte[] ToBytes(BgDecisionData decision);
     public static void   WriteFile(BgDecisionData decision, string path);
+
+    // Slice path (caller holds the parsed source file + the decision's
+    // XgDecisionId coordinates): analysis carried through — the iterator
+    // yields exactly one decision for a sliced analyzed decision.
+    public static void   Write(XgFile source, int game, int moveNumber, bool isCube, Stream output);
+    public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube);
+    public static void   WriteFile(XgFile source, int game, int moveNumber, bool isCube, string path);
 }
 
 public static class XgDecisionIterator
@@ -573,12 +602,23 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `XgFileWriterTests`. Do not "single-source" this with a declarative field
   map — evaluated and rejected as over-engineering for Pascal variant
   records.
-* **Exported `.xgp` files yield zero iterator decisions — by design.**
-  `XgpExporter` writes clean unanalyzed positions; rule 1 of the `.xgp`
-  emission policy ("skip unanalysed") makes them invisible to `Iterate` /
-  `IterateDiagramRequests`. The zero-rows assertions in `XgpExporterTests`
-  pin the intended XG-import-only boundary; making exports visible means
-  carrying analysis through (the booked follow-up), not changing the tests.
+* **Clean-path exports yield zero iterator decisions — by design.**
+  `XgpExporter`'s `BgDecisionData` path writes clean unanalyzed positions;
+  rule 1 of the `.xgp` emission policy ("skip unanalysed") makes them
+  invisible to `Iterate` / `IterateDiagramRequests`. The zero-rows
+  assertions in `XgpExporterTests` pin that XG-import-only boundary — do
+  not "fix" them to expect one row. Callers that want iterator-visible
+  analyzed exports use the **slice path** (`Write(XgFile, game,
+  moveNumber, isCube, …)`), which carries the analysis panes and emits
+  exactly one decision.
+* **A cube rollout is an adjacent context pair; the record points at the
+  second leg.** Ground truth from XG's own save (`match35253054_2_37.xgp`:
+  two contexts, `RolloutIndex = 1`). Anything that copies or filters
+  rollout tables for cube decisions must carry both legs and keep them
+  adjacent and in order — carrying only `rollouts[RolloutIndex]` silently
+  drops the companion leg. The slice exporter's `RemapCubeRollout` is the
+  in-tree reference; move-candidate rollouts are individually indexed and
+  have no pair rule.
 * **`TDateTime` is a double of days — only quantized dates round-trip
   tick-for-tick.** Dates parsed from real files are already double-quantized
   and round-trip exactly; a synthetic `DateTime` in a writer test must use a
@@ -614,16 +654,18 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 
 ## Subproject-internal next steps
 
-* **`.xgp` analysis carry-through (Option B of the exporter design).**
-  Reconstruct `BestMoveAnalysis` / `DoubleActionAnalysis` from
-  `PlayCandidate` / `DecisionData` so exports are visible to our own
-  iterator (and show analysis in XG without re-analyzing). Feasible:
-  both cube-pane eval vectors and per-candidate probabilities/equities are
-  carried by `BgDecisionData`; after-boards are recomputable; the sbyte
-  move encoding is invertible. **First decision of that session — the
-  rollout-depth policy:** rollout contexts are unrecoverable from
-  `BgDecisionData`, so a rollout-depth candidate must either be written as
-  level 1002 with `RolloutIndex = -1` (XG-legal — the `DoubleAnalysis.xgp`
-  fixture is exactly that shape, but unverified for move panes) or
-  downgraded to its base ply (dishonest depth label). Static levels invert
-  exactly via the `LevelInfo` taxonomy.
+* **Analysis carry-through landed as the slice exporter** (`XgpExporter`'s
+  `XgFile` + coordinates surface) — the original "Option B"
+  (reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from
+  `PlayCandidate` / `DecisionData`) is superseded for every caller that
+  holds the parsed source file, and its open rollout-depth policy question
+  dissolved: the slice carries the real rollout contexts, nothing is
+  fabricated. Reconstruction remains *possible* if a JSON-sourced caller
+  (holding only `BgDecisionData`) ever needs analyzed exports — unbooked;
+  revisit only when such a caller exists. Feasibility notes preserved:
+  eval vectors and per-candidate probabilities/equities are all in
+  `BgDecisionData`; after-boards recomputable; the sbyte move encoding
+  invertible; static levels invert exactly via the `LevelInfo` taxonomy;
+  rollout contexts are the one unrecoverable piece (level 1002 with
+  `RolloutIndex = -1` is XG-legal per the `DoubleAnalysis.xgp` fixture,
+  unverified for move panes).

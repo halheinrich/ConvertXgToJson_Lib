@@ -5,42 +5,46 @@ using ConvertXgToJson_Lib.Models;
 namespace ConvertXgToJson_Lib;
 
 /// <summary>
-/// Exports a single decision as an XG <c>.xgp</c> position file — the
-/// semantic translation from the consumer-level <see cref="BgDecisionData"/>
-/// to the XG record shapes, layered over <see cref="XgFileWriter"/>.
-/// ("Exporter" per the ecosystem convention: an Exporter translates
-/// semantics; a Writer/Reader mirrors byte layout.)
+/// Exports a single decision as an XG <c>.xgp</c> position file, layered
+/// over <see cref="XgFileWriter"/>. ("Exporter" per the ecosystem
+/// convention: an Exporter translates semantics; a Writer/Reader mirrors
+/// byte layout.)
 ///
-/// Usage:
-///   XgpExporter.Write(decision, stream);        // Stream / WASM friendly
-///   byte[] bytes = XgpExporter.ToBytes(decision);
-///   XgpExporter.WriteFile(decision, "pos.xgp"); // path convenience
+/// <para>Two surfaces, chosen by what the caller holds:</para>
 ///
 /// <para>
-/// The exported file is a <b>clean, unanalyzed</b> position: XG re-analyzes
-/// on import, so no analysis panes are carried over. Field values mirror
-/// what real XG writes for a position saved from its position editor
-/// (verified against the fixture corpus), with the analysis blocks holding
-/// XG's own "never analysed" sentinels (<c>Level = -100</c>, error fields
-/// <c>-1000</c>).
+/// <b>Clean-position export</b> — <c>Write(BgDecisionData, …)</c>. For
+/// callers that hold only the consumer-level decision record (e.g.
+/// JSON-sourced). Emits a clean <b>unanalyzed</b> position: XG re-analyzes
+/// on import; the analysis blocks hold XG's own never-analysed sentinels
+/// (<c>Level = -100</c>, error fields <c>-1000</c>), field values mirror an
+/// XG position-editor save, and the on-roll player is normalized to
+/// player 1. <b>XG-import-only, by design:</b> rule 1 of the <c>.xgp</c>
+/// emission policy ("skip unanalysed") makes clean exports invisible to
+/// this library's own <see cref="XgDecisionIterator"/>; the ecosystem's
+/// re-ingestible format for analysis-less decisions remains
+/// <see cref="BgDecisionData"/> JSON.
 /// </para>
 ///
 /// <para>
-/// <b>XG-import-only, by design.</b> Because the export is unanalyzed, this
-/// library's own <see cref="XgDecisionIterator"/> yields <b>zero</b> decisions
-/// for it — rule 1 of the <c>.xgp</c> emission policy skips unanalysed
-/// decisions. Exported files are for interchange with real XG (and other
-/// XG-format consumers), not for re-ingestion by this ecosystem; the
-/// ecosystem's native re-ingestible format remains the
-/// <see cref="BgDecisionData"/> JSON serialization. Carrying the source
-/// decision's analysis through (which would make exports visible to the
-/// iterator) is a booked follow-up — see INSTRUCTIONS.md.
+/// <b>Slice export</b> — <c>Write(XgFile, game, moveNumber, isCube, …)</c>.
+/// For callers that hold the parsed source <see cref="XgFile"/> (they just
+/// iterated it) plus the decision's coordinates — the same user-level
+/// selectors a <see cref="BgDataTypes_Lib.XgDecisionId"/> carries. Emits
+/// XG's own save-from-match shape: match header and game header copied
+/// verbatim (source perspective and metadata preserved), the decision
+/// records copied <b>with their analysis panes</b>, and any referenced
+/// rollout contexts carried over (indices remapped). A sliced analyzed
+/// decision is therefore visible to our own iterator (exactly one decision)
+/// and shows its analysis in XG without re-analyzing. Comments are not
+/// carried; comment indices on the sliced decision records are cleared.
 /// </para>
 ///
 /// <para>
-/// A play decision (dice present) exports a cube record plus a move record
-/// carrying the dice; a cube decision exports the cube record only —
-/// mirroring which panes XG itself writes.
+/// Both paths write which panes XG itself writes: a play decision exports a
+/// cube record (the real same-turn cube record when the source has one,
+/// else XG's incidental unanalysed cube pane) plus the move record; a cube
+/// decision exports the cube record only.
 /// </para>
 /// </summary>
 public static class XgpExporter
@@ -117,6 +121,277 @@ public static class XgpExporter
         using var fs = File.Create(path);
         Write(decision, fs);
     }
+
+    // ------------------------------------------------------------------ //
+    //  Public API — slice export (analysis carried through)
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// Writes the decision at (<paramref name="game"/>,
+    /// <paramref name="moveNumber"/>, <paramref name="isCube"/>) of
+    /// <paramref name="source"/> to <paramref name="output"/> as a complete
+    /// <c>.xgp</c> file, <b>carrying the source analysis through</b>. The
+    /// coordinates are the same user-level selectors a
+    /// <see cref="BgDataTypes_Lib.XgDecisionId"/> carries (and the same
+    /// numbering the iterator stamps on
+    /// <see cref="BgDataTypes_Lib.DescriptiveData"/>).
+    /// </summary>
+    /// <param name="source">The parsed source file (typically a full <c>.xg</c> match).</param>
+    /// <param name="game">1-based game number within the source.</param>
+    /// <param name="moveNumber">1-based move number within the game.</param>
+    /// <param name="isCube"><see langword="true"/> for the cube decision at
+    /// that move number; <see langword="false"/> for the checker play.</param>
+    /// <param name="output">Destination stream; written sequentially, left open.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="source"/> does not begin with a
+    /// <see cref="MatchHeaderRecord"/>, or no decision exists at the given
+    /// coordinates.
+    /// </exception>
+    public static void Write(XgFile source, int game, int moveNumber, bool isCube, Stream output)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(output);
+        XgFileWriter.Write(ToXgFileSlice(source, game, moveNumber, isCube), output);
+    }
+
+    /// <summary>
+    /// Serializes the decision at the given coordinates of
+    /// <paramref name="source"/> to <c>.xgp</c> bytes, analysis carried
+    /// through. Preferred entry point for browser-hosted (WASM) consumers.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, int, int, bool, Stream)"/>
+    public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube)
+    {
+        using var ms = new MemoryStream();
+        Write(source, game, moveNumber, isCube, ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Convenience overload: writes the sliced decision to
+    /// <paramref name="path"/>, overwriting any existing file.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, int, int, bool, Stream)"/>
+    public static void WriteFile(XgFile source, int game, int moveNumber, bool isCube, string path)
+    {
+        using var fs = File.Create(path);
+        Write(source, game, moveNumber, isCube, fs);
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Source slice → record set
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// Builds the <see cref="XgFile"/> record set for a slice export —
+    /// XG's own save-from-match shape, learned from the XG-authored
+    /// agreement fixtures: match header and game header shared verbatim
+    /// (source perspective and metadata preserved), decision records copied
+    /// with analysis intact, referenced rollout contexts carried over with
+    /// indices remapped, comment indices cleared (comments not carried).
+    /// Internal so tests can assert on records directly.
+    /// </summary>
+    internal static XgFile ToXgFileSlice(XgFile source, int game, int moveNumber, bool isCube)
+    {
+        if (source.Records.Count == 0 || source.Records[0] is not MatchHeaderRecord mh)
+            throw new ArgumentException(
+                "Slice source must begin with a MatchHeaderRecord (a parsed .xg/.xgp file always does).",
+                nameof(source));
+
+        var (gh, cube, move) = LocateDecision(source, game, moveNumber, isCube);
+
+        // Carry only the rollout contexts the sliced records reference,
+        // in first-appearance order, and remap indices into the new table.
+        var rollouts = new List<RolloutContext>();
+        var remap = new Dictionary<int, int>();
+        int Remap(int index)
+        {
+            if (index < 0 || index >= source.Rollouts.Count)
+                return -1;
+            if (!remap.TryGetValue(index, out int mapped))
+            {
+                mapped = rollouts.Count;
+                rollouts.Add(source.Rollouts[index]);
+                remap[index] = mapped;
+            }
+            return mapped;
+        }
+
+        // A cube rollout occupies an adjacent context *pair* with the record
+        // pointing at the second leg — XG's own save of a rolled-out cube
+        // (match35253054_2_37 ground truth) carries both legs and keeps the
+        // pointer on the second. Carry the companion leg before the
+        // referenced one so the pair stays adjacent and in order.
+        int RemapCubeRollout(int index)
+        {
+            if (index >= 1 && index < source.Rollouts.Count)
+                Remap(index - 1);
+            return Remap(index);
+        }
+
+        var records = new List<SaveRecord> { mh, gh };
+        if (isCube)
+        {
+            records.Add(SliceCubeRecord(cube!, RemapCubeRollout));
+        }
+        else
+        {
+            // XG always writes a cube pane beside a move pane: the real
+            // same-turn cube record when the source has one (Joe Russell
+            // shape), else the incidental unanalysed pane (PlayAnalysis
+            // shape) carrying the roll.
+            records.Add(cube != null
+                ? SliceCubeRecord(cube, RemapCubeRollout)
+                : UnanalysedCubeRecord(
+                    activePlayer: move!.ActivePlayer,
+                    position: move.InitialPosition,
+                    cubeValueRaw: move.CubeValue,
+                    doubled: -2,
+                    diceRolled: $"{move.Dice[0]}{move.Dice[1]}"));
+            records.Add(SliceMoveRecord(move!, Remap));
+        }
+
+        return new XgFile
+        {
+            Header = new RichGameHeader
+            {
+                HeaderVersion = 1,
+                GameId = XgpGameId,
+                SaveName = BuildSaveName(
+                    isMoney: mh.MatchLength >= 99999,
+                    matchLength: mh.MatchLength,
+                    score1: gh.Score1,
+                    score2: gh.Score2,
+                    jacoby: mh.Jacoby),
+            },
+            Records = records,
+            Rollouts = rollouts,
+        };
+    }
+
+    /// <summary>
+    /// Finds the decision records at the iterator's coordinates: game =
+    /// ordinal of the containing <see cref="GameHeaderRecord"/>; a play's
+    /// move number = ordinal of its <see cref="MoveRecord"/> within the
+    /// game; a cube decision's move number = moves seen so far + 1 (the
+    /// same <c>ctx.MoveNumber + 1</c> stamp the iterator emits). For a play,
+    /// also returns the immediately preceding same-turn
+    /// <see cref="CubeRecord"/> when one exists.
+    /// </summary>
+    private static (GameHeaderRecord Game, CubeRecord? Cube, MoveRecord? Move) LocateDecision(
+        XgFile source, int game, int moveNumber, bool isCube)
+    {
+        int currentGame = 0;
+        int movesSeen = 0;
+        GameHeaderRecord? gh = null;
+        SaveRecord? previousInGame = null;
+
+        foreach (var record in source.Records)
+        {
+            if (record is GameHeaderRecord g)
+            {
+                currentGame++;
+                movesSeen = 0;
+                previousInGame = null;
+                if (currentGame == game)
+                    gh = g;
+                continue;
+            }
+            if (currentGame != game)
+                continue;
+
+            if (isCube && record is CubeRecord c && movesSeen == moveNumber - 1)
+                return (gh!, c, null);
+
+            if (record is MoveRecord m)
+            {
+                movesSeen++;
+                if (!isCube && movesSeen == moveNumber)
+                    return (gh!, previousInGame as CubeRecord, m);
+            }
+            previousInGame = record;
+        }
+
+        throw new ArgumentException(
+            $"No {(isCube ? "cube" : "play")} decision at game {game}, move {moveNumber} in the source file.",
+            nameof(moveNumber));
+    }
+
+    /// <summary>
+    /// Copy of a source <see cref="CubeRecord"/> for the slice: analysis
+    /// intact, rollout index remapped into the slice's table, comment index
+    /// cleared (comments are not carried).
+    /// </summary>
+    private static CubeRecord SliceCubeRecord(CubeRecord c, Func<int, int> remap) => new()
+    {
+        EntryType = RecordType.Cube,
+        ActivePlayer = c.ActivePlayer,
+        Doubled = c.Doubled,
+        Taken = c.Taken,
+        BeaverAccepted = c.BeaverAccepted,
+        RaccoonAccepted = c.RaccoonAccepted,
+        CubeValue = c.CubeValue,
+        Position = c.Position,
+        Analysis = c.Analysis,
+        ErrorCube = c.ErrorCube,
+        DiceRolled = c.DiceRolled,
+        ErrorTake = c.ErrorTake,
+        RolloutIndex = remap(c.RolloutIndex),
+        ComputerChoice = c.ComputerChoice,
+        AnalyzeLevel = c.AnalyzeLevel,
+        ErrorBeaver = c.ErrorBeaver,
+        ErrorRaccoon = c.ErrorRaccoon,
+        AnalyzeLevelRequested = c.AnalyzeLevelRequested,
+        InvalidDecision = c.InvalidDecision,
+        TutorCube = c.TutorCube,
+        TutorTake = c.TutorTake,
+        ErrorTutorCube = c.ErrorTutorCube,
+        ErrorTutorTake = c.ErrorTutorTake,
+        Flagged = c.Flagged,
+        CommentIndex = -1,
+        Edited = c.Edited,
+        TimeDelayed = c.TimeDelayed,
+        TimeDelayDone = c.TimeDelayDone,
+        NumberOfAutoDoubles = c.NumberOfAutoDoubles,
+        TimeBotLeft = c.TimeBotLeft,
+        TimeTopLeft = c.TimeTopLeft,
+    };
+
+    /// <summary>
+    /// Copy of a source <see cref="MoveRecord"/> for the slice: analysis
+    /// intact, rollout indices remapped, comment index cleared.
+    /// </summary>
+    private static MoveRecord SliceMoveRecord(MoveRecord m, Func<int, int> remap) => new()
+    {
+        EntryType = RecordType.Move,
+        InitialPosition = m.InitialPosition,
+        FinalPosition = m.FinalPosition,
+        ActivePlayer = m.ActivePlayer,
+        MoveList = m.MoveList,
+        Dice = m.Dice,
+        CubeValue = m.CubeValue,
+        ErrorMove = m.ErrorMove,
+        CandidateCount = m.CandidateCount,
+        Analysis = m.Analysis,
+        Played = m.Played,
+        MoveError = m.MoveError,
+        LuckError = m.LuckError,
+        ComputerChoice = m.ComputerChoice,
+        InitialEquity = m.InitialEquity,
+        RolloutIndices = [.. m.RolloutIndices.Select(remap)],
+        AnalyzeLevel = m.AnalyzeLevel,
+        AnalyzeLevelLuck = m.AnalyzeLevelLuck,
+        InvalidDecision = m.InvalidDecision,
+        TutorPosition = m.TutorPosition,
+        TutorMoveIndex = m.TutorMoveIndex,
+        ErrorTutorMove = m.ErrorTutorMove,
+        Flagged = m.Flagged,
+        CommentIndex = -1,
+        Edited = m.Edited,
+        TimeDelayBits = m.TimeDelayBits,
+        TimeDelayDoneBits = m.TimeDelayDoneBits,
+        NumberOfAutoDoubles = m.NumberOfAutoDoubles,
+    };
 
     // ------------------------------------------------------------------ //
     //  Decision → record set
@@ -267,37 +542,52 @@ public static class XgpExporter
         BgDecisionData decision, sbyte[] position, int cubeRaw)
     {
         bool isCube = decision.Decision.IsCube;
-        return new CubeRecord
-        {
-            EntryType = RecordType.Cube,
-            ActivePlayer = 1,
+        return UnanalysedCubeRecord(
+            activePlayer: 1,
+            position: new PositionEngine { Points = position },
+            cubeValueRaw: cubeRaw,
             // Mirrors XG's own pane-state values: -1 for a saved cube
             // problem (DoubleAnalysis fixture), -2 when the position is a
             // play decision and the cube pane is incidental (PlayAnalysis).
-            Doubled = isCube ? -1 : -2,
-            Taken = -1,
-            BeaverAccepted = -1,
-            RaccoonAccepted = -1,
-            CubeValue = cubeRaw,
-            Position = new PositionEngine { Points = position },
-            Analysis = UnanalysedDoubleAction(),
-            ErrorCube = UnanalysedError,
+            doubled: isCube ? -1 : -2,
             // XG writes "11" as the cube-pane placeholder of a pre-roll
             // position; a play decision carries its real roll.
-            DiceRolled = isCube ? "11" : $"{decision.Decision.Dice[0]}{decision.Decision.Dice[1]}",
-            ErrorTake = UnanalysedError,
-            RolloutIndex = -1,
-            AnalyzeLevel = -1,
-            ErrorBeaver = UnanalysedError,
-            ErrorRaccoon = UnanalysedError,
-            AnalyzeLevelRequested = -1,
-            TutorCube = -1,
-            TutorTake = -1,
-            ErrorTutorCube = UnanalysedError,
-            ErrorTutorTake = UnanalysedError,
-            CommentIndex = -1,
-        };
+            diceRolled: isCube ? "11" : $"{decision.Decision.Dice[0]}{decision.Decision.Dice[1]}");
     }
+
+    /// <summary>
+    /// XG's incidental / never-analysed cube pane, exactly as real XG
+    /// writes it (NoAnalysis / PlayAnalysis fixtures). Shared by the
+    /// clean-position path (normalized perspective) and the slice path
+    /// (source perspective) — only the pane-state inputs differ.
+    /// </summary>
+    private static CubeRecord UnanalysedCubeRecord(
+        int activePlayer, PositionEngine position, int cubeValueRaw,
+        int doubled, string diceRolled) => new()
+    {
+        EntryType = RecordType.Cube,
+        ActivePlayer = activePlayer,
+        Doubled = doubled,
+        Taken = -1,
+        BeaverAccepted = -1,
+        RaccoonAccepted = -1,
+        CubeValue = cubeValueRaw,
+        Position = position,
+        Analysis = UnanalysedDoubleAction(),
+        ErrorCube = UnanalysedError,
+        DiceRolled = diceRolled,
+        ErrorTake = UnanalysedError,
+        RolloutIndex = -1,
+        AnalyzeLevel = -1,
+        ErrorBeaver = UnanalysedError,
+        ErrorRaccoon = UnanalysedError,
+        AnalyzeLevelRequested = -1,
+        TutorCube = -1,
+        TutorTake = -1,
+        ErrorTutorCube = UnanalysedError,
+        ErrorTutorTake = UnanalysedError,
+        CommentIndex = -1,
+    };
 
     private static MoveRecord BuildMoveRecord(
         BgDecisionData decision, sbyte[] position, int cubeRaw) => new()

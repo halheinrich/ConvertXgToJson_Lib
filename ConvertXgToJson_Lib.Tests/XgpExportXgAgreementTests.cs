@@ -138,6 +138,68 @@ public class XgpExportXgAgreementTests
     }
 
     // ------------------------------------------------------------------ //
+    //  Slice-export agreement: a slice of the source decision reproduces
+    //  XG's own save-from-match records — analysis panes included — with
+    //  one documented exception: the tutor family (ErrorTutorCube/Take/
+    //  Move, TutorPosition). XG initializes those at runtime when a match
+    //  is open (-1000 sentinels, a computed tutor board), while imported
+    //  source files carry zeros there; the slice stays source-verbatim,
+    //  which XG demonstrably accepts (it accepted the source .xg).
+    // ------------------------------------------------------------------ //
+
+    [Fact]
+    public void SlicedPlayDecision_ReproducesXgsOwnSave()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        var xgSaved = XgFileReader.ReadFile(Fixture("MTCH4064_1_22.xgp"));
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 1, moveNumber: 22, isCube: false));
+        var sliced = XgFileReader.ReadStream(ms);
+
+        sliced.Records.Select(r => r.EntryType).Should().Equal(xgSaved.Records.Select(r => r.EntryType));
+        sliced.Header.SaveName.Should().Be(xgSaved.Header.SaveName);
+        sliced.Header.GameId.Should().Be(xgSaved.Header.GameId);
+
+        sliced.Records.OfType<MatchHeaderRecord>().Single().Should().BeEquivalentTo(
+            xgSaved.Records.OfType<MatchHeaderRecord>().Single(),
+            "XG's save copies the source match header verbatim, and so does the slice");
+        sliced.Records.OfType<GameHeaderRecord>().Single().Should().BeEquivalentTo(
+            xgSaved.Records.OfType<GameHeaderRecord>().Single());
+        sliced.Records.OfType<CubeRecord>().Single().Should().BeEquivalentTo(
+            xgSaved.Records.OfType<CubeRecord>().Single(),
+            o => o.Excluding(c => c.ErrorTutorCube).Excluding(c => c.ErrorTutorTake));
+        sliced.Records.OfType<MoveRecord>().Single().Should().BeEquivalentTo(
+            xgSaved.Records.OfType<MoveRecord>().Single(),
+            o => o.Excluding(m => m.TutorPosition).Excluding(m => m.ErrorTutorMove));
+    }
+
+    [Fact]
+    public void SlicedRolledOutCubeDecision_ReproducesXgsOwnSave_IncludingRolloutPair()
+    {
+        var source = XgFileReader.ReadFile(Fixture("match35253054.xg"));
+        var xgSaved = XgFileReader.ReadFile(Fixture("match35253054_2_37.xgp"));
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 2, moveNumber: 37, isCube: true));
+        var sliced = XgFileReader.ReadStream(ms);
+
+        sliced.Records.Select(r => r.EntryType).Should().Equal(xgSaved.Records.Select(r => r.EntryType));
+        sliced.Header.SaveName.Should().Be(xgSaved.Header.SaveName);
+
+        sliced.Records.OfType<MatchHeaderRecord>().Single().Should().BeEquivalentTo(
+            xgSaved.Records.OfType<MatchHeaderRecord>().Single());
+        sliced.Records.OfType<GameHeaderRecord>().Single().Should().BeEquivalentTo(
+            xgSaved.Records.OfType<GameHeaderRecord>().Single());
+        // RolloutIndex is deliberately inside this comparison: XG carries
+        // the adjacent context pair and points at the second leg, and the
+        // slice must land on the same index.
+        sliced.Records.OfType<CubeRecord>().Single().Should().BeEquivalentTo(
+            xgSaved.Records.OfType<CubeRecord>().Single(),
+            o => o.Excluding(c => c.ErrorTutorCube).Excluding(c => c.ErrorTutorTake));
+        sliced.Rollouts.Should().BeEquivalentTo(xgSaved.Rollouts, o => o.WithStrictOrdering(),
+            "both legs of the cube's rollout pair travel with the slice");
+    }
+
+    // ------------------------------------------------------------------ //
     //  Helpers
     // ------------------------------------------------------------------ //
 

@@ -4,19 +4,22 @@ using ConvertXgToJson_Lib.Models;
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
-/// <see cref="XgpExporter"/> tests: decision → .xgp bytes → re-read through
-/// our own reader, asserting the record set XG will see.
+/// <see cref="XgpExporter"/> <b>clean-position path</b> tests: decision →
+/// .xgp bytes → re-read through our own reader, asserting the record set
+/// XG will see.
 ///
 /// <para>
 /// The end-to-end oracle is record-level, plus one deliberate iterator
-/// assertion: an exported file yields <b>zero</b> decisions from
+/// assertion: a clean export yields <b>zero</b> decisions from
 /// <see cref="XgDecisionIterator"/>. That is <b>by design</b>, not a bug —
-/// exports are clean unanalyzed positions (XG re-analyzes on import), and
+/// clean exports are unanalyzed positions (XG re-analyzes on import), and
 /// rule 1 of the .xgp emission policy ("skip unanalysed") makes them
-/// invisible to this ecosystem's own iterator. Exports are XG-import-only;
-/// the ecosystem's re-ingestible format remains BgDecisionData JSON. Do not
-/// "fix" the zero-rows assertions to expect one row — that would require
-/// carrying analysis through (the booked follow-up), not a test change.
+/// invisible to this ecosystem's own iterator. The clean path is
+/// XG-import-only; the ecosystem's re-ingestible format remains
+/// BgDecisionData JSON. Do not "fix" the zero-rows assertions to expect one
+/// row — analysis carry-through exists, but it is the <b>slice-export</b>
+/// surface (source XgFile + decision coordinates; see
+/// <see cref="XgpSliceExportTests"/>), not a change to this path.
 /// </para>
 /// </summary>
 public class XgpExporterTests
