@@ -70,41 +70,46 @@ public class XgDecisionIteratorTests
     [Fact]
     public void StopGameAfter_SkipsRemainingDecisionsInGame()
     {
-        // Use the first xg file that has multiple decisions in at least one game.
-        var path = TestPaths.XgFiles.First();
-        var file = XgFileReader.ReadFile(path);
-        string sourceFile = Path.GetFileName(path);
+        // The corpus churns and single-game matches are valid corpus members,
+        // so scan for the first file whose shape can exercise both assertions:
+        // a game with more than one decision, plus decisions in at least one
+        // other game. Tolerate a corpus with no such file (or no files at all).
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
 
-        var allRows = XgDecisionIterator.Iterate(file, sourceFile).ToList();
+            var allRows = XgDecisionIterator.Iterate(file, sourceFile).ToList();
+            var byGame = allRows.GroupBy(r => r.Game).ToList();
 
-        // Find a game that has more than one decision.
-        int targetGame = allRows
-            .GroupBy(r => r.Game)
-            .Where(g => g.Count() > 1)
-            .Select(g => g.Key)
-            .FirstOrDefault(-1);
+            // Need >1 decision in some game AND decisions in another game.
+            int targetGame = byGame
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .FirstOrDefault(-1);
+            if (targetGame == -1 || byGame.Count < 2)
+                continue;
 
-        if (targetGame == -1)
-            return; // no game with >1 decision — skip test
+            int fullCountInGame = allRows.Count(r => r.Game == targetGame);
 
-        int fullCountInGame = allRows.Count(r => r.Game == targetGame);
+            // StopGameAfter receives IDecisionFilterData (the cross-surface
+            // contract); cast back to DecisionRow to read the .Game ordinal.
+            var callbacks = new XgIteratorCallbacks(
+                StopGameAfter: row => ((DecisionRow)row).Game == targetGame);
+            var collected = XgDecisionIterator
+                .Iterate(file, sourceFile, callbacks: callbacks)
+                .ToList();
 
-        // StopGameAfter receives IDecisionFilterData (the cross-surface
-        // contract); cast back to DecisionRow to read the .Game ordinal.
-        var callbacks = new XgIteratorCallbacks(
-            StopGameAfter: row => ((DecisionRow)row).Game == targetGame);
-        var collected = XgDecisionIterator
-            .Iterate(file, sourceFile, callbacks: callbacks)
-            .ToList();
+            int skippedCount = collected.Count(r => r.Game == targetGame);
+            skippedCount.Should().Be(1,
+                $"only the first decision of game {targetGame} should be yielded " +
+                $"after StopGameAfter returns true (full count was {fullCountInGame})");
 
-        int skippedCount = collected.Count(r => r.Game == targetGame);
-        skippedCount.Should().Be(1,
-            $"only the first decision of game {targetGame} should be yielded " +
-            $"after StopGameAfter returns true (full count was {fullCountInGame})");
-
-        // Decisions from other games should still appear.
-        collected.Any(r => r.Game != targetGame).Should().BeTrue(
-            "decisions from other games should not be skipped");
+            // Decisions from other games should still appear.
+            collected.Any(r => r.Game != targetGame).Should().BeTrue(
+                "decisions from other games should not be skipped");
+            return;
+        }
     }
 
     /// <summary>
