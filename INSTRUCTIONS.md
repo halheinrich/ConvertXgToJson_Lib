@@ -165,6 +165,21 @@ from XGID field 8 when the decision carries an XGID, else default to XG's
 money defaults (Jacoby on, Beaver off). Output is byte-deterministic — no
 timestamps or random ids.
 
+Exports **self-identify** via the match header's Location fields
+(`"ConvertXgToJson_Lib"`). Location is the ecosystem's producer fingerprint
+— Galaxy writes `"BackgammonGalaxy"` there and `IsGalaxyMoneyGame` keys on
+it — so the string is provenance and a stable hook for ever special-casing
+our own exports; treat changing it as a breaking change
+(`Export_SelfIdentifiesInLocation` pins it).
+
+Ground-truth oracle beyond round-trips: `XgpExportXgAgreementTests` compares
+exports field-level against two XG-authored `.xgp` saves of decisions whose
+source `.xg` is also pinned (`MTCH4064_1_22.xgp`,
+`match35253054_2_37.xgp` — the latter saved with player 2 on roll,
+exercising perspective normalization; XG preserves the source match's
+perspective and metadata verbatim, ours normalizes on-roll → player 1, so
+the comparison runs through the on-roll lens, never byte identity).
+
 **XG-import-only, by design:** because exports are unanalyzed, this
 library's own iterator yields **zero** decisions for them (rule 1 of the
 `.xgp` emission policy). The ecosystem's re-ingestible format remains

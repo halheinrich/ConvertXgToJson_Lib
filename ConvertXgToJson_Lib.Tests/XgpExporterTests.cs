@@ -301,6 +301,19 @@ public class XgpExporterTests
     }
 
     [Fact]
+    public void Export_SelfIdentifiesInLocation()
+    {
+        // Location is the ecosystem's producer fingerprint (Galaxy writes
+        // "BackgammonGalaxy" there; IsGalaxyMoneyGame keys on it). Exports
+        // self-identify rather than mimic XG's "eXtreme Gammon" — this is
+        // the stable hook for ever special-casing our own exports, so treat
+        // a change to the string as a breaking change to provenance.
+        var mh = Export(MoneyPlayDecision()).Records[0].Should().BeOfType<MatchHeaderRecord>().Subject;
+        mh.LocationAnsi.Should().Be("ConvertXgToJson_Lib");
+        mh.Location.Should().Be("ConvertXgToJson_Lib");
+    }
+
+    [Fact]
     public void Export_WritesXgpHeaderConstantsAndSaveName()
     {
         var money = Export(MoneyPlayDecision());

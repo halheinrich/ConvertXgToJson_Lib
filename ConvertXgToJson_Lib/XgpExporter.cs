@@ -52,6 +52,17 @@ public static class XgpExporter
     /// </summary>
     private static readonly Guid XgpGameId = new("2f5af5e1-e021-4832-a423-ef480ec58a0b");
 
+    /// <summary>
+    /// Producer fingerprint written into the match header's Location fields.
+    /// The ecosystem treats Location as tool provenance — Backgammon Galaxy
+    /// writes "BackgammonGalaxy" there (and XG imports those files happily),
+    /// and <see cref="Parsing.SaveRecordParser.IsGalaxyMoneyGame"/> keys on
+    /// it — so exports self-identify rather than mimicking XG's own
+    /// "eXtreme Gammon". Keep the string stable: it is the hook for ever
+    /// special-casing our own exports the way Galaxy's are special-cased.
+    /// </summary>
+    private const string ExporterLocation = "ConvertXgToJson_Lib";
+
     /// <summary>Sentinel: analysis level "queued / never ran".</summary>
     private const int UnanalysedLevel = -100;
 
@@ -223,8 +234,8 @@ public static class XgpExporter
             GameId = DeterministicGameId(decision),
             CompLevel1 = -1,
             CompLevel2 = -1,
-            LocationAnsi = "eXtreme Gammon",
-            Location = "eXtreme Gammon",
+            LocationAnsi = ExporterLocation,
+            Location = ExporterLocation,
             GameMode = GameMode.Competition,
             Invert = 1,
             Version = 30,
