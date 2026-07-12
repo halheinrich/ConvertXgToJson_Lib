@@ -364,6 +364,104 @@ public class XgpSliceExportTests
     }
 
     // -----------------------------------------------------------------------
+    //  Anonymize-copy (whole-file re-emit with name overrides) — not a
+    //  slice: every record, rollout context, and comment travels verbatim;
+    //  only the match header's name fields are rewritten.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void Copy_WithSourceNames_IsByteIdenticalToXgFileWriterOutput()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064_1_22.xgp"));
+        var srcMh = (MatchHeaderRecord)source.Records[0];
+        // Fixture precondition (see SliceOptions_MatchingSourceNames_AreByteInvisible).
+        srcMh.Player1Ansi.Should().Be(srcMh.Player1);
+        srcMh.Player2Ansi.Should().Be(srcMh.Player2);
+
+        var expected = XgFileWriter.ToBytes(source);
+
+        XgpExporter.ToBytes(source, new XgpSliceOptions
+        {
+            Player1Name = srcMh.Player1,
+            Player2Name = srcMh.Player2,
+        }).Should().Equal(expected,
+            "a copy whose overrides equal the source names is a plain re-emit");
+
+        XgpExporter.ToBytes(source, new XgpSliceOptions()).Should().Equal(expected,
+            "a copy with no overrides is a plain re-emit");
+    }
+
+    [Fact]
+    public void AnonymizedCopy_RoundTrips_NamesOverridden_AnalysisAndRolloutsPreserved()
+    {
+        // The rolled-out cube save: two rollout contexts (the adjacent
+        // pair), so depth survival proves the rollout table travels.
+        var source = XgFileReader.ReadFile(Fixture("match35253054_2_37.xgp"));
+        var srcMh = (MatchHeaderRecord)source.Records[0];
+        var original = XgDecisionIterator
+            .IterateDiagramRequests(source, "match35253054_2_37.xgp")
+            .Single();
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, XgpSliceOptions.Anonymized));
+        var copy = XgFileReader.ReadStream(ms);
+
+        var mh = (MatchHeaderRecord)copy.Records[0];
+        mh.Player1.Should().Be("Player 1");
+        mh.Player2.Should().Be("Player 2");
+        mh.Player1Ansi.Should().Be("Player 1");
+        mh.Player2Ansi.Should().Be("Player 2");
+        mh.Location.Should().Be(srcMh.Location, "provenance survives an anonymize-copy");
+        copy.Records.Count.Should().Be(source.Records.Count, "a copy selects nothing out");
+        copy.Rollouts.Count.Should().Be(source.Rollouts.Count);
+
+        var reRead = XgDecisionIterator.IterateDiagramRequests(copy, "copy.xgp").Single();
+        reRead.IsCube.Should().BeTrue();
+        reRead.Xgid.Should().Be(original.Xgid, "names never participate in the XGID");
+        reRead.Decision.CubeDepth.Should().Be(original.Decision.CubeDepth,
+            "the rollout table travels verbatim — no remapping, no dropped legs");
+        reRead.Decision.NoDoubleEquity.Should().Be(original.Decision.NoDoubleEquity);
+        reRead.Decision.DoubleTakeEquity.Should().Be(original.Decision.DoubleTakeEquity);
+    }
+
+    [Fact]
+    public void AnonymizedCopy_PreservesComments()
+    {
+        // The slice path clears comment indices; the copy path must not.
+        var source = new XgFile
+        {
+            Records =
+            [
+                new MatchHeaderRecord
+                {
+                    EntryType = RecordType.HeaderMatch,
+                    MatchLength = 7,
+                    Player1 = "Alice", Player1Ansi = "Alice",
+                    Player2 = "Bob", Player2Ansi = "Bob",
+                },
+                new GameHeaderRecord { EntryType = RecordType.HeaderGame },
+                new MoveRecord { EntryType = RecordType.Move, Dice = [3, 1], CommentIndex = 0 },
+            ],
+            Comments = ["anonymize copy comment"],
+        };
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, XgpSliceOptions.Anonymized));
+        var copy = XgFileReader.ReadStream(ms);
+
+        ((MatchHeaderRecord)copy.Records[0]).Player1.Should().Be("Player 1");
+        ((MatchHeaderRecord)copy.Records[0]).Player2.Should().Be("Player 2");
+        copy.Comments.Should().Equal("anonymize copy comment");
+        copy.Records.OfType<MoveRecord>().Single().CommentIndex.Should().Be(0,
+            "the copy path keeps comment indices — clearing them is slice behavior");
+    }
+
+    [Fact]
+    public void Copy_Throws_WhenSourceHasNoMatchHeader()
+    {
+        var act = () => XgpExporter.ToBytes(new XgFile(), XgpSliceOptions.Anonymized);
+        act.Should().Throw<ArgumentException>().WithMessage("*MatchHeaderRecord*");
+    }
+
+    // -----------------------------------------------------------------------
     //  Validation
     // -----------------------------------------------------------------------
 

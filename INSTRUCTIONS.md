@@ -214,6 +214,15 @@ verbatim. `XgpSliceOptions.Anonymized` ("Player 1" / "Player 2") is the
 SSOT for what anonymized export means; overrides validate non-empty at
 init, so an invalid options instance is unrepresentable.
 
+**Anonymize-copy** (`Write(XgFile, XgpSliceOptions, …)`) — the third
+surface: a whole-file re-emit for callers that already hold the finished
+file shape (typically a parsed single-position `.xgp` being passed along
+anonymized). Every record, rollout context, and comment travels verbatim
+— no record selection, no comment clearing, no rollout remapping; the
+only rewrite is the match header's name fields through the same
+`WithPlayerNames` copy the slice path uses. With no overrides it is a
+plain `XgFileWriter` re-emit, byte-for-byte.
+
 **Iterator visibility differs by path, deliberately.** A clean export is
 **XG-import-only**: unanalyzed, so this library's own iterator yields
 **zero** decisions for it (rule 1 of the `.xgp` emission policy); the
@@ -501,6 +510,14 @@ public static class XgpExporter
     public static byte[] ToBytes(XgFile source, XgDecisionId id, XgpSliceOptions options);
     public static void   WriteFile(XgFile source, XgDecisionId id, string path);
     public static void   WriteFile(XgFile source, XgDecisionId id, XgpSliceOptions options, string path);
+
+    // Anonymize-copy: whole-file re-emit with name overrides — every
+    // record, rollout context, and comment verbatim (no slicing, no
+    // comment clearing, no rollout remap); only the match header's name
+    // fields rewritten. No overrides = plain re-emit.
+    public static void   Write(XgFile source, XgpSliceOptions options, Stream output);
+    public static byte[] ToBytes(XgFile source, XgpSliceOptions options);
+    public static void   WriteFile(XgFile source, XgpSliceOptions options, string path);
 }
 
 public sealed record XgpSliceOptions

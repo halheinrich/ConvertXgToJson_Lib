@@ -10,7 +10,7 @@ namespace ConvertXgToJson_Lib;
 /// convention: an Exporter translates semantics; a Writer/Reader mirrors
 /// byte layout.)
 ///
-/// <para>Two surfaces, chosen by what the caller holds:</para>
+/// <para>Three surfaces, chosen by what the caller holds:</para>
 ///
 /// <para>
 /// <b>Clean-position export</b> — <c>Write(BgDecisionData, …)</c>. For
@@ -41,6 +41,17 @@ namespace ConvertXgToJson_Lib;
 /// An optional <see cref="XgpSliceOptions"/> overrides the player names
 /// (anonymized export); every other header field still passes through
 /// verbatim.
+/// </para>
+///
+/// <para>
+/// <b>Anonymize-copy</b> — <c>Write(XgFile, XgpSliceOptions, …)</c>. For
+/// callers that already hold the finished file shape — typically a parsed
+/// single-position <c>.xgp</c> being passed along — and only want the
+/// names replaced. A whole-file re-emit: <b>every</b> record, rollout
+/// context, and comment travels verbatim (no record selection, no comment
+/// clearing, no rollout remapping — none of the slice path's carving);
+/// the only rewrite is the match header's player-name fields per the
+/// options.
 /// </para>
 ///
 /// <para>
@@ -309,6 +320,62 @@ public static class XgpExporter
     {
         ArgumentNullException.ThrowIfNull(id);
         WriteFile(source, id.Game, id.MoveNumber, id.IsCube, options, path);
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Public API — anonymize-copy (whole-file re-emit, name overrides)
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// Re-emits <paramref name="source"/> in full to
+    /// <paramref name="output"/> with <paramref name="options"/>'s
+    /// player-name overrides applied. A <b>whole-file copy</b>, not a
+    /// slice: every record, rollout context, and comment travels verbatim
+    /// (no record selection, no comment clearing, no rollout remapping);
+    /// the only rewrite is the match header's player-name fields — an
+    /// options instance with no overrides re-emits the source unchanged.
+    /// For callers that already hold the finished file shape, typically a
+    /// parsed single-position <c>.xgp</c> being passed along anonymized;
+    /// callers extracting one decision from a match use the slice surface
+    /// instead.
+    /// </summary>
+    /// <param name="source">The parsed file to re-emit.</param>
+    /// <param name="options">Player-name overrides; the default instance changes nothing.</param>
+    /// <param name="output">Destination stream; written sequentially, left open.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="source"/> does not begin with a
+    /// <see cref="MatchHeaderRecord"/>.
+    /// </exception>
+    public static void Write(XgFile source, XgpSliceOptions options, Stream output)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(output);
+        XgFileWriter.Write(ToXgFileCopy(source, options), output);
+    }
+
+    /// <summary>
+    /// Serializes the whole-file copy of <paramref name="source"/> to
+    /// <c>.xgp</c> bytes with <paramref name="options"/> applied.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, XgpSliceOptions, Stream)"/>
+    public static byte[] ToBytes(XgFile source, XgpSliceOptions options)
+    {
+        using var ms = new MemoryStream();
+        Write(source, options, ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Convenience overload: writes the whole-file copy of
+    /// <paramref name="source"/> to <paramref name="path"/> with
+    /// <paramref name="options"/> applied, overwriting any existing file.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, XgpSliceOptions, Stream)"/>
+    public static void WriteFile(XgFile source, XgpSliceOptions options, string path)
+    {
+        using var fs = File.Create(path);
+        Write(source, options, fs);
     }
 
     // ------------------------------------------------------------------ //
@@ -600,6 +667,42 @@ public static class XgpExporter
         TotalTimeDelayCubesDone = mh.TotalTimeDelayCubesDone,
         Transcriber = mh.Transcriber,
     };
+
+    // ------------------------------------------------------------------ //
+    //  Source copy → record set
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// Builds the <see cref="XgFile"/> for an anonymize-copy: the source
+    /// model shared wholesale — header, rollout table, and comment table
+    /// by reference, records in order — with only the match header
+    /// replaced through <see cref="WithPlayerNames"/> when an override is
+    /// present. With no overrides the source itself is returned (the
+    /// model is init-only throughout, so sharing is safe). Internal so
+    /// tests can assert on records directly.
+    /// </summary>
+    internal static XgFile ToXgFileCopy(XgFile source, XgpSliceOptions options)
+    {
+        if (source.Records.Count == 0 || source.Records[0] is not MatchHeaderRecord mh)
+            throw new ArgumentException(
+                "Copy source must begin with a MatchHeaderRecord (a parsed .xg/.xgp file always does).",
+                nameof(source));
+
+        if (options.Player1Name is null && options.Player2Name is null)
+            return source;
+
+        var records = new List<SaveRecord>(source.Records)
+        {
+            [0] = WithPlayerNames(mh, options.Player1Name, options.Player2Name),
+        };
+        return new XgFile
+        {
+            Header = source.Header,
+            Records = records,
+            Rollouts = source.Rollouts,
+            Comments = source.Comments,
+        };
+    }
 
     // ------------------------------------------------------------------ //
     //  Decision → record set
