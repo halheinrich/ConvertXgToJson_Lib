@@ -190,6 +190,135 @@ public class XgpSliceExportTests
     }
 
     // -----------------------------------------------------------------------
+    //  Player-name overrides (XgpSliceOptions)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void AnonymizedSlice_RewritesNames_EverywhereNamesSurface()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        var srcMh = (MatchHeaderRecord)source.Records[0];
+        srcMh.Player1.Should().NotBe("Player 1",
+            "fixture precondition: the source must carry real names for this test to prove anything");
+        var original = XgDecisionIterator
+            .IterateDiagramRequests(source, "MTCH4064.xg")
+            .Single(d => d.Descriptive.Game == 1 && d.Descriptive.MoveNumber == 22 && !d.IsCube);
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(
+            source, game: 1, moveNumber: 22, isCube: false, XgpSliceOptions.Anonymized));
+        var sliced = XgFileReader.ReadStream(ms);
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.Player1.Should().Be("Player 1");
+        mh.Player2.Should().Be("Player 2");
+        mh.Player1Ansi.Should().Be("Player 1", "the XG1-compat twin is rewritten in step");
+        mh.Player2Ansi.Should().Be("Player 2");
+
+        var info = XgDecisionIterator.ExtractMatchInfo(sliced);
+        info!.Player1.Should().Be("Player 1");
+        info.Player2.Should().Be("Player 2");
+
+        var reRead = XgDecisionIterator.IterateDiagramRequests(sliced, "slice.xgp").Single();
+        bool onRollIsPlayer1 = original.Descriptive.OnRollName == srcMh.Player1;
+        reRead.Descriptive.OnRollName.Should().Be(onRollIsPlayer1 ? "Player 1" : "Player 2");
+        reRead.Descriptive.OpponentName.Should().Be(onRollIsPlayer1 ? "Player 2" : "Player 1");
+        reRead.Xgid.Should().Be(original.Xgid, "names never participate in the XGID");
+    }
+
+    [Fact]
+    public void SliceOptions_MatchingSourceNames_AreByteInvisible()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        var srcMh = (MatchHeaderRecord)source.Records[0];
+        // Fixture precondition: the ANSI twins mirror the Unicode names, so
+        // an override equal to the source names must reproduce all four
+        // fields — and therefore the whole file — exactly.
+        srcMh.Player1Ansi.Should().Be(srcMh.Player1);
+        srcMh.Player2Ansi.Should().Be(srcMh.Player2);
+
+        var options = new XgpSliceOptions
+        {
+            Player1Name = srcMh.Player1,
+            Player2Name = srcMh.Player2,
+        };
+
+        XgpExporter.ToBytes(source, game: 1, moveNumber: 22, isCube: false, options)
+            .Should().Equal(XgpExporter.ToBytes(source, game: 1, moveNumber: 22, isCube: false),
+                "the header copy may rewrite only the four name fields — any other " +
+                "difference means a field was dropped or transposed in the copy");
+    }
+
+    [Fact]
+    public void AnonymizedSlice_PreservesLocationProvenance()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        var srcMh = (MatchHeaderRecord)source.Records[0];
+
+        var sliced = XgpExporter.ToXgFileSlice(
+            source, game: 1, moveNumber: 22, isCube: false, XgpSliceOptions.Anonymized);
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.Location.Should().Be(srcMh.Location,
+            "Location is the ecosystem's producer fingerprint and must survive anonymization");
+        mh.LocationAnsi.Should().Be(srcMh.LocationAnsi);
+        mh.Event.Should().Be(srcMh.Event);
+        mh.Date.Should().Be(srcMh.Date);
+    }
+
+    [Fact]
+    public void SliceOptions_PartialOverride_KeepsTheOtherPlayersNames()
+    {
+        var records = new List<SaveRecord>
+        {
+            new MatchHeaderRecord
+            {
+                EntryType = RecordType.HeaderMatch,
+                MatchLength = 7,
+                Player1 = "Alice", Player1Ansi = "Alice",
+                Player2 = "Bob", Player2Ansi = "Bob",
+            },
+            new GameHeaderRecord { EntryType = RecordType.HeaderGame },
+            new MoveRecord { EntryType = RecordType.Move, Dice = [3, 1] },
+        };
+
+        var sliced = XgpExporter.ToXgFileSlice(new XgFile { Records = records },
+            game: 1, moveNumber: 1, isCube: false, new XgpSliceOptions { Player1Name = "Anon" });
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.Player1.Should().Be("Anon");
+        mh.Player1Ansi.Should().Be("Anon");
+        mh.Player2.Should().Be("Bob", "an unset override keeps that player's source name");
+        mh.Player2Ansi.Should().Be("Bob");
+    }
+
+    [Fact]
+    public void SliceOptions_NonLatin1Override_DegradesOnlyTheAnsiTwin()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(
+            source, game: 1, moveNumber: 22, isCube: false,
+            new XgpSliceOptions { Player1Name = "Bjørn 東京" }));
+        var mh = (MatchHeaderRecord)XgFileReader.ReadStream(ms).Records[0];
+
+        mh.Player1.Should().Be("Bjørn 東京", "the Unicode field carries the true name");
+        mh.Player1Ansi.Should().Be("Bjørn ??",
+            "characters outside Latin1 degrade to '?' in the XG1-compat twin (ø is Latin1 and survives)");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void SliceOptions_WhitespaceOverride_ThrowsAtConstruction(string bad)
+    {
+        var act1 = () => new XgpSliceOptions { Player1Name = bad };
+        act1.Should().Throw<ArgumentException>(
+            "null means keep the source name; an explicit empty name is always a caller bug");
+        var act2 = () => new XgpSliceOptions { Player2Name = bad };
+        act2.Should().Throw<ArgumentException>();
+    }
+
+    // -----------------------------------------------------------------------
     //  Validation
     // -----------------------------------------------------------------------
 

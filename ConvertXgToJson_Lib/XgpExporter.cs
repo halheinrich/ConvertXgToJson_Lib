@@ -38,6 +38,9 @@ namespace ConvertXgToJson_Lib;
 /// decision is therefore visible to our own iterator (exactly one decision)
 /// and shows its analysis in XG without re-analyzing. Comments are not
 /// carried; comment indices on the sliced decision records are cleared.
+/// An optional <see cref="XgpSliceOptions"/> overrides the player names
+/// (anonymized export); every other header field still passes through
+/// verbatim.
 /// </para>
 ///
 /// <para>
@@ -178,6 +181,48 @@ public static class XgpExporter
         Write(source, game, moveNumber, isCube, fs);
     }
 
+    /// <summary>
+    /// Slice export with <paramref name="options"/> applied: the player-name
+    /// header fields can be overridden (see <see cref="XgpSliceOptions"/>);
+    /// every other header field is still copied verbatim.
+    /// </summary>
+    /// <param name="options">Slice options; the default instance changes nothing.</param>
+    /// <inheritdoc cref="Write(XgFile, int, int, bool, Stream)"/>
+    public static void Write(
+        XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, Stream output)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(output);
+        XgFileWriter.Write(ToXgFileSlice(source, game, moveNumber, isCube, options), output);
+    }
+
+    /// <summary>
+    /// Serializes the decision at the given coordinates to <c>.xgp</c> bytes
+    /// with <paramref name="options"/> applied.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, int, int, bool, XgpSliceOptions, Stream)"/>
+    public static byte[] ToBytes(
+        XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options)
+    {
+        using var ms = new MemoryStream();
+        Write(source, game, moveNumber, isCube, options, ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Convenience overload: writes the sliced decision to
+    /// <paramref name="path"/> with <paramref name="options"/> applied,
+    /// overwriting any existing file.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, int, int, bool, XgpSliceOptions, Stream)"/>
+    public static void WriteFile(
+        XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, string path)
+    {
+        using var fs = File.Create(path);
+        Write(source, game, moveNumber, isCube, options, fs);
+    }
+
     // ------------------------------------------------------------------ //
     //  Source slice → record set
     // ------------------------------------------------------------------ //
@@ -189,14 +234,20 @@ public static class XgpExporter
     /// (source perspective and metadata preserved), decision records copied
     /// with analysis intact, referenced rollout contexts carried over with
     /// indices remapped, comment indices cleared (comments not carried).
+    /// <paramref name="options"/> may override the player names (both
+    /// twins per player); null or the default instance changes nothing.
     /// Internal so tests can assert on records directly.
     /// </summary>
-    internal static XgFile ToXgFileSlice(XgFile source, int game, int moveNumber, bool isCube)
+    internal static XgFile ToXgFileSlice(
+        XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions? options = null)
     {
         if (source.Records.Count == 0 || source.Records[0] is not MatchHeaderRecord mh)
             throw new ArgumentException(
                 "Slice source must begin with a MatchHeaderRecord (a parsed .xg/.xgp file always does).",
                 nameof(source));
+
+        if (options is { } o && (o.Player1Name is not null || o.Player2Name is not null))
+            mh = WithPlayerNames(mh, o.Player1Name, o.Player2Name);
 
         var (gh, cube, move) = LocateDecision(source, game, moveNumber, isCube);
 
@@ -391,6 +442,75 @@ public static class XgpExporter
         TimeDelayBits = m.TimeDelayBits,
         TimeDelayDoneBits = m.TimeDelayDoneBits,
         NumberOfAutoDoubles = m.NumberOfAutoDoubles,
+    };
+
+    /// <summary>
+    /// Copy of the source match header with the player-name fields
+    /// rewritten — a non-null name replaces that player's Unicode field
+    /// <b>and</b> its ANSI twin; null keeps both of that player's source
+    /// fields. Every other field, the Location provenance fingerprint
+    /// included, passes through verbatim; the options byte-identity test
+    /// pins this copy field-for-field.
+    /// </summary>
+    private static MatchHeaderRecord WithPlayerNames(
+        MatchHeaderRecord mh, string? player1, string? player2) => new()
+    {
+        EntryType = mh.EntryType,
+        Player1Ansi = player1 ?? mh.Player1Ansi,
+        Player2Ansi = player2 ?? mh.Player2Ansi,
+        MatchLength = mh.MatchLength,
+        Variation = mh.Variation,
+        Crawford = mh.Crawford,
+        Jacoby = mh.Jacoby,
+        Beaver = mh.Beaver,
+        AutoDouble = mh.AutoDouble,
+        Elo1 = mh.Elo1,
+        Elo2 = mh.Elo2,
+        Experience1 = mh.Experience1,
+        Experience2 = mh.Experience2,
+        Date = mh.Date,
+        EventAnsi = mh.EventAnsi,
+        GameId = mh.GameId,
+        CompLevel1 = mh.CompLevel1,
+        CompLevel2 = mh.CompLevel2,
+        CountForElo = mh.CountForElo,
+        AddToProfile1 = mh.AddToProfile1,
+        AddToProfile2 = mh.AddToProfile2,
+        LocationAnsi = mh.LocationAnsi,
+        GameMode = mh.GameMode,
+        Imported = mh.Imported,
+        RoundAnsi = mh.RoundAnsi,
+        Invert = mh.Invert,
+        Version = mh.Version,
+        Magic = mh.Magic,
+        MoneyInitGames = mh.MoneyInitGames,
+        MoneyInitScore = mh.MoneyInitScore,
+        Entered = mh.Entered,
+        Counted = mh.Counted,
+        UnratedImport = mh.UnratedImport,
+        CommentHeaderMatchIndex = mh.CommentHeaderMatchIndex,
+        CommentFooterMatchIndex = mh.CommentFooterMatchIndex,
+        IsMoneyMatch = mh.IsMoneyMatch,
+        WinMoney = mh.WinMoney,
+        LoseMoney = mh.LoseMoney,
+        Currency = mh.Currency,
+        FeeMoney = mh.FeeMoney,
+        TableStake = mh.TableStake,
+        SiteId = mh.SiteId,
+        CubeLimit = mh.CubeLimit,
+        AutoDoubleMax = mh.AutoDoubleMax,
+        Transcribed = mh.Transcribed,
+        Event = mh.Event,
+        Player1 = player1 ?? mh.Player1,
+        Player2 = player2 ?? mh.Player2,
+        Location = mh.Location,
+        Round = mh.Round,
+        TimeSetting = mh.TimeSetting,
+        TotalTimeDelayMoves = mh.TotalTimeDelayMoves,
+        TotalTimeDelayCubes = mh.TotalTimeDelayCubes,
+        TotalTimeDelayMovesDone = mh.TotalTimeDelayMovesDone,
+        TotalTimeDelayCubesDone = mh.TotalTimeDelayCubesDone,
+        Transcriber = mh.Transcriber,
     };
 
     // ------------------------------------------------------------------ //
