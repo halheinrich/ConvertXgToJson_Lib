@@ -155,4 +155,118 @@ public class XgFileReaderDiscoveryTests
             try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
         }
     }
+
+    // -----------------------------------------------------------------------
+    //  EnumerateXgFormatFiles(directory, SearchOption) — recursive discovery
+    //  with a deterministic full-path order contract (consumers pin
+    //  user-visible export numbering to it)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The SearchOption overload recurses into subdirectories and returns
+    /// the contracted deterministic order: ascending full path,
+    /// OrdinalIgnoreCase. Extensions interleave by path (deliberately not
+    /// the single-argument overload's extension-major order), extension
+    /// matching is case-insensitive, and non-XG neighbors — including the
+    /// <c>.xgz</c> near-miss — are excluded. Files are created in scrambled
+    /// order so filesystem/creation order cannot accidentally satisfy the
+    /// exact-sequence assertion.
+    /// </summary>
+    [Fact]
+    public void EnumerateXgFormatFiles_Recursive_ReturnsDeterministicFullPathOrder()
+    {
+        string tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "ConvertXgToJson_Lib.Tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(tempDir, "sub1", "nested"));
+            Directory.CreateDirectory(Path.Combine(tempDir, "sub2"));
+            File.WriteAllText(Path.Combine(tempDir, "sub2", "c.xg"), "");
+            File.WriteAllText(Path.Combine(tempDir, "b.xgp"), "");
+            File.WriteAllText(Path.Combine(tempDir, "sub1", "nested", "e.XG"), "");
+            File.WriteAllText(Path.Combine(tempDir, "a.xg"), "");
+            File.WriteAllText(Path.Combine(tempDir, "sub1", "d.xgp"), "");
+            File.WriteAllText(Path.Combine(tempDir, "ignore.txt"), "");
+            File.WriteAllText(Path.Combine(tempDir, "sub1", "ignore.json"), "");
+            File.WriteAllText(Path.Combine(tempDir, "data.xgz"), "");
+
+            var relative = XgFileReader
+                .EnumerateXgFormatFiles(tempDir, SearchOption.AllDirectories)
+                .Select(p => Path.GetRelativePath(tempDir, p))
+                .ToList();
+
+            relative.Should().Equal(
+                new[]
+                {
+                    "a.xg",
+                    "b.xgp",
+                    Path.Combine("sub1", "d.xgp"),
+                    Path.Combine("sub1", "nested", "e.XG"),
+                    Path.Combine("sub2", "c.xg"),
+                },
+                "the contract is ascending full path, so extensions interleave " +
+                "and subdirectory files sort by their whole path");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// TopDirectoryOnly excludes subdirectory files while keeping the same
+    /// sorted-path order for the files it does return.
+    /// </summary>
+    [Fact]
+    public void EnumerateXgFormatFiles_TopDirectoryOnly_ExcludesSubdirectories()
+    {
+        string tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "ConvertXgToJson_Lib.Tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(tempDir, "sub"));
+            File.WriteAllText(Path.Combine(tempDir, "sub", "c.xg"), "");
+            File.WriteAllText(Path.Combine(tempDir, "b.xgp"), "");
+            File.WriteAllText(Path.Combine(tempDir, "a.xg"), "");
+
+            XgFileReader.EnumerateXgFormatFiles(tempDir, SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Should().Equal(new[] { "a.xg", "b.xgp" },
+                    "subdirectory files are excluded and the sorted-path order still holds");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
+    /// A tree with no XG-format files anywhere yields nothing, even
+    /// recursively.
+    /// </summary>
+    [Fact]
+    public void EnumerateXgFormatFiles_Recursive_NoXgFiles_ReturnsEmpty()
+    {
+        string tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "ConvertXgToJson_Lib.Tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(tempDir, "sub"));
+            File.WriteAllText(Path.Combine(tempDir, "a.json"), "");
+            File.WriteAllText(Path.Combine(tempDir, "sub", "b.txt"), "");
+
+            XgFileReader.EnumerateXgFormatFiles(tempDir, SearchOption.AllDirectories)
+                .Should().BeEmpty("no .xg or .xgp files exist anywhere in the tree");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
 }

@@ -25,8 +25,9 @@ public static class XgFileReader
     /// The file extensions this library recognizes as XG-format input:
     /// <c>.xg</c> (match files) and <c>.xgp</c> (position files), in that
     /// order. Single source of truth for <see cref="IsXgFormatFile"/> and
-    /// <see cref="EnumerateXgFormatFiles"/> — the order here is the
-    /// enumeration order those members observe.
+    /// both <c>EnumerateXgFormatFiles</c> overloads — the order here is the
+    /// enumeration order the single-argument overload observes (the
+    /// <see cref="SearchOption"/> overload sorts by full path instead).
     /// </summary>
     public static IReadOnlyList<string> XgFormatExtensions { get; } = [".xg", ".xgp"];
 
@@ -50,7 +51,11 @@ public static class XgFileReader
     /// Enumerates every XG-format file in <paramref name="directory"/>: both
     /// <c>*.xg</c> match files and <c>*.xgp</c> position files. Order is all
     /// <c>.xg</c> files first, then all <c>.xgp</c> files; within each
-    /// extension, filesystem order (non-deterministic per OS). Implemented as
+    /// extension, filesystem order (non-deterministic per OS) — callers that
+    /// need a deterministic order use the
+    /// <see cref="EnumerateXgFormatFiles(string, SearchOption)"/> overload,
+    /// whose sorted contract deliberately differs from this historical
+    /// extension-major order. Implemented as
     /// one <see cref="Directory.EnumerateFiles(string, string)"/> pass per
     /// entry in <see cref="XgFormatExtensions"/> rather than a single
     /// <c>*.xg*</c> glob — the broader pattern would also match hypothetical
@@ -62,6 +67,45 @@ public static class XgFileReader
         foreach (string ext in XgFormatExtensions)
             foreach (string path in Directory.EnumerateFiles(directory, "*" + ext))
                 yield return path;
+    }
+
+    /// <summary>
+    /// Enumerates every XG-format file in <paramref name="directory"/> —
+    /// <c>*.xg</c> and <c>*.xgp</c>, matched case-insensitively via
+    /// <see cref="IsXgFormatFile"/> — descending into subdirectories when
+    /// <paramref name="searchOption"/> is
+    /// <see cref="SearchOption.AllDirectories"/>.
+    ///
+    /// <para><b>Enumeration order is deterministic and part of the
+    /// contract:</b> ascending full path, compared with
+    /// <see cref="StringComparer.OrdinalIgnoreCase"/> plus a
+    /// <see cref="StringComparer.Ordinal"/> tiebreak for paths differing
+    /// only by case (possible on case-sensitive filesystems). The order is
+    /// independent of the filesystem's directory-walk order and of the
+    /// current culture, so consumers may pin user-visible sequencing (e.g.
+    /// export numbering) to it. Extensions interleave by path — this
+    /// deliberately differs from the single-argument overload's historical
+    /// extension-major order.</para>
+    ///
+    /// <para>Sorting materializes the matching paths on first enumeration;
+    /// like the single-argument overload, directory-access errors are
+    /// deferred to that point.</para>
+    /// </summary>
+    /// <param name="directory">Directory to scan for .xg and/or .xgp files.</param>
+    /// <param name="searchOption">
+    /// <see cref="SearchOption.AllDirectories"/> to include all
+    /// subdirectories; <see cref="SearchOption.TopDirectoryOnly"/> for the
+    /// top directory alone.
+    /// </param>
+    public static IEnumerable<string> EnumerateXgFormatFiles(string directory, SearchOption searchOption)
+    {
+        foreach (string path in Directory.EnumerateFiles(directory, "*", searchOption)
+                     .Where(IsXgFormatFile)
+                     .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(p => p, StringComparer.Ordinal))
+        {
+            yield return path;
+        }
     }
 
     // ------------------------------------------------------------------ //
