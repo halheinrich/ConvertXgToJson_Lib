@@ -43,6 +43,7 @@ ConvertXgToJson_Lib/
   XgMatchInfo.cs
   XgMoveTranslator.cs
   XgpExporter.cs
+  XgpSliceOptions.cs
   Json/
     XgJsonOptions.cs
   Models/
@@ -106,6 +107,16 @@ File discovery (which paths are XG-format input):
   files (filesystem order within each), one `Directory.EnumerateFiles` pass
   per extension rather than a `*.xg*` glob. This is the single producer-side
   copy of the discovery rule; `IterateXgDirectory` routes through it.
+* `EnumerateXgFormatFiles(directory, searchOption)` — recursive-capable
+  overload; filters through `IsXgFormatFile`, so `XgFormatExtensions`
+  stays the discovery SSOT. **Enumeration order is deterministic and
+  contractual:** ascending full path, `OrdinalIgnoreCase` with an
+  `Ordinal` tiebreak — independent of filesystem walk order and culture,
+  so consumers may pin user-visible sequencing (e.g. export numbering) to
+  it. Extensions interleave by path: deliberately different from the
+  single-arg overload's historical extension-major order (the divergence
+  is documented on both overloads). Sorting materializes the matching
+  paths on first enumeration; directory-access errors stay deferred.
 
 Entry points:
 
@@ -188,6 +199,20 @@ intact**, referenced rollout contexts carried over with indices remapped
 the second leg — both legs travel), comment indices cleared (comments not
 carried). A play slice carries the real same-turn cube record when the
 source has one, else synthesizes the incidental unanalysed pane.
+
+Slice entry points also accept the decision's `XgDecisionId` directly
+(destructured internally; `Filename` is not consulted — the caller
+already resolved the source from it; the parameter is
+`XgDecisionId`-typed so routing an `XgpDecisionId` there is a compile
+error, and the Xgp-vs-Xg routing stays with the caller). An optional
+`XgpSliceOptions` overrides the player names: each non-null override
+rewrites that player's Unicode field *and* its ANSI twin (writer
+truncation 128 chars / 40 bytes; non-Latin1 characters degrade to `?`
+in the twin via the Latin1 replacement fallback), while every other
+header field — Location provenance included — still passes through
+verbatim. `XgpSliceOptions.Anonymized` ("Player 1" / "Player 2") is the
+SSOT for what anonymized export means; overrides validate non-empty at
+init, so an invalid options instance is unrepresentable.
 
 **Iterator visibility differs by path, deliberately.** A clean export is
 **XG-import-only**: unanalyzed, so this library's own iterator yields
@@ -413,6 +438,7 @@ public static class XgFileReader
     public static IReadOnlyList<string>   XgFormatExtensions { get; }   // [".xg", ".xgp"]
     public static bool                    IsXgFormatFile(string path);
     public static IEnumerable<string>     EnumerateXgFormatFiles(string directory);
+    public static IEnumerable<string>     EnumerateXgFormatFiles(string directory, SearchOption searchOption);
 
     // Full parse (.xg / .xgp — format detected from content)
     public static XgFile                ReadFile(string path);
@@ -459,6 +485,34 @@ public static class XgpExporter
     public static void   Write(XgFile source, int game, int moveNumber, bool isCube, Stream output);
     public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube);
     public static void   WriteFile(XgFile source, int game, int moveNumber, bool isCube, string path);
+
+    // Slice path with options (player-name overrides; everything else
+    // still verbatim).
+    public static void   Write(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, Stream output);
+    public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options);
+    public static void   WriteFile(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, string path);
+
+    // Slice path addressed by the iterator-stamped XgDecisionId
+    // (compile-time contract — XgpDecisionId has no coordinates and does
+    // not fit; id.Filename is not consulted).
+    public static void   Write(XgFile source, XgDecisionId id, Stream output);
+    public static void   Write(XgFile source, XgDecisionId id, XgpSliceOptions options, Stream output);
+    public static byte[] ToBytes(XgFile source, XgDecisionId id);
+    public static byte[] ToBytes(XgFile source, XgDecisionId id, XgpSliceOptions options);
+    public static void   WriteFile(XgFile source, XgDecisionId id, string path);
+    public static void   WriteFile(XgFile source, XgDecisionId id, XgpSliceOptions options, string path);
+}
+
+public sealed record XgpSliceOptions
+{
+    // null = keep the source name; non-empty enforced at init (an invalid
+    // instance is unrepresentable). Each override rewrites that player's
+    // Unicode name field and its ANSI twin.
+    public string? Player1Name { get; init; }
+    public string? Player2Name { get; init; }
+
+    // SSOT for anonymized export: "Player 1" / "Player 2".
+    public static XgpSliceOptions Anonymized { get; }
 }
 
 public static class XgDecisionIterator
@@ -611,6 +665,15 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   analyzed exports use the **slice path** (`Write(XgFile, game,
   moveNumber, isCube, …)`), which carries the analysis panes and emits
   exactly one decision.
+* **`WithPlayerNames` is a full manual copy of `MatchHeaderRecord`.** The
+  slice exporter's name-override helper copies every header field
+  explicitly (the model is a class, not a record — no `with`). A new
+  `MatchHeaderRecord` field must be added to the copy too, or slice
+  exports with name overrides silently drop it. The guard is the
+  byte-identity test in `XgpSliceExportTests`
+  (`SliceOptions_MatchingSourceNames_AreByteInvisible`): overrides equal
+  to the source names must produce a byte-identical file, so any dropped
+  or transposed field fails it.
 * **A cube rollout is an adjacent context pair; the record points at the
   second leg.** Ground truth from XG's own save (`match35253054_2_37.xgp`:
   two contexts, `RolloutIndex = 1`). Anything that copies or filters
@@ -654,6 +717,14 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 
 ## Subproject-internal next steps
 
+* **Unify `EnumerateXgFormatFiles` ordering** — the single-arg overload
+  keeps its historical extension-major, filesystem-order contract while
+  the `SearchOption` overload sorts by full path (ordinal-insensitive,
+  deterministic). Once ExtractFromXgToCsv consolidates its four private
+  discovery copies onto the sorted overload, consider routing the
+  single-arg form through `(directory, TopDirectoryOnly)` so the class
+  carries one order contract. Deliberate behavior change, not a drive-by:
+  it alters `IterateXgDirectory`'s file order — its own session.
 * **Analysis carry-through landed as the slice exporter** (`XgpExporter`'s
   `XgFile` + coordinates surface) — the original "Option B"
   (reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from
