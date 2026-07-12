@@ -224,6 +224,94 @@ public static class XgpExporter
     }
 
     // ------------------------------------------------------------------ //
+    //  Public API — slice export by XgDecisionId
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// Slice export addressed by an <see cref="XgDecisionId"/> — the Id the
+    /// iterator stamps on every <c>.xg</c>-sourced row. Destructures the
+    /// Id's (Game, MoveNumber, IsCube) coordinates and delegates to the
+    /// coordinate surface. <paramref name="id"/>.<c>Filename</c> is
+    /// <b>not consulted</b>: the caller has already resolved
+    /// <paramref name="source"/> from it, and a parsed <see cref="XgFile"/>
+    /// carries no filename to verify against. The parameter is
+    /// <see cref="XgDecisionId"/>-typed deliberately — an
+    /// <see cref="BgDataTypes_Lib.XgpDecisionId"/> carries no coordinates,
+    /// so routing it here is a compile-time error rather than a runtime
+    /// throw; the Xgp-vs-Xg routing stays with the caller.
+    /// </summary>
+    /// <param name="source">The parsed source file the Id's coordinates address.</param>
+    /// <param name="id">The decision's iterator-stamped Id.</param>
+    /// <param name="output">Destination stream; written sequentially, left open.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="source"/> does not begin with a
+    /// <see cref="MatchHeaderRecord"/>, or no decision exists at the Id's
+    /// coordinates.
+    /// </exception>
+    public static void Write(XgFile source, XgDecisionId id, Stream output)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        Write(source, id.Game, id.MoveNumber, id.IsCube, output);
+    }
+
+    /// <summary>
+    /// Slice export addressed by an <see cref="XgDecisionId"/> with
+    /// <paramref name="options"/> applied.
+    /// </summary>
+    /// <param name="options">Slice options; the default instance changes nothing.</param>
+    /// <inheritdoc cref="Write(XgFile, XgDecisionId, Stream)"/>
+    public static void Write(XgFile source, XgDecisionId id, XgpSliceOptions options, Stream output)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        Write(source, id.Game, id.MoveNumber, id.IsCube, options, output);
+    }
+
+    /// <summary>
+    /// Serializes the decision at <paramref name="id"/>'s coordinates to
+    /// <c>.xgp</c> bytes.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, XgDecisionId, Stream)"/>
+    public static byte[] ToBytes(XgFile source, XgDecisionId id)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        return ToBytes(source, id.Game, id.MoveNumber, id.IsCube);
+    }
+
+    /// <summary>
+    /// Serializes the decision at <paramref name="id"/>'s coordinates to
+    /// <c>.xgp</c> bytes with <paramref name="options"/> applied.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, XgDecisionId, XgpSliceOptions, Stream)"/>
+    public static byte[] ToBytes(XgFile source, XgDecisionId id, XgpSliceOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        return ToBytes(source, id.Game, id.MoveNumber, id.IsCube, options);
+    }
+
+    /// <summary>
+    /// Convenience overload: writes the decision at <paramref name="id"/>'s
+    /// coordinates to <paramref name="path"/>, overwriting any existing file.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, XgDecisionId, Stream)"/>
+    public static void WriteFile(XgFile source, XgDecisionId id, string path)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        WriteFile(source, id.Game, id.MoveNumber, id.IsCube, path);
+    }
+
+    /// <summary>
+    /// Convenience overload: writes the decision at <paramref name="id"/>'s
+    /// coordinates to <paramref name="path"/> with
+    /// <paramref name="options"/> applied, overwriting any existing file.
+    /// </summary>
+    /// <inheritdoc cref="Write(XgFile, XgDecisionId, XgpSliceOptions, Stream)"/>
+    public static void WriteFile(XgFile source, XgDecisionId id, XgpSliceOptions options, string path)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        WriteFile(source, id.Game, id.MoveNumber, id.IsCube, options, path);
+    }
+
+    // ------------------------------------------------------------------ //
     //  Source slice → record set
     // ------------------------------------------------------------------ //
 

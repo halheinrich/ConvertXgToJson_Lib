@@ -1,3 +1,4 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests;
@@ -187,6 +188,50 @@ public class XgpSliceExportTests
         var sliced = XgpExporter.ToXgFileSlice(source, game: 2, moveNumber: 37, isCube: true);
         sliced.Records.Select(r => r.EntryType).Should().Equal(
             RecordType.HeaderMatch, RecordType.HeaderGame, RecordType.Cube);
+    }
+
+    // -----------------------------------------------------------------------
+    //  XgDecisionId addressing — the Id overloads destructure the same
+    //  (Game, MoveNumber, IsCube) coordinates the bare surface takes, so
+    //  their output must be byte-identical. Filename is not consulted.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void IdOverload_PlayDecision_MatchesCoordinateOverloadByteForByte()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        var id = new XgDecisionId("MTCH4064.xg", Game: 1, MoveNumber: 22, IsCube: false);
+
+        XgpExporter.ToBytes(source, id).Should().Equal(
+            XgpExporter.ToBytes(source, game: 1, moveNumber: 22, isCube: false));
+    }
+
+    [Fact]
+    public void IdOverload_CubeDecision_MatchesCoordinateOverloadByteForByte()
+    {
+        var source = XgFileReader.ReadFile(Fixture("match35253054.xg"));
+        var id = new XgDecisionId("match35253054.xg", Game: 2, MoveNumber: 37, IsCube: true);
+
+        XgpExporter.ToBytes(source, id).Should().Equal(
+            XgpExporter.ToBytes(source, game: 2, moveNumber: 37, isCube: true));
+    }
+
+    [Fact]
+    public void IdOverload_WithOptions_MatchesCoordinateOverloadByteForByte()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        var id = new XgDecisionId("MTCH4064.xg", Game: 1, MoveNumber: 22, IsCube: false);
+
+        XgpExporter.ToBytes(source, id, XgpSliceOptions.Anonymized).Should().Equal(
+            XgpExporter.ToBytes(source, game: 1, moveNumber: 22, isCube: false, XgpSliceOptions.Anonymized));
+    }
+
+    [Fact]
+    public void IdOverload_NullId_Throws()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        var act = () => XgpExporter.ToBytes(source, id: null!);
+        act.Should().Throw<ArgumentNullException>();
     }
 
     // -----------------------------------------------------------------------
