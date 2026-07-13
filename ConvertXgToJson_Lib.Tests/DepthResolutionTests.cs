@@ -7,9 +7,9 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <summary>
 /// Tests for <see cref="XgDecisionIterator.ResolveDepthInfo"/> — the
 /// canonical producer of per-candidate analysis depth
-/// (Label / Abbreviation / Rank). Covers every case of the underlying
-/// ply-level switch so the abbreviation and rank tables can't silently
-/// drift. Rollout branch is covered via a synthesized RolloutContext
+/// (Label / Abbreviation / Rank / Class). Covers every case of the underlying
+/// ply-level switch so the abbreviation, rank, and depth-class tables can't
+/// silently drift. Rollout branch is covered via a synthesized RolloutContext
 /// so it doesn't depend on the binary corpus.
 /// </summary>
 public class DepthResolutionTests
@@ -22,24 +22,25 @@ public class DepthResolutionTests
     // -----------------------------------------------------------------------
 
     [Theory]
-    [InlineData((short)0,    "1-ply",       "1-ply",     1)]
-    [InlineData((short)1,    "2-ply",       "2-ply",     2)]
-    [InlineData((short)2,    "3-ply",       "3-ply",     3)]
-    [InlineData((short)12,   "3-ply red",   "3-ply red", 3)]
-    [InlineData((short)3,    "4-ply",       "4-ply",     4)]
-    [InlineData((short)4,    "5-ply",       "5-ply",     5)]
-    [InlineData((short)5,    "6-ply",       "6-ply",     6)]
-    [InlineData((short)6,    "7-ply",       "7-ply",     7)]
-    [InlineData((short)100,  "Rollout",     "Ro",        100)]
-    [InlineData((short)1000, "XG Roller",   "R",         20)]
-    [InlineData((short)1001, "XG Roller+",  "R+",        21)]
-    [InlineData((short)1002, "XG Roller++", "R++",       22)]
-    [InlineData((short)998,  "Book V1",     "Book",      0)]
-    [InlineData((short)999,  "Book V2",     "Book",      0)]
+    [InlineData((short)0,    "1-ply",       "1-ply",     1,   AnalysisDepthClass.Ply1)]
+    [InlineData((short)1,    "2-ply",       "2-ply",     2,   AnalysisDepthClass.Ply2)]
+    [InlineData((short)2,    "3-ply",       "3-ply",     3,   AnalysisDepthClass.Ply3)]
+    [InlineData((short)12,   "3-ply red",   "3-ply red", 3,   AnalysisDepthClass.Ply3)]
+    [InlineData((short)3,    "4-ply",       "4-ply",     4,   AnalysisDepthClass.Ply4)]
+    [InlineData((short)4,    "5-ply",       "5-ply",     5,   AnalysisDepthClass.Ply5)]
+    [InlineData((short)5,    "6-ply",       "6-ply",     6,   AnalysisDepthClass.Ply6)]
+    [InlineData((short)6,    "7-ply",       "7-ply",     7,   AnalysisDepthClass.Ply7)]
+    [InlineData((short)100,  "Rollout",     "Ro",        100, AnalysisDepthClass.Rollout)]
+    [InlineData((short)1000, "XG Roller",   "R",         20,  AnalysisDepthClass.XgRoller)]
+    [InlineData((short)1001, "XG Roller+",  "R+",        21,  AnalysisDepthClass.XgRollerPlus)]
+    [InlineData((short)1002, "XG Roller++", "R++",       22,  AnalysisDepthClass.XgRollerPlusPlus)]
+    [InlineData((short)998,  "Book V1",     "Book",      0,   AnalysisDepthClass.Book)]
+    [InlineData((short)999,  "Book V2",     "Book",      0,   AnalysisDepthClass.Book)]
     public void ResolveDepthInfo_NonRollout_KnownLevels(
-        short level, string expectedLabel, string expectedAbbrev, int expectedRank)
+        short level, string expectedLabel, string expectedAbbrev, int expectedRank,
+        AnalysisDepthClass expectedClass)
     {
-        var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
+        var (label, abbrev, rank, depthClass) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: level,
             rolloutIndex: -1,
             rollouts: NoRollouts);
@@ -47,19 +48,28 @@ public class DepthResolutionTests
         label.Should().Be(expectedLabel);
         abbrev.Should().Be(expectedAbbrev);
         rank.Should().Be(expectedRank);
+        depthClass.Should().Be(expectedClass);
     }
 
     /// <summary>
     /// Unknown levels fall through to the synthesized "level-{N}" label
-    /// on both Label and Abbreviation; rank defaults to 0 (lowest slot).
-    /// Picked a value that hasn't been adopted by any XG version we've
-    /// seen so this test doesn't quietly break if the switch gains a new
-    /// case later.
+    /// on both Label and Abbreviation; rank defaults to 0 (lowest slot)
+    /// and the class to <see cref="AnalysisDepthClass.Unknown"/>. Picked a
+    /// value that hasn't been adopted by any XG version we've seen so this
+    /// test doesn't quietly break if the switch gains a new case later.
+    ///
+    /// <para>
+    /// Note the class distinguishes this from a Book lookup where rank 0
+    /// could not: an unrecognised level is <see cref="AnalysisDepthClass.Unknown"/>,
+    /// a book hit is <see cref="AnalysisDepthClass.Book"/>, even though both
+    /// rank 0. That separation is the deliberate reason the class exists
+    /// alongside the rank.
+    /// </para>
     /// </summary>
     [Fact]
     public void ResolveDepthInfo_NonRollout_UnknownLevel_FallsThrough()
     {
-        var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
+        var (label, abbrev, rank, depthClass) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: 7777,
             rolloutIndex: -1,
             rollouts: NoRollouts);
@@ -67,6 +77,7 @@ public class DepthResolutionTests
         label.Should().Be("level-7777");
         abbrev.Should().Be("level-7777");
         rank.Should().Be(0);
+        depthClass.Should().Be(AnalysisDepthClass.Unknown);
     }
 
     /// <summary>
@@ -81,7 +92,7 @@ public class DepthResolutionTests
     [InlineData(42)]
     public void ResolveDepthInfo_InvalidRolloutIndex_FallsThroughToNonRollout(int idx)
     {
-        var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
+        var (label, abbrev, rank, depthClass) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: 2, // 3-ply
             rolloutIndex: idx,
             rollouts: NoRollouts);
@@ -89,6 +100,7 @@ public class DepthResolutionTests
         label.Should().Be("3-ply");
         abbrev.Should().Be("3-ply");
         rank.Should().Be(3);
+        depthClass.Should().Be(AnalysisDepthClass.Ply3);
     }
 
     // -----------------------------------------------------------------------
@@ -99,15 +111,17 @@ public class DepthResolutionTests
     /// With a valid rollout index and Level2 set, ResolveDepthInfo takes
     /// the rollout branch: inner ply is Level2+1 (because the short
     /// encoding shifts by 1 — Level2=2 → 3-ply), abbreviation is
-    /// "{innerPly}p{trials}", rank is 100+innerPly. evalLevel is
-    /// ignored in this branch.
+    /// "{innerPly}p{trials}", rank is 100+innerPly, and the class is
+    /// RolloutPly{innerPly}. evalLevel is ignored in this branch.
     /// </summary>
     [Theory]
-    [InlineData(2, 1296, "Rollout: 1296 trials. 3-ply", "3p1296", 103)]
-    [InlineData(3,  648, "Rollout: 648 trials. 4-ply",  "4p648",  104)]
-    [InlineData(0,  500, "Rollout: 500 trials. 1-ply",  "1p500",  101)]
-    public void ResolveDepthInfo_Rollout_Level2_PopulatesTriple(
-        int level2, int trials, string expectedLabel, string expectedAbbrev, int expectedRank)
+    [InlineData(2, 1296, "Rollout: 1296 trials. 3-ply", "3p1296", 103, AnalysisDepthClass.RolloutPly3)]
+    [InlineData(3,  648, "Rollout: 648 trials. 4-ply",  "4p648",  104, AnalysisDepthClass.RolloutPly4)]
+    [InlineData(0,  500, "Rollout: 500 trials. 1-ply",  "1p500",  101, AnalysisDepthClass.RolloutPly1)]
+    [InlineData(6,  100, "Rollout: 100 trials. 7-ply",  "7p100",  107, AnalysisDepthClass.RolloutPly7)]
+    public void ResolveDepthInfo_Rollout_Level2_PopulatesQuad(
+        int level2, int trials, string expectedLabel, string expectedAbbrev, int expectedRank,
+        AnalysisDepthClass expectedClass)
     {
         var rollouts = new List<RolloutContext>
         {
@@ -115,7 +129,7 @@ public class DepthResolutionTests
         };
 
         // evalLevel here is 7777 (unknown non-rollout) to prove it's ignored.
-        var (label, abbrev, rank) = XgDecisionIterator.ResolveDepthInfo(
+        var (label, abbrev, rank, depthClass) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: 7777,
             rolloutIndex: 0,
             rollouts: rollouts);
@@ -123,13 +137,43 @@ public class DepthResolutionTests
         label.Should().Be(expectedLabel);
         abbrev.Should().Be(expectedAbbrev);
         rank.Should().Be(expectedRank);
+        depthClass.Should().Be(expectedClass);
+    }
+
+    /// <summary>
+    /// An inner ply outside 1–7 falls back to the
+    /// <see cref="AnalysisDepthClass.Rollout"/> floor rather than
+    /// producing an out-of-taxonomy class. Defensive: a rolled-out
+    /// candidate always carries an in-range inner ply in practice, so
+    /// this pins the guard against silently mapping to a bogus enum value.
+    /// Rank and abbreviation still reflect the raw inner ply (rank 108,
+    /// "8p…") — only the class clamps to the floor.
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_Rollout_InnerPlyOutOfRange_ClampsToRolloutFloor()
+    {
+        // Level2 = 7 → innerPly = 8, past the RolloutPly7 ceiling.
+        var rollouts = new List<RolloutContext>
+        {
+            new() { Level2 = 7, GamesRolled = 200 },
+        };
+
+        var (_, abbrev, rank, depthClass) = XgDecisionIterator.ResolveDepthInfo(
+            evalLevel: 0,
+            rolloutIndex: 0,
+            rollouts: rollouts);
+
+        abbrev.Should().Be("8p200");
+        rank.Should().Be(108);
+        depthClass.Should().Be(AnalysisDepthClass.Rollout,
+            "innerPly 8 is outside the RolloutPly1–7 range and clamps to the floor");
     }
 
     /// <summary>
     /// ResolveDepthInfo prefers Level2, then Level1, then LevelTrunc
     /// when computing the inner ply level. This test pins the fallback
     /// order so a refactor of the selection logic can't silently change
-    /// which field wins.
+    /// which field wins — asserting on both the rank and the class.
     /// </summary>
     [Fact]
     public void ResolveDepthInfo_Rollout_LevelFallback_PrefersLevel2ThenLevel1ThenTrunc()
@@ -139,24 +183,27 @@ public class DepthResolutionTests
         {
             new() { Level2 = 3, Level1 = 2, LevelTrunc = 1, GamesRolled = 100 },
         };
-        XgDecisionIterator.ResolveDepthInfo(0, 0, r1).Rank.Should().Be(104,
-            "Level2=3 → innerPly=4 → rank 104");
+        var c1 = XgDecisionIterator.ResolveDepthInfo(0, 0, r1);
+        c1.Rank.Should().Be(104, "Level2=3 → innerPly=4 → rank 104");
+        c1.Class.Should().Be(AnalysisDepthClass.RolloutPly4);
 
         // Level2 absent → Level1 wins.
         var r2 = new List<RolloutContext>
         {
             new() { Level2 = 0, Level1 = 2, LevelTrunc = 1, GamesRolled = 100 },
         };
-        XgDecisionIterator.ResolveDepthInfo(0, 0, r2).Rank.Should().Be(103,
-            "Level1=2 → innerPly=3 → rank 103");
+        var c2 = XgDecisionIterator.ResolveDepthInfo(0, 0, r2);
+        c2.Rank.Should().Be(103, "Level1=2 → innerPly=3 → rank 103");
+        c2.Class.Should().Be(AnalysisDepthClass.RolloutPly3);
 
         // Both absent → LevelTrunc wins.
         var r3 = new List<RolloutContext>
         {
             new() { Level2 = 0, Level1 = 0, LevelTrunc = 1, GamesRolled = 100 },
         };
-        XgDecisionIterator.ResolveDepthInfo(0, 0, r3).Rank.Should().Be(102,
-            "LevelTrunc=1 → innerPly=2 → rank 102");
+        var c3 = XgDecisionIterator.ResolveDepthInfo(0, 0, r3);
+        c3.Rank.Should().Be(102, "LevelTrunc=1 → innerPly=2 → rank 102");
+        c3.Class.Should().Be(AnalysisDepthClass.RolloutPly2);
     }
 
     /// <summary>
@@ -177,9 +224,11 @@ public class DepthResolutionTests
         var c0 = XgDecisionIterator.ResolveDepthInfo(0, 0, rollouts);
         c0.Abbreviation.Should().Be("3p1296");
         c0.Rank.Should().Be(103);
+        c0.Class.Should().Be(AnalysisDepthClass.RolloutPly3);
 
         var c1 = XgDecisionIterator.ResolveDepthInfo(0, 1, rollouts);
         c1.Abbreviation.Should().Be("4p5000");
         c1.Rank.Should().Be(104);
+        c1.Class.Should().Be(AnalysisDepthClass.RolloutPly4);
     }
 }

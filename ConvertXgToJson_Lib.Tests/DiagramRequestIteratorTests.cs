@@ -824,6 +824,171 @@ public class DiagramRequestIteratorTests
             "the .xg corpus must contain at least one analysed cube decision");
     }
 
+    // -----------------------------------------------------------------------
+    //  Depth class — taxonomy population and tier agreement
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Coarse depth tiers shared by the rank scale and the
+    /// <see cref="AnalysisDepthClass"/> taxonomy. The corpus invariant below
+    /// asserts both surfaces classify every emitted decision into the same
+    /// tier — the rank and the class are two projections of one resolution
+    /// (see <c>XgDecisionIterator.ResolveDepthInfo</c>) and must never disagree.
+    /// </summary>
+    private enum DepthTier { BookOrUnknown, Ply, Roller, Rollout }
+
+    private static DepthTier TierOfRank(int rank) => rank switch
+    {
+        0 => DepthTier.BookOrUnknown,
+        >= 1 and <= 7 => DepthTier.Ply,
+        >= 20 and <= 22 => DepthTier.Roller,
+        >= 100 => DepthTier.Rollout,
+        _ => throw new Xunit.Sdk.XunitException($"Unexpected DepthRank {rank}: not in any known tier band"),
+    };
+
+    private static DepthTier TierOfClass(AnalysisDepthClass cls) => cls switch
+    {
+        AnalysisDepthClass.Unknown or AnalysisDepthClass.Book => DepthTier.BookOrUnknown,
+        >= AnalysisDepthClass.Ply1 and <= AnalysisDepthClass.Ply7 => DepthTier.Ply,
+        AnalysisDepthClass.XgRoller
+            or AnalysisDepthClass.XgRollerPlus
+            or AnalysisDepthClass.XgRollerPlusPlus => DepthTier.Roller,
+        >= AnalysisDepthClass.Rollout and <= AnalysisDepthClass.RolloutPly7 => DepthTier.Rollout,
+        _ => throw new Xunit.Sdk.XunitException($"Unexpected AnalysisDepthClass {cls}: not in any known tier"),
+    };
+
+    /// <summary>
+    /// For every emitted diagram request across the .xg corpus, the depth
+    /// class agrees tier-wise with the ordinal rank — rank 1–7 ⇔ Ply*,
+    /// 20–22 ⇔ the XG Roller family, ≥100 ⇔ the rollout tier, 0 ⇔ Book /
+    /// Unknown. Both are projections of the same <c>ResolveDepthInfo</c>
+    /// resolution, so a divergence means one stamping site pulled its class
+    /// and rank from different candidates. Move plays check every candidate;
+    /// cube requests check the single cube analysis.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_DepthClassAndRank_AgreeTierWiseForEveryCandidate()
+    {
+        int movePlaysChecked = 0;
+        int cubesChecked = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile))
+            {
+                if (req.Decision.IsCube)
+                {
+                    TierOfClass(req.Decision.CubeDepthClass).Should().Be(
+                        TierOfRank(req.Decision.CubeDepthRank),
+                        $"{sourceFile}: cube depth class and rank must land in the same tier");
+                    cubesChecked++;
+                }
+                else
+                {
+                    foreach (var play in req.Decision.Plays)
+                    {
+                        TierOfClass(play.DepthClass).Should().Be(
+                            TierOfRank(play.DepthRank),
+                            $"{sourceFile}: candidate depth class and rank must land in the same tier");
+                        movePlaysChecked++;
+                    }
+                }
+            }
+        }
+
+        movePlaysChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed move candidate");
+        cubesChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed cube decision");
+    }
+
+    /// <summary>
+    /// Convergence guarantee. <see cref="BgDecisionData.AnalysisDepthClass"/>
+    /// derives from the <see cref="DecisionData.BestPlayIndex"/> candidate,
+    /// while the class of the best-by-equity candidate is what the CSV surface
+    /// (<c>DecisionRow.AnalysisDepthClass</c>) resolves. This pins that the
+    /// interface-level class equals the class of the play independently located
+    /// as best-by-equity (max <see cref="PlayCandidate.Equity"/>, stable lower
+    /// index on ties) — so the <c>BestPlayIndex</c> surface and the
+    /// best-by-equity surface can never name different candidates. If a
+    /// regression pointed <c>BestPlayIndex</c> away from best-by-equity, this
+    /// fails wherever the two candidates differ in depth.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_InterfaceDepthClass_MatchesBestByEquityCandidate()
+    {
+        int moveDecisionsChecked = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile)
+                                                  .Where(r => !r.Decision.IsCube))
+            {
+                var plays = req.Decision.Plays;
+                if (plays.Count == 0) continue;
+
+                // Independently locate best-by-equity: max equity, stable lower
+                // index on ties — mirrors FindBestByEquityIndex without trusting
+                // BestPlayIndex.
+                int bestByEquity = 0;
+                for (int i = 1; i < plays.Count; i++)
+                    if (plays[i].Equity > plays[bestByEquity].Equity) bestByEquity = i;
+
+                req.AnalysisDepthClass.Should().Be(plays[bestByEquity].DepthClass,
+                    $"{sourceFile}: interface AnalysisDepthClass must equal the best-by-equity candidate's class");
+                moveDecisionsChecked++;
+            }
+        }
+
+        moveDecisionsChecked.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed move decision");
+    }
+
+    /// <summary>
+    /// Cross-surface convergence: for every decision, the CSV surface
+    /// (<c>DecisionRow.AnalysisDepthClass</c>, resolved best-by-equity for
+    /// plays / from the cube analysis for cubes) and the diagram surface
+    /// (<c>BgDecisionData.AnalysisDepthClass</c>, resolved via
+    /// <c>BestPlayIndex</c> / <c>CubeDepthClass</c>) agree. Both route through
+    /// the same skip policy and stamp from the same taxonomy switch, so paired
+    /// by <see cref="DecisionId"/> they must report an identical class.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void DepthClass_CsvAndDiagramSurfaces_AgreePairedById()
+    {
+        int paired = 0;
+
+        foreach (var path in TestPaths.XgFiles)
+        {
+            var file = XgFileReader.ReadFile(path);
+            string sourceFile = Path.GetFileName(path);
+
+            var rowClassById = XgDecisionIterator.Iterate(file, sourceFile)
+                .ToDictionary(r => r.Id, r => r.AnalysisDepthClass);
+
+            foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile))
+            {
+                rowClassById.Should().ContainKey(req.Id,
+                    $"{sourceFile}: every diagram request must pair with a CSV row by Id");
+                req.AnalysisDepthClass.Should().Be(rowClassById[req.Id],
+                    $"{sourceFile}: CSV and diagram surfaces must resolve the same depth class for decision {req.Id}");
+                paired++;
+            }
+        }
+
+        paired.Should().BeGreaterThan(0,
+            "the .xg corpus must contain at least one analysed decision to pair");
+    }
+
     /// <summary>
     /// <c>match35253054.xg</c> exercises XG's per-candidate depth
     /// variation (see <see cref="ConvertXgToJson_Lib.MEMORY.md"/> note

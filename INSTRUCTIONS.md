@@ -305,6 +305,42 @@ code that reads from `analysis.Evals`, `analysis.Moves`,
 `analysis.PositionsPlayed`, or `analysis.EvalLevels`. All four arrays
 are rank-coupled with the same index.
 
+**Depth resolution.** `ResolveDepthInfo` is the single source of a
+candidate's analysis depth, projecting one XG level (plus optional rollout
+context) into four parallel forms: the human `Label`, a compact
+`Abbreviation`, an ordinal `Rank` (higher = deeper), and an
+`AnalysisDepthClass` — the machine-usable taxonomy behind depth filtering.
+The `LevelInfo` switch is the taxonomy: N-ply → `Ply1`–`Ply7` (rank 1–7;
+XG level `12` "3-ply red" collapses to `Ply3`), `1000/1001/1002` →
+`XgRoller`/`XgRollerPlus`/`XgRollerPlusPlus` (rank 20–22), `998/999`
+(Book V1/V2) → `Book`, the no-context `100` sentinel → `Rollout` floor, and
+any unrecognised level → `Unknown`. The class distinguishes `Book` from
+`Unknown` where rank 0 cannot — that separation is deliberate. The rollout
+branch (valid `rolloutIndex`) computes `innerPly = plyLevel + 1` and stamps
+`RolloutPly1`–`RolloutPly7` (rank 100 + innerPly); an inner ply outside 1–7
+clamps the *class* to the `Rollout` floor while rank/abbreviation still
+reflect the raw value (defensive — real rollouts always carry an in-range
+inner ply). Trial count lives only in `Label`/`Abbreviation`, never the
+class — it is not a taxonomy axis. Rank and class are two projections of
+the *same* resolution; the corpus invariant
+`IterateDiagramRequests_DepthClassAndRank_AgreeTierWiseForEveryCandidate`
+pins that they never land in different tiers.
+
+The class is stamped at all four emission sites from the same resolution
+that produces the label: `BuildMoveRow` →
+`DecisionRow.AnalysisDepthClass` (best-by-equity candidate),
+`BuildCubeRows` → `DecisionRow.AnalysisDepthClass` (cube analysis),
+`BuildMoveDiagramRequest` → per-candidate `PlayCandidate.DepthClass`,
+`BuildCubeDiagramRequests` → `DecisionData.CubeDepthClass`.
+`BgDecisionData.AnalysisDepthClass` (the `IDecisionFilterData` member)
+derives via `BestPlayIndex`, which the sorted `Plays` list makes index 0 —
+the best-by-equity candidate, converging with the CSV surface's
+best-by-equity resolution. That convergence is pinned twice: within the
+diagram surface
+(`IterateDiagramRequests_InterfaceDepthClass_MatchesBestByEquityCandidate`)
+and across surfaces paired by `DecisionId`
+(`DepthClass_CsvAndDiagramSurfaces_AgreePairedById`).
+
 Supporting helpers:
 
 * `ExtractMatchInfo` — public helper that scans for the first

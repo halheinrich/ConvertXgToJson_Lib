@@ -396,7 +396,10 @@ public static class XgDecisionIterator
         var bestEval = analysis.Evals[bestIdx];
         int dice = DiceToInt(move.Dice);
 
-        string depth = ResolveDepth(
+        // Label and class both key off the same best-by-equity candidate, so
+        // DecisionRow.AnalysisDepth and DecisionRow.AnalysisDepthClass can
+        // never describe different candidates.
+        var (depth, _, _, depthClass) = ResolveDepthInfo(
             evalLevel: bestIdx < analysis.EvalLevels.Length ? analysis.EvalLevels[bestIdx].Level : (short)0,
             rolloutIndex: bestIdx < move.RolloutIndices.Length ? move.RolloutIndices[bestIdx] : -1,
             rollouts: rollouts);
@@ -424,6 +427,7 @@ public static class XgDecisionIterator
             IsStandardStart = ctx.IsStandardStart,
             Roll = dice,
             AnalysisDepth = depth,
+            AnalysisDepthClass = depthClass,
             Equity = bestEval.Equity,
             Board = board,
             AfterBestBoard = afterBest,
@@ -484,7 +488,7 @@ public static class XgDecisionIterator
             short evalLevel = i < analysis.EvalLevels.Length
                 ? analysis.EvalLevels[i].Level
                 : (short)0;
-            var (candidateDepth, candidateDepthAbbrev, candidateDepthRank) = ResolveDepthInfo(
+            var (candidateDepth, candidateDepthAbbrev, candidateDepthRank, candidateDepthClass) = ResolveDepthInfo(
                 evalLevel: evalLevel,
                 rolloutIndex: i < move.RolloutIndices.Length ? move.RolloutIndices[i] : -1,
                 rollouts: rollouts);
@@ -501,6 +505,7 @@ public static class XgDecisionIterator
                 Depth = candidateDepth,
                 DepthAbbreviation = candidateDepthAbbrev,
                 DepthRank = candidateDepthRank,
+                DepthClass = candidateDepthClass,
                 Equity = equity,
                 EquityLoss = bestEquity - equity,
                 IsUserPlay = k == userPlayIndex,
@@ -565,7 +570,7 @@ public static class XgDecisionIterator
     {
         var analysis = cube.Analysis;
 
-        string depth = ResolveDepth(
+        var (depth, _, _, depthClass) = ResolveDepthInfo(
             evalLevel: analysis.LevelRequest,
             rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
@@ -594,6 +599,7 @@ public static class XgDecisionIterator
             IsStandardStart = ctx.IsStandardStart,
             Roll = 0,
             AnalysisDepth = depth,
+            AnalysisDepthClass = depthClass,
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
             Board = board,
             // Cube decisions carry no play; the PlayOutcomeData contract requires
@@ -611,7 +617,7 @@ public static class XgDecisionIterator
     {
         var analysis = cube.Analysis;
 
-        var (depth, depthAbbrev, depthRank) = ResolveDepthInfo(
+        var (depth, depthAbbrev, depthRank, depthClass) = ResolveDepthInfo(
             evalLevel: analysis.LevelRequest,
             rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
@@ -663,6 +669,7 @@ public static class XgDecisionIterator
                 CubeDepth = depth,
                 CubeDepthAbbreviation = depthAbbrev,
                 CubeDepthRank = depthRank,
+                CubeDepthClass = depthClass,
                 UserDoubleError = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : (double?)null,
                 UserTakeError = (cube.Doubled == 1 && cube.ErrorTake > -999.0) ? Math.Abs(cube.ErrorTake) : (double?)null,
             },
@@ -906,17 +913,23 @@ public static class XgDecisionIterator
     /// <c>Abbreviation = "{innerPly}p{trials}"</c> (e.g. "3p1296"),
     /// <c>Rank = 100 + innerPly</c>. The ply-label switch encodes ply as
     /// <c>short - 1</c>, so <c>Level*</c> value 2 is a 3-ply rollout.
+    /// The <see cref="AnalysisDepthClass"/> preserves the inner ply:
+    /// <c>innerPly</c> 1–7 maps to
+    /// <see cref="AnalysisDepthClass.RolloutPly1"/>–<see cref="AnalysisDepthClass.RolloutPly7"/>;
+    /// an <c>innerPly</c> outside that range falls back to the
+    /// <see cref="AnalysisDepthClass.Rollout"/> floor (defensive — a rolled-out
+    /// candidate always carries an inner-ply level in practice).
     /// </para>
     ///
     /// <para>
     /// Non-rollout branch: returns <see cref="LevelLabel"/>,
-    /// <see cref="LevelAbbreviation"/>, and <see cref="LevelRank"/> for
-    /// <paramref name="evalLevel"/>. The rank ordering is:
-    /// N-ply → N (1..7), XG Roller family → 20–22, Book V1/V2 → 0, any
-    /// unrecognised level → 0. The edge case is a "Rollout" sentinel
-    /// (<c>short 100</c>) without a matching rollout context, which ranks
-    /// 100 — the same floor as a no-inner-ply rollout (e.g. truncated at
-    /// level 0).
+    /// <see cref="LevelAbbreviation"/>, <see cref="LevelRank"/>, and the
+    /// <see cref="AnalysisDepthClass"/> for <paramref name="evalLevel"/>. The
+    /// rank ordering is: N-ply → N (1..7), XG Roller family → 20–22, Book
+    /// V1/V2 → 0, any unrecognised level → 0. The edge case is a "Rollout"
+    /// sentinel (<c>short 100</c>) without a matching rollout context, which
+    /// ranks 100 and classes <see cref="AnalysisDepthClass.Rollout"/> — the
+    /// same floor as a no-inner-ply rollout (e.g. truncated at level 0).
     /// </para>
     ///
     /// <para>
@@ -928,7 +941,7 @@ public static class XgDecisionIterator
     /// label whenever any candidate was rolled out.
     /// </para>
     /// </summary>
-    internal static (string Label, string Abbreviation, int Rank) ResolveDepthInfo(
+    internal static (string Label, string Abbreviation, int Rank, AnalysisDepthClass Class) ResolveDepthInfo(
         short evalLevel,
         int rolloutIndex,
         List<RolloutContext> rollouts)
@@ -943,16 +956,37 @@ public static class XgDecisionIterator
             string label = $"Rollout: {ctx.GamesRolled} trials. {LevelInfo((short)plyLevel).Label}";
             string abbrev = $"{innerPly}p{ctx.GamesRolled}";
             int rank = 100 + innerPly;
-            return (label, abbrev, rank);
+            return (label, abbrev, rank, RolloutClassForInnerPly(innerPly));
         }
         return LevelInfo(evalLevel);
     }
 
     /// <summary>
+    /// Maps a rollout's inner evaluation ply to its
+    /// <see cref="AnalysisDepthClass"/>. Inner ply 1–7 stamp the matching
+    /// <see cref="AnalysisDepthClass.RolloutPly1"/>–<see cref="AnalysisDepthClass.RolloutPly7"/>;
+    /// anything outside that range falls back to the
+    /// <see cref="AnalysisDepthClass.Rollout"/> floor. A plain arithmetic
+    /// offset would couple this to the enum's declaration order, which
+    /// <see cref="AnalysisDepthClass"/> documents as informational-not-contractual;
+    /// the explicit switch keeps the taxonomy single-sourced.
+    /// </summary>
+    private static AnalysisDepthClass RolloutClassForInnerPly(int innerPly) => innerPly switch
+    {
+        1 => AnalysisDepthClass.RolloutPly1,
+        2 => AnalysisDepthClass.RolloutPly2,
+        3 => AnalysisDepthClass.RolloutPly3,
+        4 => AnalysisDepthClass.RolloutPly4,
+        5 => AnalysisDepthClass.RolloutPly5,
+        6 => AnalysisDepthClass.RolloutPly6,
+        7 => AnalysisDepthClass.RolloutPly7,
+        _ => AnalysisDepthClass.Rollout,
+    };
+
+    /// <summary>
     /// Thin wrapper returning only the label form of
     /// <see cref="ResolveDepthInfo"/>, for callers that don't need the
-    /// abbreviation or rank — e.g. <see cref="DecisionRow.AnalysisDepth"/>
-    /// on the CSV path.
+    /// abbreviation, rank, or class.
     /// </summary>
     internal static string ResolveDepth(
         short evalLevel,
@@ -1166,24 +1200,37 @@ public static class XgDecisionIterator
     /// search. The rank lets downstream rendering flag out-of-order analysis
     /// across adjacent sorted-by-equity plays.
     /// </para>
+    ///
+    /// <para>
+    /// <see cref="AnalysisDepthClass"/> is the machine-usable taxonomy behind
+    /// the three display forms — the single-sourced classification for depth
+    /// filtering. It parallels <c>Rank</c>'s tiering but is finer where rank
+    /// collapses: unlike rank 0, the class distinguishes <see cref="AnalysisDepthClass.Book"/>
+    /// (a book lookup) from <see cref="AnalysisDepthClass.Unknown"/> (an
+    /// unrecognised level code) — that distinction is deliberate. "3-ply red"
+    /// classes as <see cref="AnalysisDepthClass.Ply3"/> (same as plain 3-ply);
+    /// the no-context rollout sentinel classes as the
+    /// <see cref="AnalysisDepthClass.Rollout"/> floor, the rollout tier's known
+    /// inner plies being stamped in <see cref="ResolveDepthInfo"/>'s rollout branch.
+    /// </para>
     /// </summary>
-    private static (string Label, string Abbreviation, int Rank) LevelInfo(short level) => level switch
+    private static (string Label, string Abbreviation, int Rank, AnalysisDepthClass Class) LevelInfo(short level) => level switch
     {
-        0    => ("1-ply",        "1-ply",     1),
-        1    => ("2-ply",        "2-ply",     2),
-        2    => ("3-ply",        "3-ply",     3),
-        12   => ("3-ply red",    "3-ply red", 3),
-        3    => ("4-ply",        "4-ply",     4),
-        4    => ("5-ply",        "5-ply",     5),
-        5    => ("6-ply",        "6-ply",     6),
-        6    => ("7-ply",        "7-ply",     7),
-        100  => ("Rollout",      "Ro",        100),
-        1000 => ("XG Roller",    "R",         20),
-        1001 => ("XG Roller+",   "R+",        21),
-        1002 => ("XG Roller++",  "R++",       22),
-        998  => ("Book V1",      "Book",      0),
-        999  => ("Book V2",      "Book",      0),
-        _    => ($"level-{level}", $"level-{level}", 0),
+        0    => ("1-ply",        "1-ply",     1,   AnalysisDepthClass.Ply1),
+        1    => ("2-ply",        "2-ply",     2,   AnalysisDepthClass.Ply2),
+        2    => ("3-ply",        "3-ply",     3,   AnalysisDepthClass.Ply3),
+        12   => ("3-ply red",    "3-ply red", 3,   AnalysisDepthClass.Ply3),
+        3    => ("4-ply",        "4-ply",     4,   AnalysisDepthClass.Ply4),
+        4    => ("5-ply",        "5-ply",     5,   AnalysisDepthClass.Ply5),
+        5    => ("6-ply",        "6-ply",     6,   AnalysisDepthClass.Ply6),
+        6    => ("7-ply",        "7-ply",     7,   AnalysisDepthClass.Ply7),
+        100  => ("Rollout",      "Ro",        100, AnalysisDepthClass.Rollout),
+        1000 => ("XG Roller",    "R",         20,  AnalysisDepthClass.XgRoller),
+        1001 => ("XG Roller+",   "R+",        21,  AnalysisDepthClass.XgRollerPlus),
+        1002 => ("XG Roller++",  "R++",       22,  AnalysisDepthClass.XgRollerPlusPlus),
+        998  => ("Book V1",      "Book",      0,   AnalysisDepthClass.Book),
+        999  => ("Book V2",      "Book",      0,   AnalysisDepthClass.Book),
+        _    => ($"level-{level}", $"level-{level}", 0, AnalysisDepthClass.Unknown),
     };
 
 }
