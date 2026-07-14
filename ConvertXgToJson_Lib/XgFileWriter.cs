@@ -35,8 +35,9 @@ public static class XgFileWriter
     /// Writes <paramref name="file"/> to <paramref name="output"/> as a
     /// complete XG binary container: RichGameHeader, then the concatenated
     /// zlib streams (temp.xg records, temp.xgr rollouts when present,
-    /// temp.xgi first+last record index, temp.xgc comments when present)
-    /// and the trailing file manifest.
+    /// temp.xgi first+last record index, temp.xgc comments when present),
+    /// the file manifest, and the 36-byte end-record XG seeks to from EOF
+    /// to locate that manifest.
     /// </summary>
     /// <param name="file">The file model to serialize.</param>
     /// <param name="output">Destination stream; written sequentially, left open.</param>

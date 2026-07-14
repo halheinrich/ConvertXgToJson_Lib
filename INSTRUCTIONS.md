@@ -157,11 +157,22 @@ Container facts the reader never needed (writer-only knowledge, decoded from
 the fixture corpus and pinned by `XgFileWriterTests`):
 
 * Physical stream order is `temp.xg`, `temp.xgr` (only when rollouts exist),
-  `temp.xgi`, `temp.xgc` (only when comments exist), then a manifest stream.
+  `temp.xgi`, `temp.xgc` (only when comments exist), then a manifest stream,
+  then a 36-byte uncompressed end-record.
 * The manifest is one 532-byte entry per inner file, in stream order, the
   manifest itself unlisted: Pascal ANSI filename padded to 512 bytes, then
   uncompressed size, compressed size, offset relative to content start,
   CRC32 (IEEE) of the uncompressed bytes, and constant `0x200`.
+* The end-record is nine little-endian int32s XG seeks to from EOF to find
+  the manifest (so its absence makes the file unloadable even though every
+  other structure validates): CRC32 (IEEE) of the entire compressed body
+  (all data streams **and** the manifest stream), count of data streams
+  (manifest excluded), constant `1`, compressed size of the manifest stream,
+  manifest offset from content start (= sum of the data streams' compressed
+  sizes), constant `1`, then three zero int32s. Decoded byte-level against
+  XG-authored `.xgp`/`.xg` (2-, 3-, and 4-stream files all validate) and
+  pinned by `XgFileWriterTests` (writer trailer + `XgCorpus_EndRecord_*`
+  corpus agreement).
 * `temp.xgi` holds exactly two records: byte-copies of the first and last
   records of the emitted stream. (Real XG writes its session's first/last —
   the "last" often isn't in the `.xgp` at all — so XG demonstrably does not
@@ -740,14 +751,20 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   and round-trip exactly; a synthetic `DateTime` in a writer test must use a
   binary-exact day fraction (midnight, noon, 18:00) or the re-read value can
   differ by a tick or two.
-* **The RichGameHeader is packed; the container manifest is writer-only
-  knowledge.** `ThumbnailOffset` (an Int64 at offset 12) must be written raw
-  — an aligned 8-byte write would insert padding and corrupt the header. And
-  because `XgFileReader` finds streams by scanning for zlib headers, it
-  ignores the trailing manifest entirely; a reader-level round-trip passes
-  even with a corrupt manifest. Real XG is presumed to consume it, so
-  `XgFileWriterTests` asserts sizes / offsets / CRC32s against the raw
-  written bytes — keep that test when refactoring the container writer.
+* **The RichGameHeader is packed; the container manifest + end-record are
+  reader-invisible but load-bearing for XG.** `ThumbnailOffset` (an Int64 at
+  offset 12) must be written raw — an aligned 8-byte write would insert
+  padding and corrupt the header. And because `XgFileReader` finds streams by
+  scanning forward for zlib headers, it ignores both the trailing manifest and
+  the 36-byte end-record entirely; a reader-level round-trip passes even with a
+  corrupt manifest or a *missing trailer*. That gap once shipped: the writer
+  omitted the end-record, round-trip tests stayed green, and real XG rejected
+  every file (it seeks from EOF through the trailer to locate the manifest).
+  So `XgFileWriterTests` asserts manifest sizes / offsets / CRC32s **and** the
+  end-record's fields against the raw written bytes, plus `XgCorpus_EndRecord_*`
+  pins the trailer decoding against XG-authored files — keep these when
+  refactoring the container writer. The one smoke the suite cannot run: open a
+  freshly written `.xgp` in real XG.
 * **A centred cube above 1 is not exportable.** The record encodes cube
   ownership in the sign of a log2 field, so "centred, above 1" (auto-doubled
   money positions) has no representation without XG's auto-double

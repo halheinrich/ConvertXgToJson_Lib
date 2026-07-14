@@ -113,6 +113,7 @@ public class XgFileWriterTests
     // -----------------------------------------------------------------------
 
     private const int ManifestEntrySize = 532;
+    private const int EndRecordSize = 36;
 
     private sealed record ManifestEntry(string Name, uint UncompressedSize, uint CompressedSize, uint Offset, uint Crc, uint Constant);
 
@@ -145,9 +146,11 @@ public class XgFileWriterTests
 
         byte[] bytes = XgFileWriter.ToBytes(file);
 
-        // Content starts directly after the 8232-byte header (no thumbnail).
+        // Content starts directly after the 8232-byte header (no thumbnail);
+        // the compressed body is everything up to the 36-byte end-record.
         byte[] content = bytes[8232..];
-        var streams = XgDecompressor.DecompressAllStreams(content);
+        byte[] body = content[..^EndRecordSize];
+        var streams = XgDecompressor.DecompressAllStreams(body);
         streams.Should().HaveCount(5, "xg, xgr, xgi, xgc, manifest");
 
         byte[] xg = streams[0], xgr = streams[1], xgi = streams[2], xgc = streams[3], manifest = streams[4];
@@ -178,8 +181,11 @@ public class XgFileWriterTests
 
         // The compressed sizes must also account for the physical layout:
         // last manifest entry's offset + size = start of the manifest stream.
-        long manifestStart = content.Length - CompressedLengthOfLastStream(content);
+        long manifestStart = body.Length - CompressedLengthOfLastStream(body);
         expectedOffset.Should().Be((uint)manifestStart, "compressed sizes tile the payload exactly up to the manifest");
+
+        // The 36-byte end-record's fields agree with the recomputed body.
+        AssertTrailerMatchesRecomputed(content);
     }
 
     /// <summary>
@@ -216,10 +222,92 @@ public class XgFileWriterTests
         var noExtras = new XgFile { Header = file.Header, Records = file.Records };
 
         byte[] bytes = XgFileWriter.ToBytes(noExtras);
-        var streams = XgDecompressor.DecompressAllStreams(bytes[8232..]);
+        var streams = XgDecompressor.DecompressAllStreams(bytes[8232..^EndRecordSize]);
         streams.Should().HaveCount(3, "xg, xgi, manifest");
 
         ParseManifest(streams[2]).Select(e => e.Name).Should().Equal("temp.xg", "temp.xgi");
+    }
+
+    // -----------------------------------------------------------------------
+    //  End-record (trailer) — the 36-byte block XG seeks to from EOF
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Recomputes the nine end-record fields from the compressed body and
+    /// asserts the written trailer matches, byte for byte. <paramref name="content"/>
+    /// is the payload from content-start (after header + any thumbnail) to EOF,
+    /// trailer included.
+    /// </summary>
+    private static void AssertTrailerMatchesRecomputed(byte[] content)
+    {
+        content.Length.Should().BeGreaterThan(EndRecordSize, "a container carries at least one stream plus the trailer");
+        byte[] body = content[..^EndRecordSize];
+        byte[] trailer = content[^EndRecordSize..];
+
+        long manifestLen = CompressedLengthOfLastStream(body);
+        long manifestOffset = body.Length - manifestLen;
+        int dataStreamCount = XgDecompressor.DecompressAllStreams(body).Count - 1;
+
+        BitConverter.ToUInt32(trailer, 0).Should().Be(
+            System.IO.Hashing.Crc32.HashToUInt32(body), "field 1: CRC32 of the whole compressed body");
+        BitConverter.ToUInt32(trailer, 4).Should().Be((uint)dataStreamCount, "field 2: data stream count (manifest excluded)");
+        BitConverter.ToUInt32(trailer, 8).Should().Be(1u, "field 3: constant 1");
+        BitConverter.ToUInt32(trailer, 12).Should().Be((uint)manifestLen, "field 4: compressed size of the manifest stream");
+        BitConverter.ToUInt32(trailer, 16).Should().Be((uint)manifestOffset, "field 5: manifest offset from content start");
+        BitConverter.ToUInt32(trailer, 20).Should().Be(1u, "field 6: constant 1");
+        BitConverter.ToUInt32(trailer, 24).Should().Be(0u, "field 7: zero");
+        BitConverter.ToUInt32(trailer, 28).Should().Be(0u, "field 8: zero");
+        BitConverter.ToUInt32(trailer, 32).Should().Be(0u, "field 9: zero");
+    }
+
+    [Fact]
+    public void WrittenTrailer_MatchesRecomputedFields_WithRolloutsAndComments()
+    {
+        // Four data streams (xg, xgr, xgi, xgc) → the trailer's stream count
+        // and manifest offset must reflect all four.
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "Opening 32 65 64 31 65.xgp");
+        var file = XgFileReader.ReadFile(path);
+        file.Rollouts.Should().NotBeEmpty("this fixture is pinned as rollout-bearing");
+
+        byte[] bytes = XgFileWriter.ToBytes(file);
+        AssertTrailerMatchesRecomputed(bytes[8232..]);
+    }
+
+    [Fact]
+    public void WrittenTrailer_MatchesRecomputedFields_NoRolloutsOrComments()
+    {
+        // Two data streams (xg, xgi) → a different stream count and offset,
+        // so the recomputation is genuinely re-exercised, not a constant.
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "NoAnalysis.xgp");
+        var src = XgFileReader.ReadFile(path);
+        var file = new XgFile { Header = src.Header, Records = src.Records };
+        file.Rollouts.Should().BeEmpty();
+        file.Comments.Should().BeEmpty();
+
+        byte[] bytes = XgFileWriter.ToBytes(file);
+        AssertTrailerMatchesRecomputed(bytes[8232..]);
+    }
+
+    [Fact]
+    public void XgCorpus_EndRecord_MatchesRecomputedFields()
+    {
+        // Fixture-agnostic: pin our decoding of the end-record against every
+        // XG-authored .xg file present, tolerating an empty corpus. Real XG
+        // writes the trailer; recomputing its fields from the compressed body
+        // and matching proves we read the format the way XG wrote it.
+        foreach (string path in TestPaths.XgFiles)
+        {
+            byte[] fileBytes = File.ReadAllBytes(path);
+            long contentOffset = ContentOffset(path);
+            AssertTrailerMatchesRecomputed(fileBytes[(int)contentOffset..]);
+        }
+    }
+
+    /// <summary>Content start (after header + any thumbnail) of an XG file.</summary>
+    private static long ContentOffset(string path)
+    {
+        using var fs = File.OpenRead(path);
+        return RichGameHeaderParser.Read(fs).ContentOffset;
     }
 
     // -----------------------------------------------------------------------
