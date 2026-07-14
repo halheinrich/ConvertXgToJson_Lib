@@ -268,6 +268,7 @@ public class XgFileWriterTests
         string path = Path.Combine(TestPaths.FixtureFilesDir, "Opening 32 65 64 31 65.xgp");
         var file = XgFileReader.ReadFile(path);
         file.Rollouts.Should().NotBeEmpty("this fixture is pinned as rollout-bearing");
+        file.Comments.Should().NotBeEmpty("this fixture is pinned as comment-bearing");
 
         byte[] bytes = XgFileWriter.ToBytes(file);
         AssertTrailerMatchesRecomputed(bytes[8232..]);
