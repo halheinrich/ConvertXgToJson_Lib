@@ -202,14 +202,22 @@ breaking change (`Export_SelfIdentifiesInLocation` pins it).
 callers that hold the parsed source file plus the decision's coordinates
 (the same user-level selectors an `XgDecisionId` carries). Emits XG's own
 save-from-match shape, learned from the XG-authored agreement fixtures:
-match header and game header shared **verbatim** (source perspective,
-player order, and metadata preserved — including a foreign Location like
+match header and game header copied with their comment indices cleared
+but otherwise **verbatim** (source perspective, player order, and
+metadata preserved — including a foreign Location like
 `"BackgammonGalaxy"`), decision records copied **with analysis panes
 intact**, referenced rollout contexts carried over with indices remapped
 (a cube rollout is an adjacent context *pair* with the record pointing at
-the second leg — both legs travel), comment indices cleared (comments not
-carried). A play slice carries the real same-turn cube record when the
-source has one, else synthesizes the incidental unanalysed pane.
+the second leg — both legs travel), and the decision records' comments
+carried into a fresh dense comment table (indices remapped, RTF payloads
+verbatim — XG's own SaveAs of a commented move does the same:
+`CommentExported.xgp` ground truth). Match- and game-level comments are
+**not** carried — XG mirrors the match header comment into the outer
+header's plain-text `Comments` field (`CommentsAddedToXgp.xgp` ground
+truth), so carrying them would drag RTF→plain-text extraction in; the
+header/footer comment indices are cleared so they cannot dangle into the
+rebuilt table. A play slice carries the real same-turn cube record when
+the source has one, else synthesizes the incidental unanalysed pane.
 
 Slice entry points also accept the decision's `XgDecisionId` directly
 (destructured internally; `Filename` is not consulted — the caller
@@ -229,10 +237,10 @@ init, so an invalid options instance is unrepresentable.
 surface: a whole-file re-emit for callers that already hold the finished
 file shape (typically a parsed single-position `.xgp` being passed along
 anonymized). Every record, rollout context, and comment travels verbatim
-— no record selection, no comment clearing, no rollout remapping; the
-only rewrite is the match header's name fields through the same
-`WithPlayerNames` copy the slice path uses. With no overrides it is a
-plain `XgFileWriter` re-emit, byte-for-byte.
+— no record selection, no comment or rollout remapping; the only rewrite
+is the match header's name fields through the same `CopyMatchHeader`
+copy the slice path uses (with its comment-index clearing off). With no
+overrides it is a plain `XgFileWriter` re-emit, byte-for-byte.
 
 **Iterator visibility differs by path, deliberately.** A clean export is
 **XG-import-only**: unanalyzed, so this library's own iterator yields
@@ -560,8 +568,8 @@ public static class XgpExporter
 
     // Anonymize-copy: whole-file re-emit with name overrides — every
     // record, rollout context, and comment verbatim (no slicing, no
-    // comment clearing, no rollout remap); only the match header's name
-    // fields rewritten. No overrides = plain re-emit.
+    // comment or rollout remap); only the match header's name fields
+    // rewritten. No overrides = plain re-emit.
     public static void   Write(XgFile source, XgpSliceOptions options, Stream output);
     public static byte[] ToBytes(XgFile source, XgpSliceOptions options);
     public static void   WriteFile(XgFile source, XgpSliceOptions options, string path);
@@ -729,15 +737,24 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   analyzed exports use the **slice path** (`Write(XgFile, game,
   moveNumber, isCube, …)`), which carries the analysis panes and emits
   exactly one decision.
-* **`WithPlayerNames` is a full manual copy of `MatchHeaderRecord`.** The
-  slice exporter's name-override helper copies every header field
-  explicitly (the model is a class, not a record — no `with`). A new
-  `MatchHeaderRecord` field must be added to the copy too, or slice
-  exports with name overrides silently drop it. The guard is the
-  byte-identity test in `XgpSliceExportTests`
-  (`SliceOptions_MatchingSourceNames_AreByteInvisible`): overrides equal
-  to the source names must produce a byte-identical file, so any dropped
-  or transposed field fails it.
+* **`CopyMatchHeader` is a full manual copy of `MatchHeaderRecord`.** The
+  exporter's single header-copy helper (name overrides + optional
+  comment-index clearing) copies every header field explicitly (the
+  model is a class, not a record — no `with`). A new
+  `MatchHeaderRecord` field must be added to the copy too, or slice and
+  anonymize-copy exports silently drop it. The guard is the byte-identity
+  pair in `XgpSliceExportTests`
+  (`SliceOptions_MatchingSourceNames_AreByteInvisible` and
+  `Copy_WithSourceNames_IsByteIdenticalToXgFileWriterOutput`): overrides
+  equal to the source names must produce a byte-identical file, so any
+  dropped or transposed field fails them.
+* **An interior empty comment line is a real (empty) comment.**
+  `temp.xgc` is CRLF-terminated lines joined by `CommentIndex`;
+  `CommentWriter` writes an empty comment as a bare CRLF, so
+  `CommentParser` may drop only the one empty segment after the final
+  CRLF (a split artifact). Skipping interior empties shifts every later
+  entry and silently desyncs all subsequent comment joins — it once
+  shipped that way.
 * **A cube rollout is an adjacent context pair; the record points at the
   second leg.** Ground truth from XG's own save (`match35253054_2_37.xgp`:
   two contexts, `RolloutIndex = 1`). Anything that copies or filters

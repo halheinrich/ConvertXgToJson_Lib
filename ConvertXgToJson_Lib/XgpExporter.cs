@@ -32,12 +32,17 @@ namespace ConvertXgToJson_Lib;
 /// iterated it) plus the decision's coordinates — the same user-level
 /// selectors a <see cref="BgDataTypes_Lib.XgDecisionId"/> carries. Emits
 /// XG's own save-from-match shape: match header and game header copied
-/// verbatim (source perspective and metadata preserved), the decision
+/// with their comment indices cleared but otherwise verbatim (source
+/// perspective and metadata preserved), the decision
 /// records copied <b>with their analysis panes</b>, and any referenced
-/// rollout contexts carried over (indices remapped). A sliced analyzed
+/// rollout contexts carried over (indices remapped). The sliced decision
+/// records' comments travel the same way — remapped into a fresh dense
+/// comment table, RTF payloads verbatim, matching XG's own SaveAs of a
+/// commented move. Match- and game-level comments are <b>not</b> carried;
+/// the match/game header + footer comment indices are cleared so they
+/// cannot dangle into the slice's table. A sliced analyzed
 /// decision is therefore visible to our own iterator (exactly one decision)
-/// and shows its analysis in XG without re-analyzing. Comments are not
-/// carried; comment indices on the sliced decision records are cleared.
+/// and shows its analysis in XG without re-analyzing.
 /// An optional <see cref="XgpSliceOptions"/> overrides the player names
 /// (anonymized export); every other header field still passes through
 /// verbatim.
@@ -49,9 +54,8 @@ namespace ConvertXgToJson_Lib;
 /// single-position <c>.xgp</c> being passed along — and only want the
 /// names replaced. A whole-file re-emit: <b>every</b> record, rollout
 /// context, and comment travels verbatim (no record selection, no comment
-/// clearing, no rollout remapping — none of the slice path's carving);
-/// the only rewrite is the match header's player-name fields per the
-/// options.
+/// or rollout remapping — none of the slice path's carving); the only
+/// rewrite is the match header's player-name fields per the options.
 /// </para>
 ///
 /// <para>
@@ -385,10 +389,12 @@ public static class XgpExporter
     /// <summary>
     /// Builds the <see cref="XgFile"/> record set for a slice export —
     /// XG's own save-from-match shape, learned from the XG-authored
-    /// agreement fixtures: match header and game header shared verbatim
-    /// (source perspective and metadata preserved), decision records copied
-    /// with analysis intact, referenced rollout contexts carried over with
-    /// indices remapped, comment indices cleared (comments not carried).
+    /// agreement fixtures: match header and game header copied with their
+    /// comment indices cleared but otherwise verbatim (source perspective
+    /// and metadata preserved), decision records copied with analysis
+    /// intact, referenced rollout contexts carried over with indices
+    /// remapped, and the decision records' comments carried into a fresh
+    /// dense comment table (indices remapped the same way).
     /// <paramref name="options"/> may override the player names (both
     /// twins per player); null or the default instance changes nothing.
     /// Internal so tests can assert on records directly.
@@ -396,13 +402,13 @@ public static class XgpExporter
     internal static XgFile ToXgFileSlice(
         XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions? options = null)
     {
-        if (source.Records.Count == 0 || source.Records[0] is not MatchHeaderRecord mh)
+        if (source.Records.Count == 0 || source.Records[0] is not MatchHeaderRecord sourceMh)
             throw new ArgumentException(
                 "Slice source must begin with a MatchHeaderRecord (a parsed .xg/.xgp file always does).",
                 nameof(source));
 
-        if (options is { } o && (o.Player1Name is not null || o.Player2Name is not null))
-            mh = WithPlayerNames(mh, o.Player1Name, o.Player2Name);
+        var mh = CopyMatchHeader(
+            sourceMh, options?.Player1Name, options?.Player2Name, clearCommentIndices: true);
 
         var (gh, cube, move) = LocateDecision(source, game, moveNumber, isCube);
 
@@ -435,10 +441,32 @@ public static class XgpExporter
             return Remap(index);
         }
 
-        var records = new List<SaveRecord> { mh, gh };
+        // Carry the comments the sliced decision records reference, into a
+        // fresh dense table in record order — the same carve XG's own SaveAs
+        // of a commented move performs (CommentExported fixture ground
+        // truth). Match- and game-level comments are deliberately not
+        // carried: XG mirrors the match header comment into the outer
+        // header's plain-text Comments field (CommentsAddedToXgp fixture),
+        // so carrying them would drag RTF→plain-text extraction in.
+        var comments = new List<string>();
+        var commentRemap = new Dictionary<int, int>();
+        int RemapComment(int index)
+        {
+            if (index < 0 || index >= source.Comments.Count)
+                return -1;
+            if (!commentRemap.TryGetValue(index, out int mapped))
+            {
+                mapped = comments.Count;
+                comments.Add(source.Comments[index]);
+                commentRemap[index] = mapped;
+            }
+            return mapped;
+        }
+
+        var records = new List<SaveRecord> { mh, WithClearedCommentIndices(gh) };
         if (isCube)
         {
-            records.Add(SliceCubeRecord(cube!, RemapCubeRollout));
+            records.Add(SliceCubeRecord(cube!, RemapCubeRollout, RemapComment));
         }
         else
         {
@@ -447,14 +475,14 @@ public static class XgpExporter
             // shape), else the incidental unanalysed pane (PlayAnalysis
             // shape) carrying the roll.
             records.Add(cube != null
-                ? SliceCubeRecord(cube, RemapCubeRollout)
+                ? SliceCubeRecord(cube, RemapCubeRollout, RemapComment)
                 : UnanalysedCubeRecord(
                     activePlayer: move!.ActivePlayer,
                     position: move.InitialPosition,
                     cubeValueRaw: move.CubeValue,
                     doubled: -2,
                     diceRolled: $"{move.Dice[0]}{move.Dice[1]}"));
-            records.Add(SliceMoveRecord(move!, Remap));
+            records.Add(SliceMoveRecord(move!, Remap, RemapComment));
         }
 
         return new XgFile
@@ -472,6 +500,7 @@ public static class XgpExporter
             },
             Records = records,
             Rollouts = rollouts,
+            Comments = comments,
         };
     }
 
@@ -525,10 +554,12 @@ public static class XgpExporter
 
     /// <summary>
     /// Copy of a source <see cref="CubeRecord"/> for the slice: analysis
-    /// intact, rollout index remapped into the slice's table, comment index
-    /// cleared (comments are not carried).
+    /// intact, rollout index remapped into the slice's rollout table,
+    /// comment index remapped into the slice's comment table (a dangling
+    /// source index clears to −1, like an out-of-range rollout index).
     /// </summary>
-    private static CubeRecord SliceCubeRecord(CubeRecord c, Func<int, int> remap) => new()
+    private static CubeRecord SliceCubeRecord(
+        CubeRecord c, Func<int, int> remapRollout, Func<int, int> remapComment) => new()
     {
         EntryType = RecordType.Cube,
         ActivePlayer = c.ActivePlayer,
@@ -542,7 +573,7 @@ public static class XgpExporter
         ErrorCube = c.ErrorCube,
         DiceRolled = c.DiceRolled,
         ErrorTake = c.ErrorTake,
-        RolloutIndex = remap(c.RolloutIndex),
+        RolloutIndex = remapRollout(c.RolloutIndex),
         ComputerChoice = c.ComputerChoice,
         AnalyzeLevel = c.AnalyzeLevel,
         ErrorBeaver = c.ErrorBeaver,
@@ -554,7 +585,7 @@ public static class XgpExporter
         ErrorTutorCube = c.ErrorTutorCube,
         ErrorTutorTake = c.ErrorTutorTake,
         Flagged = c.Flagged,
-        CommentIndex = -1,
+        CommentIndex = remapComment(c.CommentIndex),
         Edited = c.Edited,
         TimeDelayed = c.TimeDelayed,
         TimeDelayDone = c.TimeDelayDone,
@@ -565,9 +596,10 @@ public static class XgpExporter
 
     /// <summary>
     /// Copy of a source <see cref="MoveRecord"/> for the slice: analysis
-    /// intact, rollout indices remapped, comment index cleared.
+    /// intact, rollout indices remapped, comment index remapped.
     /// </summary>
-    private static MoveRecord SliceMoveRecord(MoveRecord m, Func<int, int> remap) => new()
+    private static MoveRecord SliceMoveRecord(
+        MoveRecord m, Func<int, int> remapRollout, Func<int, int> remapComment) => new()
     {
         EntryType = RecordType.Move,
         InitialPosition = m.InitialPosition,
@@ -584,7 +616,7 @@ public static class XgpExporter
         LuckError = m.LuckError,
         ComputerChoice = m.ComputerChoice,
         InitialEquity = m.InitialEquity,
-        RolloutIndices = [.. m.RolloutIndices.Select(remap)],
+        RolloutIndices = [.. m.RolloutIndices.Select(remapRollout)],
         AnalyzeLevel = m.AnalyzeLevel,
         AnalyzeLevelLuck = m.AnalyzeLevelLuck,
         InvalidDecision = m.InvalidDecision,
@@ -592,7 +624,7 @@ public static class XgpExporter
         TutorMoveIndex = m.TutorMoveIndex,
         ErrorTutorMove = m.ErrorTutorMove,
         Flagged = m.Flagged,
-        CommentIndex = -1,
+        CommentIndex = remapComment(m.CommentIndex),
         Edited = m.Edited,
         TimeDelayBits = m.TimeDelayBits,
         TimeDelayDoneBits = m.TimeDelayDoneBits,
@@ -600,15 +632,19 @@ public static class XgpExporter
     };
 
     /// <summary>
-    /// Copy of the source match header with the player-name fields
-    /// rewritten — a non-null name replaces that player's Unicode field
-    /// <b>and</b> its ANSI twin; null keeps both of that player's source
-    /// fields. Every other field, the Location provenance fingerprint
-    /// included, passes through verbatim; the options byte-identity test
-    /// pins this copy field-for-field.
+    /// The single field-for-field copy of <see cref="MatchHeaderRecord"/>,
+    /// with two rewrite knobs. A non-null player name replaces that
+    /// player's Unicode field <b>and</b> its ANSI twin; null keeps both of
+    /// that player's source fields. <paramref name="clearCommentIndices"/>
+    /// clears the match header/footer comment indices (the slice path,
+    /// whose fresh comment table carries no match-level comments); false
+    /// passes them through (the anonymize-copy path, whose comment table
+    /// travels verbatim). Every other field, the Location provenance
+    /// fingerprint included, passes through verbatim; the options
+    /// byte-identity test pins this copy field-for-field.
     /// </summary>
-    private static MatchHeaderRecord WithPlayerNames(
-        MatchHeaderRecord mh, string? player1, string? player2) => new()
+    private static MatchHeaderRecord CopyMatchHeader(
+        MatchHeaderRecord mh, string? player1, string? player2, bool clearCommentIndices) => new()
     {
         EntryType = mh.EntryType,
         Player1Ansi = player1 ?? mh.Player1Ansi,
@@ -643,8 +679,8 @@ public static class XgpExporter
         Entered = mh.Entered,
         Counted = mh.Counted,
         UnratedImport = mh.UnratedImport,
-        CommentHeaderMatchIndex = mh.CommentHeaderMatchIndex,
-        CommentFooterMatchIndex = mh.CommentFooterMatchIndex,
+        CommentHeaderMatchIndex = clearCommentIndices ? -1 : mh.CommentHeaderMatchIndex,
+        CommentFooterMatchIndex = clearCommentIndices ? -1 : mh.CommentFooterMatchIndex,
         IsMoneyMatch = mh.IsMoneyMatch,
         WinMoney = mh.WinMoney,
         LoseMoney = mh.LoseMoney,
@@ -668,6 +704,25 @@ public static class XgpExporter
         Transcriber = mh.Transcriber,
     };
 
+    /// <summary>
+    /// Copy of the source game header for the slice: every field verbatim
+    /// except the game header/footer comment indices, cleared because the
+    /// slice's fresh comment table carries no game-level comments.
+    /// </summary>
+    private static GameHeaderRecord WithClearedCommentIndices(GameHeaderRecord gh) => new()
+    {
+        EntryType = gh.EntryType,
+        Score1 = gh.Score1,
+        Score2 = gh.Score2,
+        CrawfordApplies = gh.CrawfordApplies,
+        InitialPosition = gh.InitialPosition,
+        GameNumber = gh.GameNumber,
+        InProgress = gh.InProgress,
+        CommentHeaderGameIndex = -1,
+        CommentFooterGameIndex = -1,
+        NumberOfAutoDoubles = gh.NumberOfAutoDoubles,
+    };
+
     // ------------------------------------------------------------------ //
     //  Source copy → record set
     // ------------------------------------------------------------------ //
@@ -676,7 +731,7 @@ public static class XgpExporter
     /// Builds the <see cref="XgFile"/> for an anonymize-copy: the source
     /// model shared wholesale — header, rollout table, and comment table
     /// by reference, records in order — with only the match header
-    /// replaced through <see cref="WithPlayerNames"/> when an override is
+    /// replaced through <see cref="CopyMatchHeader"/> when an override is
     /// present. With no overrides the source itself is returned (the
     /// model is init-only throughout, so sharing is safe). Internal so
     /// tests can assert on records directly.
@@ -693,7 +748,8 @@ public static class XgpExporter
 
         var records = new List<SaveRecord>(source.Records)
         {
-            [0] = WithPlayerNames(mh, options.Player1Name, options.Player2Name),
+            [0] = CopyMatchHeader(
+                mh, options.Player1Name, options.Player2Name, clearCommentIndices: false),
         };
         return new XgFile
         {

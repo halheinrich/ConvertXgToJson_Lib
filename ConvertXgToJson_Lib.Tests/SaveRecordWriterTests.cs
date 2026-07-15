@@ -397,4 +397,26 @@ public class SaveRecordWriterTests
         using var ms = new MemoryStream(bytes);
         CommentParser.ReadAll(ms).Should().Equal(comments);
     }
+
+    [Fact]
+    public void Comments_RoundTrip_KeepsInteriorEmptyComment()
+    {
+        // CommentWriter writes an empty comment as a bare CRLF line, so the
+        // parser must keep interior empty segments — skipping one shifts
+        // every later entry and desyncs the records' CommentIndex
+        // references. Only the empty segment after the final CRLF is a
+        // split artifact rather than a comment.
+        List<string> comments = ["first", "", "third"];
+
+        byte[] bytes = CommentWriter.WriteAll(comments);
+        using var ms = new MemoryStream(bytes);
+        CommentParser.ReadAll(ms).Should().Equal(comments);
+
+        // The hardest case: a real empty comment in final position. Its
+        // own CRLF terminator still produces exactly one artifact segment,
+        // which is all the parser may drop.
+        List<string> trailingEmpty = ["first", ""];
+        using var ms2 = new MemoryStream(CommentWriter.WriteAll(trailingEmpty));
+        CommentParser.ReadAll(ms2).Should().Equal(trailingEmpty);
+    }
 }

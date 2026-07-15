@@ -77,7 +77,8 @@ public class XgpSliceExportTests
 
     private static RolloutContext Context(int marker) => new() { GamesRolled = 1000 + marker };
 
-    private static XgFile SyntheticSource(CubeRecord? cube, MoveRecord? move, int rolloutCount)
+    private static XgFile SyntheticSource(
+        CubeRecord? cube, MoveRecord? move, int rolloutCount, List<string>? comments = null)
     {
         var records = new List<SaveRecord>
         {
@@ -90,6 +91,7 @@ public class XgpSliceExportTests
         {
             Records = records,
             Rollouts = [.. Enumerable.Range(0, rolloutCount).Select(Context)],
+            Comments = comments ?? [],
         };
     }
 
@@ -118,7 +120,8 @@ public class XgpSliceExportTests
         slicedMove.RolloutIndices[2].Should().Be(1);
         slicedMove.RolloutIndices[4].Should().Be(0);
         slicedMove.RolloutIndices.Where((_, i) => i is not (1 or 2 or 4)).Should().OnlyContain(x => x == -1);
-        slicedMove.CommentIndex.Should().Be(-1, "comments are not carried in a slice");
+        slicedMove.CommentIndex.Should().Be(-1,
+            "a source comment index with no table entry behind it is dangling and must clear, not carry");
     }
 
     [Fact]
@@ -135,7 +138,7 @@ public class XgpSliceExportTests
         sliced.Rollouts.Select(r => r.GamesRolled).Should().Equal(1003, 1004);
         var slicedCube = sliced.Records.OfType<CubeRecord>().Single();
         slicedCube.RolloutIndex.Should().Be(1, "the referenced leg stays second in the pair");
-        slicedCube.CommentIndex.Should().Be(-1);
+        slicedCube.CommentIndex.Should().Be(-1, "the source has no comment table entry behind index 7");
     }
 
     [Fact]
@@ -188,6 +191,141 @@ public class XgpSliceExportTests
         var sliced = XgpExporter.ToXgFileSlice(source, game: 2, moveNumber: 37, isCube: true);
         sliced.Records.Select(r => r.EntryType).Should().Equal(
             RecordType.HeaderMatch, RecordType.HeaderGame, RecordType.Cube);
+    }
+
+    // -----------------------------------------------------------------------
+    //  Comment carriage — the sliced decision records' comments travel into
+    //  a fresh dense table, matching XG's own SaveAs of a commented move
+    //  (CommentExported.xgp ground truth). Match- and game-level comments
+    //  are not carried; their header/footer indices are cleared so nothing
+    //  dangles into the rebuilt table.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void SlicedCommentedMove_CarriesTheCommentThrough()
+    {
+        // CommentExported.xgp is XG's own SaveAs of a commented move, so it
+        // is simultaneously the input and the shape oracle: one RTF entry,
+        // the move pointing at it, the cube pane and all four match/game
+        // header indices at -1, and the outer header's Comments mirror empty.
+        var source = XgFileReader.ReadFile(Fixture("CommentExported.xgp"));
+        source.Comments.Should().ContainSingle("fixture precondition: exactly one RTF comment")
+            .Which.Should().StartWith(@"{\rtf", "XG stores decision comments as RTF");
+        source.Records.OfType<MoveRecord>().Single().CommentIndex.Should().Be(0,
+            "fixture precondition: the move carries the comment");
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 1, moveNumber: 1, isCube: false));
+        var sliced = XgFileReader.ReadStream(ms);
+
+        sliced.Comments.Should().Equal(source.Comments, "the RTF payload travels verbatim");
+        sliced.Records.OfType<MoveRecord>().Single().CommentIndex.Should().Be(0,
+            "the sole comment lands at index 0 of the rebuilt table");
+        sliced.Records.OfType<CubeRecord>().Single().CommentIndex.Should().Be(-1);
+        sliced.Header.Comments.Should().BeEmpty(
+            "XG's own SaveAs leaves the outer-header mirror empty for a decision comment");
+    }
+
+    [Fact]
+    public void PlaySlice_WithCubeAndMoveComments_BuildsDenseTableInRecordOrder()
+    {
+        // Source indices deliberately reversed and sparse: the slice's
+        // table must come out dense and in record order (cube pane first),
+        // with the unreferenced entry left behind.
+        var cube = new CubeRecord { EntryType = RecordType.Cube, CommentIndex = 2 };
+        var move = new MoveRecord { EntryType = RecordType.Move, Dice = [3, 1], CommentIndex = 0 };
+        var source = SyntheticSource(cube, move, rolloutCount: 0,
+            comments: [@"{\rtf move}", @"{\rtf unreferenced}", @"{\rtf cube}"]);
+
+        var sliced = XgpExporter.ToXgFileSlice(source, game: 1, moveNumber: 1, isCube: false);
+
+        sliced.Comments.Should().Equal(@"{\rtf cube}", @"{\rtf move}");
+        sliced.Records.OfType<CubeRecord>().Single().CommentIndex.Should().Be(0);
+        sliced.Records.OfType<MoveRecord>().Single().CommentIndex.Should().Be(1);
+    }
+
+    [Fact]
+    public void Slice_ClearsMatchAndGameHeaderCommentIndices()
+    {
+        // Copied verbatim (as the rest of the headers are), these indices
+        // would dangle into the slice's rebuilt comment table.
+        var records = new List<SaveRecord>
+        {
+            new MatchHeaderRecord
+            {
+                EntryType = RecordType.HeaderMatch,
+                MatchLength = 7,
+                CommentHeaderMatchIndex = 0,
+                CommentFooterMatchIndex = 1,
+            },
+            new GameHeaderRecord
+            {
+                EntryType = RecordType.HeaderGame,
+                CommentHeaderGameIndex = 2,
+                CommentFooterGameIndex = 3,
+            },
+            // CommentIndex = -1 as in a real parsed record (the model
+            // default 0 would reference the table's first entry).
+            new MoveRecord { EntryType = RecordType.Move, Dice = [3, 1], CommentIndex = -1 },
+        };
+        var source = new XgFile { Records = records, Comments = ["a", "b", "c", "d"] };
+
+        var sliced = XgpExporter.ToXgFileSlice(source, game: 1, moveNumber: 1, isCube: false);
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.CommentHeaderMatchIndex.Should().Be(-1);
+        mh.CommentFooterMatchIndex.Should().Be(-1);
+        var gh = sliced.Records.OfType<GameHeaderRecord>().Single();
+        gh.CommentHeaderGameIndex.Should().Be(-1);
+        gh.CommentFooterGameIndex.Should().Be(-1);
+        sliced.Comments.Should().BeEmpty(
+            "only decision-record comments are carried, and no decision record references one");
+    }
+
+    [Fact]
+    public void Slice_OfMatchCommentedSource_EmitsNoDanglingIndices()
+    {
+        // End-to-end run of the header-clearing rule against the XG-authored
+        // fixture whose match header really points into the comment table.
+        var source = XgFileReader.ReadFile(Fixture("CommentsAddedToXgp.xgp"));
+        var srcMh = (MatchHeaderRecord)source.Records[0];
+        srcMh.CommentHeaderMatchIndex.Should().Be(0, "fixture precondition: before-session comment");
+        srcMh.CommentFooterMatchIndex.Should().Be(1, "fixture precondition: after-session comment");
+
+        // Model level: nothing references a comment, so the rebuilt table
+        // is empty. (Asserted here rather than on the re-read below: the
+        // reader misclassifies the container manifest as a comment stream
+        // when no real temp.xgc exists — a pre-existing read-side bug that
+        // afflicts every commentless XG-authored file alike.)
+        XgpExporter.ToXgFileSlice(source, game: 1, moveNumber: 1, isCube: false)
+            .Comments.Should().BeEmpty(
+                "this fixture's decision records carry no comments, so the rebuilt table is empty");
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 1, moveNumber: 1, isCube: false));
+        var sliced = XgFileReader.ReadStream(ms);
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.CommentHeaderMatchIndex.Should().Be(-1, "match-level comments are not carried in a slice");
+        mh.CommentFooterMatchIndex.Should().Be(-1);
+    }
+
+    [Fact]
+    public void CommentsAddedToXgp_ParseOracle_PinsWhyMatchCommentsStayOutOfScope()
+    {
+        // Parse oracle for the fixture itself: XG stores match-level
+        // comments as RTF table entries referenced by the match header AND
+        // mirrors the header comment as plain text into the outer header's
+        // Comments field. Carrying match-level comments through a slice
+        // would therefore require RTF→plain-text extraction — the reason
+        // slice comment carriage stops at decision records.
+        var file = XgFileReader.ReadFile(Fixture("CommentsAddedToXgp.xgp"));
+
+        file.Comments.Should().HaveCount(2);
+        file.Comments.Should().OnlyContain(c => c.StartsWith(@"{\rtf"));
+        var mh = (MatchHeaderRecord)file.Records[0];
+        mh.CommentHeaderMatchIndex.Should().Be(0);
+        mh.CommentFooterMatchIndex.Should().Be(1);
+        file.Header.Comments.Should().Be("Comments before session\r\n",
+            "XG mirrors the match header comment into the outer header as plain text");
     }
 
     // -----------------------------------------------------------------------
@@ -426,7 +564,8 @@ public class XgpSliceExportTests
     [Fact]
     public void AnonymizedCopy_PreservesComments()
     {
-        // The slice path clears comment indices; the copy path must not.
+        // The slice path rebuilds the comment table (dense, decision
+        // comments only); the copy path must carry table and indices verbatim.
         var source = new XgFile
         {
             Records =
@@ -451,7 +590,7 @@ public class XgpSliceExportTests
         ((MatchHeaderRecord)copy.Records[0]).Player2.Should().Be("Player 2");
         copy.Comments.Should().Equal("anonymize copy comment");
         copy.Records.OfType<MoveRecord>().Single().CommentIndex.Should().Be(0,
-            "the copy path keeps comment indices — clearing them is slice behavior");
+            "the copy path keeps comment indices verbatim — remapping is slice behavior");
     }
 
     [Fact]

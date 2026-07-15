@@ -16,13 +16,16 @@ internal static class CommentParser
         // Split on CRLF line separators
         string[] lines = raw.Split("\r\n", StringSplitOptions.None);
 
+        // The final CRLF yields one empty trailing segment — a split
+        // artifact, not a comment. An *interior* empty segment is a real
+        // (empty) comment: dropping one would shift every later entry and
+        // desync the records' CommentIndex references.
+        int count = lines[^1].Length == 0 ? lines.Length - 1 : lines.Length;
+
         // Replace the embedded CRLF escape (#1#2 = 0x01 0x02) with real CRLF
-        var result = new List<string>(lines.Length);
-        foreach (string line in lines)
-        {
-            if (line.Length == 0) continue;  // skip empty trailing line
-            result.Add(line.Replace("\x01\x02", "\r\n"));
-        }
+        var result = new List<string>(count);
+        for (int i = 0; i < count; i++)
+            result.Add(lines[i].Replace("\x01\x02", "\r\n"));
         return result;
     }
 }
