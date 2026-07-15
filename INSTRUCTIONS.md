@@ -827,3 +827,29 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   rollout contexts are the one unrecoverable piece (level 1002 with
   `RolloutIndex = -1` is XG-legal per the `DoubleAnalysis.xgp` fixture,
   unverified for move panes).
+* **Fix `XgDecompressor.Decompress` misclassifying the manifest as the
+  comment stream.** The stream classifier assigns by record-size
+  heuristics, so when a file carries no real `temp.xgc`, the container's
+  trailing manifest (532-byte entries, matching no record size) falls
+  into the `xgc` slot — every commentless XG-authored file parses with
+  one phantom garbage comment in `XgFile.Comments` (and the JSON
+  `comments` array). Never dereferenced — such files' `CommentIndex`
+  fields are all `-1` — and masked by round-trips (the writer re-emits
+  the phantom as a real `temp.xgc`, so reparse equals parse), which is
+  why it shipped silently. Two slice tests
+  (`Slice_OfMatchCommentedSource_EmitsNoDanglingIndices`,
+  `Slice_ClearsMatchAndGameHeaderCommentIndices`) assert comment-table
+  emptiness at the model level because of it and name the bug; tighten
+  them to re-read assertions once fixed. Candidate approaches: locate
+  the manifest via the 36-byte end-record (how XG itself finds it),
+  exclude the last stream from classification, or shape-detect the
+  manifest — mind the old single-stream-format fallback either way.
+* **Investigate the three orphaned RTF comments in `match35041658.xg` /
+  `MoneyTest.xg`.** Both fixtures parse with three real RTF comment-table
+  entries referenced by nothing the model surfaces: every parsed
+  `CommentIndex` / header-footer comment index in them is `-1`. Possibly
+  comment-index fields on the footer records (`GameFooterRecord` /
+  `MatchFooterRecord`) that the parser doesn't currently decode — if so,
+  a round-trip silently drops the *references* while keeping the
+  comments. Probe the raw footer bytes against the TSaveRec layout to
+  confirm, then decide whether to parse and carry them.
