@@ -33,6 +33,7 @@ ConvertXgToJson_Lib/
   ConvertXgToJson_Lib.csproj
   BackgammonConstants.cs
   MatchContext.cs
+  XgContainerLayout.cs
   XgDecisionIterator.cs
   XgFileReader.cs
   XgFileWriter.cs
@@ -153,8 +154,10 @@ The reader's mirror. Layered exactly like the read path:
   Writer/Reader mirrors byte layout. Consumers never touch record
   internals.
 
-Container facts the reader never needed (writer-only knowledge, decoded from
-the fixture corpus and pinned by `XgFileWriterTests`):
+Container facts shared by both sides (decoded from the fixture corpus,
+pinned by `XgFileWriterTests`, byte layout encoded once in
+`XgContainerLayout` — the SSOT `XgContainerWriter` emits through and
+`XgDecompressor` assigns streams through):
 
 * Physical stream order is `temp.xg`, `temp.xgr` (only when rollouts exist),
   `temp.xgi`, `temp.xgc` (only when comments exist), then a manifest stream,
@@ -769,19 +772,33 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   binary-exact day fraction (midnight, noon, 18:00) or the re-read value can
   differ by a tick or two.
 * **The RichGameHeader is packed; the container manifest + end-record are
-  reader-invisible but load-bearing for XG.** `ThumbnailOffset` (an Int64 at
-  offset 12) must be written raw — an aligned 8-byte write would insert
-  padding and corrupt the header. And because `XgFileReader` finds streams by
-  scanning forward for zlib headers, it ignores both the trailing manifest and
-  the 36-byte end-record entirely; a reader-level round-trip passes even with a
-  corrupt manifest or a *missing trailer*. That gap once shipped: the writer
-  omitted the end-record, round-trip tests stayed green, and real XG rejected
-  every file (it seeks from EOF through the trailer to locate the manifest).
-  So `XgFileWriterTests` asserts manifest sizes / offsets / CRC32s **and** the
-  end-record's fields against the raw written bytes, plus `XgCorpus_EndRecord_*`
-  pins the trailer decoding against XG-authored files — keep these when
-  refactoring the container writer. The one smoke the suite cannot run: open a
-  freshly written `.xgp` in real XG.
+  load-bearing for XG but silently optional for our reader.**
+  `ThumbnailOffset` (an Int64 at offset 12) must be written raw — an aligned
+  8-byte write would insert padding and corrupt the header. `XgFileReader`
+  assigns streams by manifest name (located via the end-record, exactly as
+  real XG loads a file) but degrades to record-size heuristics whenever the
+  trailer or manifest fails validation — so a reader-level round-trip still
+  passes with a corrupt manifest or a *missing trailer*. That gap once
+  shipped: the writer omitted the end-record, round-trip tests stayed green,
+  and real XG rejected every file (it seeks from EOF through the trailer to
+  locate the manifest). So `XgFileWriterTests` asserts manifest sizes /
+  offsets / CRC32s **and** the end-record's fields against the raw written
+  bytes, plus `XgCorpus_EndRecord_*` pins the trailer decoding against
+  XG-authored files — keep these when refactoring the container writer. The
+  one smoke the suite cannot run: open a freshly written `.xgp` in real XG.
+* **Stream assignment is manifest-first; the heuristic fallback cannot tell
+  the manifest from a comment stream.** `XgDecompressor` names the four
+  sub-streams from the manifest and falls back to record-size heuristics
+  only for the old single-stream format and unvalidatable containers. Under
+  the fallback, a commentless multi-stream container parses with one phantom
+  garbage comment — the manifest (532-byte entries, matching no record size)
+  lands in the xgc slot. That bug shipped silently for every commentless
+  XG-authored file, masked because round-trips re-emitted the phantom as a
+  real `temp.xgc`; files written during that window still parse with the
+  garbage entry, which is correct for what their bytes say. The fallback's
+  limitation is accepted (robust over minimal) and pinned by
+  `Decompress_CorruptTrailer_FallsBackToRecordSizeHeuristics`; the corpus
+  guard is `XgCorpus_NoParsedCommentIsManifestShaped`.
 * **A centred cube above 1 is not exportable.** The record encodes cube
   ownership in the sign of a log2 field, so "centred, above 1" (auto-doubled
   money positions) has no representation without XG's auto-double
@@ -827,23 +844,6 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   rollout contexts are the one unrecoverable piece (level 1002 with
   `RolloutIndex = -1` is XG-legal per the `DoubleAnalysis.xgp` fixture,
   unverified for move panes).
-* **Fix `XgDecompressor.Decompress` misclassifying the manifest as the
-  comment stream.** The stream classifier assigns by record-size
-  heuristics, so when a file carries no real `temp.xgc`, the container's
-  trailing manifest (532-byte entries, matching no record size) falls
-  into the `xgc` slot — every commentless XG-authored file parses with
-  one phantom garbage comment in `XgFile.Comments` (and the JSON
-  `comments` array). Never dereferenced — such files' `CommentIndex`
-  fields are all `-1` — and masked by round-trips (the writer re-emits
-  the phantom as a real `temp.xgc`, so reparse equals parse), which is
-  why it shipped silently. Two slice tests
-  (`Slice_OfMatchCommentedSource_EmitsNoDanglingIndices`,
-  `Slice_ClearsMatchAndGameHeaderCommentIndices`) assert comment-table
-  emptiness at the model level because of it and name the bug; tighten
-  them to re-read assertions once fixed. Candidate approaches: locate
-  the manifest via the 36-byte end-record (how XG itself finds it),
-  exclude the last stream from classification, or shape-detect the
-  manifest — mind the old single-stream-format fallback either way.
 * **Investigate the three orphaned RTF comments in `match35041658.xg` /
   `MoneyTest.xg`.** Both fixtures parse with three real RTF comment-table
   entries referenced by nothing the model surfaces: every parsed

@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.IO.Hashing;
 
 namespace ConvertXgToJson_Lib.Parsing;
 
@@ -12,8 +13,14 @@ namespace ConvertXgToJson_Lib.Parsing;
 ///   temp.xgr  - M x 2184 bytes  (TRolloutContext records, may be absent)
 ///   temp.xgc  - variable         (RTF comments, may be absent)
 ///
-/// Real XG files emit streams in order: xg, xgr, xgi, xgc.
-/// Among the SaveRec-sized streams, xg always comes FIRST.
+/// Stream assignment prefers the container's own directory: the trailing
+/// 36-byte end-record (sought from EOF, exactly as real XG loads a file)
+/// locates the compressed manifest, whose entries name every data stream —
+/// see <see cref="XgContainerLayout"/> for both layouts. Assignment by name
+/// makes misclassification impossible by construction. When the trailer or
+/// manifest is absent or fails validation (the old single-stream format has
+/// neither; a corrupt container may fail either), assignment falls back to
+/// the historical record-size heuristics.
 /// </summary>
 internal static class XgDecompressor
 {
@@ -23,6 +30,107 @@ internal static class XgDecompressor
     public static XgDecompressedStreams Decompress(Stream compressedStream)
     {
         byte[] raw = ReadAllBytes(compressedStream);
+        return TryDecompressViaManifest(raw) ?? DecompressByRecordSizeHeuristics(raw);
+    }
+
+    /// <summary>
+    /// Manifest-directed decompression: reads the end-record from the tail of
+    /// <paramref name="raw"/> (whose start is the container's content start,
+    /// so all manifest offsets are directly usable as indices), validates it
+    /// against the body, then decompresses and assigns each data stream by its
+    /// manifest name. Returns <c>null</c> — deferring to the heuristic
+    /// fallback — when any structural check fails: unrecognized trailer
+    /// shape, manifest offset/size not tiling the body exactly, body CRC32
+    /// mismatch, undecompressible or wrongly-sized manifest, an entry that
+    /// does not parse, an unknown or duplicate inner-file name, a stream
+    /// whose decompressed length contradicts its entry, or a manifest that
+    /// never names temp.xg. Per-entry CRC32s are not re-verified: the body
+    /// CRC already covers every compressed byte they describe.
+    /// </summary>
+    private static XgDecompressedStreams? TryDecompressViaManifest(byte[] raw)
+    {
+        if (raw.Length <= XgContainerLayout.EndRecordSize)
+            return null;
+        if (!XgContainerLayout.TryReadEndRecord(
+                raw.AsSpan(raw.Length - XgContainerLayout.EndRecordSize), out var trailer))
+            return null;
+
+        int bodyLength = raw.Length - XgContainerLayout.EndRecordSize;
+        if ((long)trailer.ManifestOffset + trailer.ManifestCompressedSize != bodyLength)
+            return null;
+        if (trailer.DataStreamCount == 0)
+            return null;
+        if (Crc32.HashToUInt32(raw.AsSpan(0, bodyLength)) != trailer.BodyCrc32)
+            return null;
+
+        byte[]? manifest = TryDecompress(raw, (int)trailer.ManifestOffset);
+        if (manifest == null ||
+            manifest.Length != (long)trailer.DataStreamCount * XgContainerLayout.ManifestEntrySize)
+        {
+            return null;
+        }
+
+        byte[]? xgData = null;
+        byte[]? xgiData = null;
+        byte[]? xgrData = null;
+        byte[]? xgcData = null;
+
+        for (int pos = 0; pos < manifest.Length; pos += XgContainerLayout.ManifestEntrySize)
+        {
+            if (!XgContainerLayout.TryReadManifestEntry(
+                    manifest.AsSpan(pos, XgContainerLayout.ManifestEntrySize), out var entry))
+                return null;
+            if (entry.Offset >= trailer.ManifestOffset)
+                return null;
+
+            byte[]? data = TryDecompress(raw, (int)entry.Offset);
+            if (data == null || (uint)data.Length != entry.UncompressedSize)
+                return null;
+
+            switch (entry.Name.ToLowerInvariant())
+            {
+                case "temp.xg":
+                    if (xgData != null) return null;
+                    xgData = data;
+                    break;
+                case "temp.xgi":
+                    if (xgiData != null) return null;
+                    xgiData = data;
+                    break;
+                case "temp.xgr":
+                    if (xgrData != null) return null;
+                    xgrData = data;
+                    break;
+                case "temp.xgc":
+                    if (xgcData != null) return null;
+                    xgcData = data;
+                    break;
+                default:
+                    return null;
+            }
+        }
+
+        if (xgData == null)
+            return null;
+
+        return new XgDecompressedStreams(
+            ToStream(xgData),
+            ToStream(xgiData),
+            ToStream(xgrData),
+            ToStream(xgcData));
+    }
+
+    /// <summary>
+    /// Fallback assignment for payloads without a validatable manifest, by
+    /// record-size heuristics: SaveRec-sized streams are xg then xgi, a
+    /// rollout-sized stream is xgr, the first remaining stream is xgc. A
+    /// single-stream payload (the old XG format) has its xgi split off the
+    /// tail of xg. Note the known limitation that motivates the manifest
+    /// path: a manifest stream matches no record size, so in a commentless
+    /// multi-stream container it lands in the xgc slot.
+    /// </summary>
+    private static XgDecompressedStreams DecompressByRecordSizeHeuristics(byte[] raw)
+    {
         var streams = DecompressAllStreams(raw);
 
         byte[]? xgData = null;

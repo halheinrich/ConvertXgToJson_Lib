@@ -279,6 +279,12 @@ public class XgpSliceExportTests
         gh.CommentFooterGameIndex.Should().Be(-1);
         sliced.Comments.Should().BeEmpty(
             "only decision-record comments are carried, and no decision record references one");
+
+        // And through the container: a written slice with no comments emits
+        // no temp.xgc, and the re-read table stays empty.
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 1, moveNumber: 1, isCube: false));
+        XgFileReader.ReadStream(ms).Comments.Should().BeEmpty(
+            "the commentless slice must re-read with an empty comment table");
     }
 
     [Fact]
@@ -291,21 +297,14 @@ public class XgpSliceExportTests
         srcMh.CommentHeaderMatchIndex.Should().Be(0, "fixture precondition: before-session comment");
         srcMh.CommentFooterMatchIndex.Should().Be(1, "fixture precondition: after-session comment");
 
-        // Model level: nothing references a comment, so the rebuilt table
-        // is empty. (Asserted here rather than on the re-read below: the
-        // reader misclassifies the container manifest as a comment stream
-        // when no real temp.xgc exists — a pre-existing read-side bug that
-        // afflicts every commentless XG-authored file alike.)
-        XgpExporter.ToXgFileSlice(source, game: 1, moveNumber: 1, isCube: false)
-            .Comments.Should().BeEmpty(
-                "this fixture's decision records carry no comments, so the rebuilt table is empty");
-
         using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 1, moveNumber: 1, isCube: false));
         var sliced = XgFileReader.ReadStream(ms);
 
         var mh = (MatchHeaderRecord)sliced.Records[0];
         mh.CommentHeaderMatchIndex.Should().Be(-1, "match-level comments are not carried in a slice");
         mh.CommentFooterMatchIndex.Should().Be(-1);
+        sliced.Comments.Should().BeEmpty(
+            "this fixture's decision records carry no comments, so the re-read table is empty");
     }
 
     [Fact]
