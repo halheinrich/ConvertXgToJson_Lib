@@ -44,8 +44,9 @@ namespace ConvertXgToJson_Lib;
 /// decision is therefore visible to our own iterator (exactly one decision)
 /// and shows its analysis in XG without re-analyzing.
 /// An optional <see cref="XgpSliceOptions"/> overrides the player names
-/// (anonymized export); every other header field still passes through
-/// verbatim.
+/// (anonymized export) — by header slot or by decision role, resolved
+/// internally from the sliced decision's <c>ActivePlayer</c>; every other
+/// header field still passes through verbatim.
 /// </para>
 ///
 /// <para>
@@ -198,7 +199,9 @@ public static class XgpExporter
 
     /// <summary>
     /// Slice export with <paramref name="options"/> applied: the player-name
-    /// header fields can be overridden (see <see cref="XgpSliceOptions"/>);
+    /// header fields can be overridden, by header slot or by decision role
+    /// (see <see cref="XgpSliceOptions"/> — a slice always defines roles,
+    /// the located decision's <c>ActivePlayer</c> naming the on-roll slot);
     /// every other header field is still copied verbatim.
     /// </summary>
     /// <param name="options">Slice options; the default instance changes nothing.</param>
@@ -338,6 +341,12 @@ public static class XgpExporter
     /// (no record selection, no comment clearing, no rollout remapping);
     /// the only rewrite is the match header's player-name fields — an
     /// options instance with no overrides re-emits the source unchanged.
+    /// Role-based overrides apply when the source's decision records
+    /// define roles — every move/cube record sharing one
+    /// <c>ActivePlayer</c> sign, true for every single-decision
+    /// <c>.xgp</c>; a multi-decision source (a whole <c>.xg</c> match) has
+    /// no file-wide roles and uses the slot-based names (see
+    /// <see cref="XgpSliceOptions"/>).
     /// For callers that already hold the finished file shape, typically a
     /// parsed single-position <c>.xgp</c> being passed along anonymized;
     /// callers extracting one decision from a match use the slice surface
@@ -349,6 +358,10 @@ public static class XgpExporter
     /// <exception cref="ArgumentException">
     /// Thrown when <paramref name="source"/> does not begin with a
     /// <see cref="MatchHeaderRecord"/>.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// Thrown when <paramref name="options"/> sets a role-based name with
+    /// no slot-based fallback and the source's roles are not determinable.
     /// </exception>
     public static void Write(XgFile source, XgpSliceOptions options, Stream output)
     {
@@ -396,8 +409,10 @@ public static class XgpExporter
     /// remapped, and the decision records' comments carried into a fresh
     /// dense comment table (indices remapped the same way).
     /// <paramref name="options"/> may override the player names (both
-    /// twins per player); null or the default instance changes nothing.
-    /// Internal so tests can assert on records directly.
+    /// twins per player), by slot or by role — role names resolve against
+    /// the located decision's <c>ActivePlayer</c> via
+    /// <see cref="ResolveNameOverrides"/>; null or the default instance
+    /// changes nothing. Internal so tests can assert on records directly.
     /// </summary>
     internal static XgFile ToXgFileSlice(
         XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions? options = null)
@@ -407,10 +422,22 @@ public static class XgpExporter
                 "Slice source must begin with a MatchHeaderRecord (a parsed .xg/.xgp file always does).",
                 nameof(source));
 
-        var mh = CopyMatchHeader(
-            sourceMh, options?.Player1Name, options?.Player2Name, clearCommentIndices: true);
-
         var (gh, cube, move) = LocateDecision(source, game, moveNumber, isCube);
+
+        // Resolve role-based name overrides against the located decision —
+        // the single decision defines the roles, so its record(s) carry the
+        // deciding ActivePlayer sign (a play's same-turn cube pane shares
+        // the move's) — before the header copy, which stays slot-dumb.
+        string? player1Override = null;
+        string? player2Override = null;
+        if (options is not null)
+        {
+            var decisionRecords = new List<SaveRecord>(capacity: 2);
+            if (cube is not null) decisionRecords.Add(cube);
+            if (move is not null) decisionRecords.Add(move);
+            (player1Override, player2Override) = ResolveNameOverrides(options, decisionRecords);
+        }
+        var mh = CopyMatchHeader(sourceMh, player1Override, player2Override, clearCommentIndices: true);
 
         // Carry only the rollout contexts the sliced records reference,
         // in first-appearance order, and remap indices into the new table.
@@ -632,6 +659,66 @@ public static class XgpExporter
     };
 
     /// <summary>
+    /// Resolves an options instance's two naming axes into the slot-based
+    /// (player 1, player 2) override pair <see cref="CopyMatchHeader"/>
+    /// takes — the header copy stays a dumb slot mechanism. Role names
+    /// (<see cref="XgpSliceOptions.OnRollName"/> /
+    /// <see cref="XgpSliceOptions.OpponentName"/>) name the decision-maker's
+    /// slot. Roles are determinable iff <paramref name="records"/> holds at
+    /// least one move/cube record and all of them share one
+    /// <c>ActivePlayer</c> sign (<c>&gt;= 0</c> is player 1 — the
+    /// <see cref="MatchContext.PlayerName"/> convention; a cube record's
+    /// <c>ActivePlayer</c> is the doubler, so a take decision is anchored
+    /// to the doubler with no special-casing). When determinable, a role
+    /// name outranks the same slot's slot name; when not (a multi-decision
+    /// whole-<c>.xg</c> copy has no file-wide roles), slot names apply and
+    /// role names are deliberately unused — unless no slot name exists to
+    /// fall back on, which throws rather than silently guessing a slot.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    /// Thrown when a role-based name is set, no slot-based fallback is, and
+    /// roles are not determinable from <paramref name="records"/>.
+    /// </exception>
+    internal static (string? Player1, string? Player2) ResolveNameOverrides(
+        XgpSliceOptions options, IEnumerable<SaveRecord> records)
+    {
+        if (options.OnRollName is null && options.OpponentName is null)
+            return (options.Player1Name, options.Player2Name);
+
+        bool sawPlayer1 = false;
+        bool sawPlayer2 = false;
+        foreach (var record in records)
+        {
+            int? activePlayer = record switch
+            {
+                CubeRecord c => c.ActivePlayer,
+                MoveRecord m => m.ActivePlayer,
+                _ => null,
+            };
+            if (activePlayer is null)
+                continue;
+            if (activePlayer >= 0) sawPlayer1 = true;
+            else sawPlayer2 = true;
+        }
+
+        if (sawPlayer1 == sawPlayer2) // no decision records, or both signs
+        {
+            if (options.Player1Name is null && options.Player2Name is null)
+                throw new NotSupportedException(
+                    "Role-based name overrides (OnRollName/OpponentName) need a source whose " +
+                    "records define a single on-roll player — every move/cube record sharing " +
+                    "one ActivePlayer sign. This source does not (a multi-decision match has " +
+                    "no file-wide roles); set Player1Name/Player2Name as the slot fallback, " +
+                    "as the Anonymized preset does.");
+            return (options.Player1Name, options.Player2Name);
+        }
+
+        return sawPlayer1
+            ? (options.OnRollName ?? options.Player1Name, options.OpponentName ?? options.Player2Name)
+            : (options.OpponentName ?? options.Player1Name, options.OnRollName ?? options.Player2Name);
+    }
+
+    /// <summary>
     /// The single field-for-field copy of <see cref="MatchHeaderRecord"/>,
     /// with two rewrite knobs. A non-null player name replaces that
     /// player's Unicode field <b>and</b> its ANSI twin; null keeps both of
@@ -732,9 +819,12 @@ public static class XgpExporter
     /// model shared wholesale — header, rollout table, and comment table
     /// by reference, records in order — with only the match header
     /// replaced through <see cref="CopyMatchHeader"/> when an override is
-    /// present. With no overrides the source itself is returned (the
-    /// model is init-only throughout, so sharing is safe). Internal so
-    /// tests can assert on records directly.
+    /// present. Role-based names resolve against the whole record stream
+    /// via <see cref="ResolveNameOverrides"/> first (determinable for a
+    /// single-decision <c>.xgp</c>; a whole <c>.xg</c> match falls back to
+    /// slot names). When nothing resolves to an override the source itself
+    /// is returned (the model is init-only throughout, so sharing is
+    /// safe). Internal so tests can assert on records directly.
     /// </summary>
     internal static XgFile ToXgFileCopy(XgFile source, XgpSliceOptions options)
     {
@@ -743,13 +833,14 @@ public static class XgpExporter
                 "Copy source must begin with a MatchHeaderRecord (a parsed .xg/.xgp file always does).",
                 nameof(source));
 
-        if (options.Player1Name is null && options.Player2Name is null)
+        var (player1Override, player2Override) = ResolveNameOverrides(options, source.Records);
+        if (player1Override is null && player2Override is null)
             return source;
 
         var records = new List<SaveRecord>(source.Records)
         {
             [0] = CopyMatchHeader(
-                mh, options.Player1Name, options.Player2Name, clearCommentIndices: false),
+                mh, player1Override, player2Override, clearCommentIndices: false),
         };
         return new XgFile
         {

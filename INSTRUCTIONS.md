@@ -227,14 +227,25 @@ Slice entry points also accept the decision's `XgDecisionId` directly
 already resolved the source from it; the parameter is
 `XgDecisionId`-typed so routing an `XgpDecisionId` there is a compile
 error, and the Xgp-vs-Xg routing stays with the caller). An optional
-`XgpSliceOptions` overrides the player names: each non-null override
-rewrites that player's Unicode field *and* its ANSI twin (writer
-truncation 128 chars / 40 bytes; non-Latin1 characters degrade to `?`
-in the twin via the Latin1 replacement fallback), while every other
-header field — Location provenance included — still passes through
-verbatim. `XgpSliceOptions.Anonymized` ("Player 1" / "Player 2") is the
-SSOT for what anonymized export means; overrides validate non-empty at
-init, so an invalid options instance is unrepresentable.
+`XgpSliceOptions` overrides the player names on two axes: the
+slot-based pair (`Player1Name`/`Player2Name`) renames by header slot;
+the role-based pair (`OnRollName`/`OpponentName`) renames by decision
+role, resolved by the exporter from the exported records' `ActivePlayer`
+sign (`>= 0` is player 1 — the `MatchContext.PlayerName` convention; a
+cube record's `ActivePlayer` is the doubler, so a take decision anchors
+to the doubler with no special-casing). Roles are determinable iff the
+exported records hold at least one move/cube record and all share one
+sign — always true for a slice (one located decision); when
+determinable, role names outrank the same slot's slot name; each
+resolved override rewrites that player's Unicode field *and* its ANSI
+twin (writer truncation 128 chars / 40 bytes; non-Latin1 characters
+degrade to `?` in the twin via the Latin1 replacement fallback), while
+every other header field — Location provenance included — still passes
+through verbatim. `XgpSliceOptions.Anonymized` carries both pairs
+("On-roll" / "Opponent" where a single decision defines roles,
+"Player 1" / "Player 2" where roles are undefined) and is the SSOT for
+what anonymized export means; overrides validate non-empty at init, so
+an invalid options instance is unrepresentable.
 
 **Anonymize-copy** (`Write(XgFile, XgpSliceOptions, …)`) — the third
 surface: a whole-file re-emit for callers that already hold the finished
@@ -243,7 +254,14 @@ anonymized). Every record, rollout context, and comment travels verbatim
 — no record selection, no comment or rollout remapping; the only rewrite
 is the match header's name fields through the same `CopyMatchHeader`
 copy the slice path uses (with its comment-index clearing off). With no
-overrides it is a plain `XgFileWriter` re-emit, byte-for-byte.
+overrides it is a plain `XgFileWriter` re-emit, byte-for-byte. Role
+names apply when the whole record stream determines roles — true for
+every single-decision `.xgp` source; a multi-decision copy (a whole
+`.xg` match) has per-move roles only, so slot names apply and role
+names are deliberately unused — unless the options carry no slot
+fallback at all, which throws `NotSupportedException` rather than
+silently guessing a slot (precedent: the centred-cube-above-1 throw).
+The `Anonymized` preset carries both pairs, so it never throws.
 
 **Iterator visibility differs by path, deliberately.** A clean export is
 **XG-import-only**: unanalyzed, so this library's own iterator yields
@@ -580,13 +598,26 @@ public static class XgpExporter
 
 public sealed record XgpSliceOptions
 {
-    // null = keep the source name; non-empty enforced at init (an invalid
-    // instance is unrepresentable). Each override rewrites that player's
-    // Unicode name field and its ANSI twin.
+    // null = no override; non-empty enforced at init (an invalid
+    // instance is unrepresentable). Each resolved override rewrites that
+    // player's Unicode name field and its ANSI twin.
+
+    // Slot-based pair: renames by header slot.
     public string? Player1Name { get; init; }
     public string? Player2Name { get; init; }
 
-    // SSOT for anonymized export: "Player 1" / "Player 2".
+    // Role-based pair: renames by decision role — the exporter resolves
+    // the decision-maker's slot from ActivePlayer sign. Outranks the
+    // slot names when roles are determinable; ignored (slot fallback)
+    // on a multi-decision copy; role-only options against a
+    // roles-undeterminable source throw NotSupportedException.
+    public string? OnRollName   { get; init; }
+    public string? OpponentName { get; init; }
+
+    // SSOT for anonymized export, both pairs: "On-roll" / "Opponent"
+    // where a single decision defines roles (every slice, every
+    // single-decision .xgp copy), "Player 1" / "Player 2" where roles
+    // are undefined (whole-.xg copy). Never throws.
     public static XgpSliceOptions Anonymized { get; }
 }
 
@@ -751,6 +782,19 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `Copy_WithSourceNames_IsByteIdenticalToXgFileWriterOutput`): overrides
   equal to the source names must produce a byte-identical file, so any
   dropped or transposed field fails them.
+* **Role-based names resolve to slots *before* `CopyMatchHeader`.**
+  `ResolveNameOverrides(options, records)` turns the role pair
+  (`OnRollName`/`OpponentName`) into the slot pair the header copy takes;
+  `CopyMatchHeader` must stay a dumb slot mechanism — do not teach it
+  roles. Roles are determinable ⟺ the exported records hold at least one
+  move/cube record and **all** share one `ActivePlayer` sign (`>= 0` is
+  player 1; a cube record's `ActivePlayer` is the doubler) — true by
+  construction for every slice and every single-decision `.xgp` copy
+  source. A whole-`.xg` copy deliberately **ignores** role names when a
+  slot fallback exists (user spec — roles are per-move there, undefined
+  file-wide — not an omission); role names with **no** slot fallback
+  against a roles-undeterminable source throw `NotSupportedException`
+  rather than silently guess a slot.
 * **An interior empty comment line is a real (empty) comment.**
   `temp.xgc` is CRLF-terminated lines joined by `CommentIndex`;
   `CommentWriter` writes an empty comment as a bare CRLF, so

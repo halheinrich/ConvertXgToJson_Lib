@@ -390,20 +390,23 @@ public class XgpSliceExportTests
             source, game: 1, moveNumber: 22, isCube: false, XgpSliceOptions.Anonymized));
         var sliced = XgFileReader.ReadStream(ms);
 
+        // A slice defines roles (one located decision), so the Anonymized
+        // preset renames by role: "On-roll" on the decision-maker's slot.
+        bool onRollIsPlayer1 = original.Descriptive.OnRollName == srcMh.Player1;
         var mh = (MatchHeaderRecord)sliced.Records[0];
-        mh.Player1.Should().Be("Player 1");
-        mh.Player2.Should().Be("Player 2");
-        mh.Player1Ansi.Should().Be("Player 1", "the XG1-compat twin is rewritten in step");
-        mh.Player2Ansi.Should().Be("Player 2");
+        mh.Player1.Should().Be(onRollIsPlayer1 ? "On-roll" : "Opponent");
+        mh.Player2.Should().Be(onRollIsPlayer1 ? "Opponent" : "On-roll");
+        mh.Player1Ansi.Should().Be(mh.Player1, "the XG1-compat twin is rewritten in step");
+        mh.Player2Ansi.Should().Be(mh.Player2);
 
         var info = XgDecisionIterator.ExtractMatchInfo(sliced);
-        info!.Player1.Should().Be("Player 1");
-        info.Player2.Should().Be("Player 2");
+        info!.Player1.Should().Be(mh.Player1);
+        info.Player2.Should().Be(mh.Player2);
 
         var reRead = XgDecisionIterator.IterateDiagramRequests(sliced, "slice.xgp").Single();
-        bool onRollIsPlayer1 = original.Descriptive.OnRollName == srcMh.Player1;
-        reRead.Descriptive.OnRollName.Should().Be(onRollIsPlayer1 ? "Player 1" : "Player 2");
-        reRead.Descriptive.OpponentName.Should().Be(onRollIsPlayer1 ? "Player 2" : "Player 1");
+        reRead.Descriptive.OnRollName.Should().Be("On-roll",
+            "role naming makes the rename slot-agnostic at the consumer surface");
+        reRead.Descriptive.OpponentName.Should().Be("Opponent");
         reRead.Xgid.Should().Be(original.Xgid, "names never participate in the XGID");
     }
 
@@ -501,6 +504,207 @@ public class XgpSliceExportTests
     }
 
     // -----------------------------------------------------------------------
+    //  Role-based name overrides (OnRollName / OpponentName) — renaming by
+    //  decision role rather than header slot. The exporter resolves the
+    //  role pair to the slot pair from the exported records' ActivePlayer
+    //  sign (>= 0 is player 1, the MatchContext.PlayerName convention; a
+    //  cube record's ActivePlayer is the doubler). Every slice defines
+    //  roles — a single located decision — as does a copy of a
+    //  single-decision .xgp; a whole-.xg copy does not and keeps slot names.
+    // -----------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(1, "On-roll", "Opponent")]
+    [InlineData(-1, "Opponent", "On-roll")]
+    public void AnonymizedPlaySlice_NamesSlotsByRole(
+        int activePlayer, string expectedPlayer1, string expectedPlayer2)
+    {
+        var move = new MoveRecord
+        {
+            EntryType = RecordType.Move,
+            ActivePlayer = activePlayer,
+            Dice = [3, 1],
+        };
+
+        var sliced = XgpExporter.ToXgFileSlice(SyntheticSource(cube: null, move, rolloutCount: 0),
+            game: 1, moveNumber: 1, isCube: false, XgpSliceOptions.Anonymized);
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.Player1.Should().Be(expectedPlayer1, "the on-roll slot follows the ActivePlayer sign");
+        mh.Player1Ansi.Should().Be(expectedPlayer1, "the XG1-compat twin is rewritten in step");
+        mh.Player2.Should().Be(expectedPlayer2);
+        mh.Player2Ansi.Should().Be(expectedPlayer2);
+    }
+
+    [Fact]
+    public void AnonymizedCubeSlice_AnchorsOnRollToTheDoubler()
+    {
+        var cube = new CubeRecord { EntryType = RecordType.Cube, ActivePlayer = -1 };
+
+        var sliced = XgpExporter.ToXgFileSlice(SyntheticSource(cube, move: null, rolloutCount: 0),
+            game: 1, moveNumber: 1, isCube: true, XgpSliceOptions.Anonymized);
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.Player2.Should().Be("On-roll",
+            "a cube record's ActivePlayer is the doubler — the decision-maker; the taker is the opponent");
+        mh.Player2Ansi.Should().Be("On-roll");
+        mh.Player1.Should().Be("Opponent");
+        mh.Player1Ansi.Should().Be("Opponent");
+    }
+
+    [Fact]
+    public void AnonymizedSlice_EndToEnd_SurfacesRoleNamesToTheIterator()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(
+            source, game: 1, moveNumber: 22, isCube: false, XgpSliceOptions.Anonymized));
+        var reRead = XgDecisionIterator
+            .IterateDiagramRequests(XgFileReader.ReadStream(ms), "slice.xgp")
+            .Single();
+
+        reRead.Descriptive.OnRollName.Should().Be("On-roll",
+            "whichever slot is on roll, the role name must land on it");
+        reRead.Descriptive.OpponentName.Should().Be("Opponent");
+    }
+
+    [Fact]
+    public void AnonymizedCopy_OfSingleDecisionCubeXgp_NamesRoles()
+    {
+        // XG's own save of the rolled-out cube, made with player 2 on roll:
+        // the copy path must resolve roles too, and this fixture pins the
+        // non-trivial slot mapping (On-roll lands on slot 2).
+        var source = XgFileReader.ReadFile(Fixture("match35253054_2_37.xgp"));
+        source.Records.OfType<CubeRecord>().Single().ActivePlayer.Should().BeNegative(
+            "fixture precondition: player 2 is the doubler in this save");
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, XgpSliceOptions.Anonymized));
+        var mh = (MatchHeaderRecord)XgFileReader.ReadStream(ms).Records[0];
+
+        mh.Player2.Should().Be("On-roll");
+        mh.Player2Ansi.Should().Be("On-roll");
+        mh.Player1.Should().Be("Opponent");
+        mh.Player1Ansi.Should().Be("Opponent");
+    }
+
+    [Fact]
+    public void AnonymizedCopy_OfSingleDecisionPlayXgp_NamesRoles()
+    {
+        // A play-shaped .xgp: cube pane + move record sharing the turn's
+        // ActivePlayer, so roles are determinable on the copy path.
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064_1_22.xgp"));
+        bool onRollIsPlayer1 =
+            source.Records.OfType<MoveRecord>().Single().ActivePlayer >= 0;
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, XgpSliceOptions.Anonymized));
+        var mh = (MatchHeaderRecord)XgFileReader.ReadStream(ms).Records[0];
+
+        mh.Player1.Should().Be(onRollIsPlayer1 ? "On-roll" : "Opponent");
+        mh.Player2.Should().Be(onRollIsPlayer1 ? "Opponent" : "On-roll");
+    }
+
+    [Fact]
+    public void AnonymizedCopy_OfWholeXgMatch_KeepsSlotNames()
+    {
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+        source.Records
+            .Select(r => r switch
+            {
+                CubeRecord c => (int?)c.ActivePlayer,
+                MoveRecord m => m.ActivePlayer,
+                _ => null,
+            })
+            .Where(a => a.HasValue)
+            .Select(a => a!.Value >= 0)
+            .Distinct()
+            .Should().HaveCount(2,
+                "fixture precondition: both players act in a full match, so roles are undefined file-wide");
+
+        using var ms = new MemoryStream(XgpExporter.ToBytes(source, XgpSliceOptions.Anonymized));
+        var mh = (MatchHeaderRecord)XgFileReader.ReadStream(ms).Records[0];
+
+        mh.Player1.Should().Be("Player 1",
+            "a whole-match copy has no file-wide on-roll player; the preset's slot fallback applies");
+        mh.Player2.Should().Be("Player 2");
+        mh.Player1Ansi.Should().Be("Player 1");
+        mh.Player2Ansi.Should().Be("Player 2");
+    }
+
+    [Fact]
+    public void RoleOnlyOptions_AgainstMultiDecisionSource_Throw()
+    {
+        // No slot fallback and no file-wide on-roll player: guessing which
+        // slot "On-roll" means would be silent nonsense, so the exporter
+        // refuses (precedent: the centred-cube-above-1 throw).
+        var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
+
+        var act1 = () => XgpExporter.ToBytes(source, new XgpSliceOptions { OnRollName = "On-roll" });
+        act1.Should().Throw<NotSupportedException>().WithMessage("*ActivePlayer*");
+
+        var act2 = () => XgpExporter.ToBytes(source, new XgpSliceOptions { OpponentName = "Opponent" });
+        act2.Should().Throw<NotSupportedException>().WithMessage("*ActivePlayer*");
+    }
+
+    [Fact]
+    public void RoleNames_WinOverSlotNames_WhenRolesAreDeterminable()
+    {
+        var move = new MoveRecord { EntryType = RecordType.Move, ActivePlayer = 1, Dice = [3, 1] };
+        var options = new XgpSliceOptions
+        {
+            OnRollName = "Hero",
+            OpponentName = "Villain",
+            Player1Name = "Slot 1",
+            Player2Name = "Slot 2",
+        };
+
+        var sliced = XgpExporter.ToXgFileSlice(SyntheticSource(cube: null, move, rolloutCount: 0),
+            game: 1, moveNumber: 1, isCube: false, options);
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.Player1.Should().Be("Hero", "a role name outranks the same slot's slot name");
+        mh.Player2.Should().Be("Villain");
+    }
+
+    [Fact]
+    public void PartialRoleOverride_KeepsTheOtherSlotsSourceName()
+    {
+        var records = new List<SaveRecord>
+        {
+            new MatchHeaderRecord
+            {
+                EntryType = RecordType.HeaderMatch,
+                MatchLength = 7,
+                Player1 = "Alice", Player1Ansi = "Alice",
+                Player2 = "Bob", Player2Ansi = "Bob",
+            },
+            new GameHeaderRecord { EntryType = RecordType.HeaderGame },
+            new MoveRecord { EntryType = RecordType.Move, ActivePlayer = -1, Dice = [3, 1] },
+        };
+
+        var sliced = XgpExporter.ToXgFileSlice(new XgFile { Records = records },
+            game: 1, moveNumber: 1, isCube: false, new XgpSliceOptions { OnRollName = "Anon" });
+
+        var mh = (MatchHeaderRecord)sliced.Records[0];
+        mh.Player2.Should().Be("Anon", "player 2 is on roll here");
+        mh.Player2Ansi.Should().Be("Anon");
+        mh.Player1.Should().Be("Alice",
+            "with no OpponentName and no slot fallback, the other slot keeps its source name");
+        mh.Player1Ansi.Should().Be("Alice");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void SliceOptions_WhitespaceRoleOverride_ThrowsAtConstruction(string bad)
+    {
+        var act1 = () => new XgpSliceOptions { OnRollName = bad };
+        act1.Should().Throw<ArgumentException>(
+            "null means no role override; an explicit empty name is always a caller bug");
+        var act2 = () => new XgpSliceOptions { OpponentName = bad };
+        act2.Should().Throw<ArgumentException>();
+    }
+
+    // -----------------------------------------------------------------------
     //  Anonymize-copy (whole-file re-emit with name overrides) — not a
     //  slice: every record, rollout context, and comment travels verbatim;
     //  only the match header's name fields are rewritten.
@@ -542,11 +746,15 @@ public class XgpSliceExportTests
         using var ms = new MemoryStream(XgpExporter.ToBytes(source, XgpSliceOptions.Anonymized));
         var copy = XgFileReader.ReadStream(ms);
 
+        // A single-decision .xgp defines roles, so the Anonymized preset
+        // renames by role; player 2 is the doubler in this fixture (the
+        // slot mapping itself is pinned in
+        // AnonymizedCopy_OfSingleDecisionCubeXgp_NamesRoles).
         var mh = (MatchHeaderRecord)copy.Records[0];
-        mh.Player1.Should().Be("Player 1");
-        mh.Player2.Should().Be("Player 2");
-        mh.Player1Ansi.Should().Be("Player 1");
-        mh.Player2Ansi.Should().Be("Player 2");
+        mh.Player1.Should().Be("Opponent");
+        mh.Player2.Should().Be("On-roll");
+        mh.Player1Ansi.Should().Be("Opponent");
+        mh.Player2Ansi.Should().Be("On-roll");
         mh.Location.Should().Be(srcMh.Location, "provenance survives an anonymize-copy");
         copy.Records.Count.Should().Be(source.Records.Count, "a copy selects nothing out");
         copy.Rollouts.Count.Should().Be(source.Rollouts.Count);
@@ -577,7 +785,13 @@ public class XgpSliceExportTests
                     Player2 = "Bob", Player2Ansi = "Bob",
                 },
                 new GameHeaderRecord { EntryType = RecordType.HeaderGame },
-                new MoveRecord { EntryType = RecordType.Move, Dice = [3, 1], CommentIndex = 0 },
+                new MoveRecord
+                {
+                    EntryType = RecordType.Move,
+                    ActivePlayer = 1,
+                    Dice = [3, 1],
+                    CommentIndex = 0,
+                },
             ],
             Comments = ["anonymize copy comment"],
         };
@@ -585,8 +799,9 @@ public class XgpSliceExportTests
         using var ms = new MemoryStream(XgpExporter.ToBytes(source, XgpSliceOptions.Anonymized));
         var copy = XgFileReader.ReadStream(ms);
 
-        ((MatchHeaderRecord)copy.Records[0]).Player1.Should().Be("Player 1");
-        ((MatchHeaderRecord)copy.Records[0]).Player2.Should().Be("Player 2");
+        ((MatchHeaderRecord)copy.Records[0]).Player1.Should().Be("On-roll",
+            "a single-decision source defines roles, so the preset's role names apply");
+        ((MatchHeaderRecord)copy.Records[0]).Player2.Should().Be("Opponent");
         copy.Comments.Should().Equal("anonymize copy comment");
         copy.Records.OfType<MoveRecord>().Single().CommentIndex.Should().Be(0,
             "the copy path keeps comment indices verbatim — remapping is slice behavior");
