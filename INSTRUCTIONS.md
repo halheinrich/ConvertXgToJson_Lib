@@ -818,6 +818,25 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `>= 99999 ? 0` checks in `XgMatchInfo.From` and `MatchContext`. One
   consequence for consumers: `MatchHeaderRecord.IsMoneyMatch` is *not*
   the raw XG byte — it is that byte OR'd with Galaxy detection.
+* **`temp.xgc` may carry unreferenced leftovers — orphaned comment-table
+  entries are format reality, not a parse failure.** XG saves by bundling
+  its working-directory temp files wholesale, so a stale comment table
+  from an earlier commented session rides into unrelated saves.
+  `match35041658.xg` and `MoneyTest.xg` each parse with three real RTF
+  comment-table entries (two URLs + XG rollout-settings text, same
+  Japanese-locale RTF — *identical* across the two different matches)
+  referenced by nothing: every parsed `CommentIndex` / header-footer
+  comment index in both files is `-1`. **Never assert comment-table
+  emptiness for a "commentless" match file, and don't "fix" orphans** —
+  whole-file copy preserves them (they're in the source bytes), slice
+  drops them (only *referenced* comments are carried); both are correct.
+  The footer-record hypothesis (an undecoded comment-index field on
+  `GameFooterRecord` / `MatchFooterRecord`) was **refuted** by a
+  byte-level sweep: footer records contain no −1-defaulted dwords at any
+  common offset, so there is no hidden comment-index field there. The only
+  offsets the sweep lit up were the already-parsed `RolloutIndices` (the
+  rolled-out move referencing contexts 0–3) and cube `Taken` fields —
+  never a comment reference.
 
 ## Subproject-internal next steps
 
@@ -844,12 +863,3 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   rollout contexts are the one unrecoverable piece (level 1002 with
   `RolloutIndex = -1` is XG-legal per the `DoubleAnalysis.xgp` fixture,
   unverified for move panes).
-* **Investigate the three orphaned RTF comments in `match35041658.xg` /
-  `MoneyTest.xg`.** Both fixtures parse with three real RTF comment-table
-  entries referenced by nothing the model surfaces: every parsed
-  `CommentIndex` / header-footer comment index in them is `-1`. Possibly
-  comment-index fields on the footer records (`GameFooterRecord` /
-  `MatchFooterRecord`) that the parser doesn't currently decode — if so,
-  a round-trip silently drops the *references* while keeping the
-  comments. Probe the raw footer bytes against the TSaveRec layout to
-  confirm, then decide whether to parse and carry them.
