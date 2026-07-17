@@ -509,7 +509,6 @@ public static class XgDecisionIterator
                 DepthClass = candidateDepthClass,
                 Equity = equity,
                 EquityLoss = bestEquity - equity,
-                IsUserPlay = k == userPlayIndex,
                 WinPct = eval.WinSingle,
                 WinGammonPct = eval.WinGammon,
                 WinBgPct = eval.WinBackgammon,
