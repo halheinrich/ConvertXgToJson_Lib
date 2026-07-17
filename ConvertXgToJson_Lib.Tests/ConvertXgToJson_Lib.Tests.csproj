@@ -1,12 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>14.0</LangVersion>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <RootNamespace>ConvertXgToJson_Lib.Tests</RootNamespace>
     <AssemblyName>ConvertXgToJson_Lib.Tests</AssemblyName>
+    <!-- Tests keep warnings-as-errors (Directory.Build.props) but opt out of
+         doc-file generation: test method names are the documentation, and
+         CS1591 on every [Fact] would demand boilerplate docs. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit" />

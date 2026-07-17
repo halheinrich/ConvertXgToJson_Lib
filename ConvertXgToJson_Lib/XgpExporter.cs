@@ -183,7 +183,13 @@ public static class XgpExporter
     /// the located decision's <c>ActivePlayer</c> naming the on-roll slot);
     /// every other header field is still copied verbatim.
     /// </summary>
+    /// <param name="source">The parsed source file (typically a full <c>.xg</c> match).</param>
+    /// <param name="game">1-based game number within the source.</param>
+    /// <param name="moveNumber">1-based move number within the game.</param>
+    /// <param name="isCube"><see langword="true"/> for the cube decision at
+    /// that move number; <see langword="false"/> for the checker play.</param>
     /// <param name="options">Slice options; the default instance changes nothing.</param>
+    /// <param name="output">Destination stream; written sequentially, left open.</param>
     /// <inheritdoc cref="Write(XgFile, int, int, bool, Stream)"/>
     public static void Write(
         XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, Stream output)
@@ -241,6 +247,8 @@ public static class XgpExporter
     /// Slice export addressed by an <see cref="XgDecisionId"/> with
     /// <paramref name="options"/> applied, serialized to <c>.xgp</c> bytes.
     /// </summary>
+    /// <param name="source">The parsed source file the Id's coordinates address.</param>
+    /// <param name="id">The decision's iterator-stamped Id.</param>
     /// <param name="options">Slice options; the default instance changes nothing.</param>
     /// <inheritdoc cref="ToBytes(XgFile, XgDecisionId)"/>
     public static byte[] ToBytes(XgFile source, XgDecisionId id, XgpSliceOptions options)
@@ -253,6 +261,8 @@ public static class XgpExporter
     /// Convenience overload: writes the decision at <paramref name="id"/>'s
     /// coordinates to <paramref name="path"/>, overwriting any existing file.
     /// </summary>
+    /// <param name="source">The parsed source file the Id's coordinates address.</param>
+    /// <param name="id">The decision's iterator-stamped Id.</param>
     /// <param name="path">Destination file path.</param>
     /// <inheritdoc cref="ToBytes(XgFile, XgDecisionId)"/>
     public static void WriteFile(XgFile source, XgDecisionId id, string path)
@@ -267,6 +277,9 @@ public static class XgpExporter
     /// coordinates to <paramref name="path"/> with
     /// <paramref name="options"/> applied, overwriting any existing file.
     /// </summary>
+    /// <param name="source">The parsed source file the Id's coordinates address.</param>
+    /// <param name="id">The decision's iterator-stamped Id.</param>
+    /// <param name="options">Slice options; the default instance changes nothing.</param>
     /// <param name="path">Destination file path.</param>
     /// <inheritdoc cref="ToBytes(XgFile, XgDecisionId, XgpSliceOptions)"/>
     public static void WriteFile(XgFile source, XgDecisionId id, XgpSliceOptions options, string path)

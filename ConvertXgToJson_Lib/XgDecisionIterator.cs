@@ -923,9 +923,9 @@ public static class XgDecisionIterator
     /// </para>
     ///
     /// <para>
-    /// Non-rollout branch: returns <see cref="LevelLabel"/>,
-    /// <see cref="LevelAbbreviation"/>, <see cref="LevelRank"/>, and the
-    /// <see cref="AnalysisDepthClass"/> for <paramref name="evalLevel"/>. The
+    /// Non-rollout branch: returns the <see cref="LevelInfo"/> projection —
+    /// label, abbreviation, rank, and
+    /// <see cref="AnalysisDepthClass"/> — for <paramref name="evalLevel"/>. The
     /// rank ordering is: N-ply → N (1..7), XG Roller family → 20–22, Book
     /// V1/V2 → 0, any unrecognised level → 0. The edge case is a "Rollout"
     /// sentinel (<c>short 100</c>) without a matching rollout context, which

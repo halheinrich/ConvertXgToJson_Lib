@@ -168,6 +168,19 @@ public static class XgFileReader
         await JsonSerializer.SerializeAsync(fs, file, options ?? XgJsonOptions.Default, cancellationToken);
     }
 
+    /// <summary>
+    /// Reads an <see cref="XgFile"/> back from a JSON export produced by
+    /// <see cref="ToJson"/> / <see cref="WriteJsonAsync"/> — the read half of
+    /// the JSON round-trip. Load-bearing: the JSON directory walks (this
+    /// library's internal one and XgFilter_Lib's) parse every export
+    /// through it.
+    /// </summary>
+    /// <param name="path">Full path to the .json export.</param>
+    /// <exception cref="InvalidDataException">
+    /// Thrown when the file deserializes to <see langword="null"/> (e.g. the
+    /// literal JSON <c>null</c>); malformed JSON throws
+    /// <see cref="JsonException"/> from the serializer instead.
+    /// </exception>
     public static XgFile ReadJson(string path)
     {
         string json = File.ReadAllText(path);
@@ -219,7 +232,7 @@ public static class XgFileReader
     }
 
     /// <summary>
-    /// Streaming overload of <see cref="ReadGameHeaders(string)"/>.
+    /// Fast path over the first zlib stream only.
     /// Yields one <see cref="XgGameInfo"/> per game in the file, populating
     /// <see cref="XgIteratorState.MatchInfo"/> before the first yield.
     /// To stop iteration early, the caller breaks out of the consuming
