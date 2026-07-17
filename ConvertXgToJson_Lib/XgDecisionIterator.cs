@@ -322,7 +322,8 @@ public static class XgDecisionIterator
     }
 
     // -----------------------------------------------------------------------
-    //  Public API — directories
+    //  Directory walks (internal — external consumers build their own walks
+    //  over EnumerateXgFormatFiles + Iterate, as XgFilter_Lib does)
     // -----------------------------------------------------------------------
 
     /// <summary>
@@ -338,7 +339,7 @@ public static class XgDecisionIterator
     /// <param name="callbacks">Optional skip predicates. Re-evaluated fresh per
     /// file — predicates are stateless from the producer's perspective, so a
     /// match-skip in one file has no effect on the next.</param>
-    public static IEnumerable<DecisionRow> IterateXgDirectory(
+    internal static IEnumerable<DecisionRow> IterateXgDirectory(
         string xgDir,
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null)
@@ -361,7 +362,7 @@ public static class XgDecisionIterator
     /// <param name="jsonDir">Directory containing .json files.</param>
     /// <param name="state">Optional read-only observer. See <see cref="Iterate"/>.</param>
     /// <param name="callbacks">Optional skip predicates. See <see cref="IterateXgDirectory"/>.</param>
-    public static IEnumerable<DecisionRow> IterateJsonDirectory(
+    internal static IEnumerable<DecisionRow> IterateJsonDirectory(
         string jsonDir,
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null)

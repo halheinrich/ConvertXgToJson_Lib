@@ -11,9 +11,6 @@ namespace ConvertXgToJson_Lib;
 /// Usage:
 ///   var xgFile = XgFileReader.ReadFile("mymatch.xg");
 ///   string json = XgFileReader.ToJson(xgFile);
-///
-/// Or in a single step:
-///   string json = XgFileReader.ReadFileAsJson("mymatch.xg");
 /// </summary>
 public static class XgFileReader
 {
@@ -159,13 +156,6 @@ public static class XgFileReader
         => JsonSerializer.Serialize(file, options ?? XgJsonOptions.Default);
 
     /// <summary>
-    /// Convenience method: reads a .XG file from disk and returns its JSON
-    /// representation in a single call.
-    /// </summary>
-    public static string ReadFileAsJson(string path, JsonSerializerOptions? options = null)
-        => ToJson(ReadFile(path), options);
-
-    /// <summary>
     /// Writes the JSON representation of an <see cref="XgFile"/> to a file.
     /// </summary>
     public static async Task WriteJsonAsync(
@@ -178,20 +168,6 @@ public static class XgFileReader
         await JsonSerializer.SerializeAsync(fs, file, options ?? XgJsonOptions.Default, cancellationToken);
     }
 
-    /// <summary>
-    /// Reads a .XG file from disk and writes its JSON representation directly
-    /// to <paramref name="outputPath"/> without buffering the entire JSON string
-    /// in memory – preferred for large files.
-    /// </summary>
-    public static async Task ReadFileToJsonFileAsync(
-        string inputPath,
-        string outputPath,
-        JsonSerializerOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        var xgFile = ReadFile(inputPath);
-        await WriteJsonAsync(xgFile, outputPath, options, cancellationToken);
-    }
     public static XgFile ReadJson(string path)
     {
         string json = File.ReadAllText(path);

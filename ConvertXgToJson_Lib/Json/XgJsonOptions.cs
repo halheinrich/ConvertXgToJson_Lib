@@ -7,7 +7,7 @@ namespace ConvertXgToJson_Lib.Json;
 /// <summary>
 /// Provides pre-configured JsonSerializerOptions for XG model serialization.
 /// </summary>
-public static class XgJsonOptions
+internal static class XgJsonOptions
 {
     private static readonly JsonSerializerOptions _options = BuildOptions();
 

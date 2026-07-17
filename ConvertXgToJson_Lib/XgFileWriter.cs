@@ -10,7 +10,6 @@ namespace ConvertXgToJson_Lib;
 /// Usage:
 ///   XgFileWriter.Write(xgFile, stream);      // Stream / WASM friendly
 ///   byte[] bytes = XgFileWriter.ToBytes(xgFile);
-///   XgFileWriter.WriteFile(xgFile, "out.xgp"); // path convenience
 ///
 /// <para>
 /// Output is semantically faithful, not byte-identical: record pointer
@@ -86,15 +85,5 @@ public static class XgFileWriter
         using var ms = new MemoryStream();
         Write(file, ms);
         return ms.ToArray();
-    }
-
-    /// <summary>
-    /// Convenience overload: writes <paramref name="file"/> to
-    /// <paramref name="path"/>, overwriting any existing file.
-    /// </summary>
-    public static void WriteFile(XgFile file, string path)
-    {
-        using var fs = File.Create(path);
-        Write(file, fs);
     }
 }

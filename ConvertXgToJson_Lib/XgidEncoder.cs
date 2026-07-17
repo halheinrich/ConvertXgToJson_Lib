@@ -25,7 +25,7 @@ namespace ConvertXgToJson_Lib;
 /// matchLen = 0 for money game
 /// maxCube  = log2 of max allowed cube value (typically 6 = 64 max, shown as 2^6)
 /// </summary>
-public static class XgidEncoder
+internal static class XgidEncoder
 {
     /// <summary>
     /// Encodes a position and game context into an XGID string.

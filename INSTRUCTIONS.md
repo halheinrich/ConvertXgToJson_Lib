@@ -326,14 +326,20 @@ agrees with the emitted `DecisionRow.MoveNumber` /
 contract is that the Id's coordinate tuple matches the emitted row's
 published fields, record-for-record.
 
-`IterateXgDirectory` is the directory-level entry point: it enumerates
-both `*.xg` (match files) and `*.xgp` (position files) — both formats
-are XG-native and `XgFileReader` handles them uniformly, so callers
-that point at a directory of mixed XG content get all decisions
-regardless of extension. File discovery is delegated to
+`IterateXgDirectory` (internal) is the directory-level walk: it
+enumerates both `*.xg` (match files) and `*.xgp` (position files) —
+both formats are XG-native and `XgFileReader` handles them uniformly,
+so a directory of mixed XG content yields all decisions regardless of
+extension. File discovery is delegated to
 `XgFileReader.EnumerateXgFormatFiles` (see XgFileReader above) — the
-single source of the `.xg`-then-`.xgp` rule. `IterateJsonDirectory` is
-the parallel entry point for `*.json` exports.
+single source of the `.xg`-then-`.xgp` rule. `IterateJsonDirectory`
+(internal) is the parallel walk for `*.json` exports. Both are
+internal: external consumers compose their own directory walks from
+the public `EnumerateXgFormatFiles` + `Iterate` /
+`IterateDiagramRequests` pieces (XgFilter_Lib's
+`FilteredDecisionIterator` is the in-tree pattern — it adds
+skip-and-log error handling and filter callbacks this producer
+deliberately doesn't own).
 
 Both surfaces report the "best play" as the **highest-equity** candidate in
 `analysis.Evals[]`, not XG-native rank 0. `BgDecisionData.Plays[0]`,
@@ -529,14 +535,11 @@ public static class XgFileReader
     public static XgFile                ReadFile(string path);
     public static XgFile                ReadStream(Stream stream);
 
-    // JSON serialization round-trip. ReadJson is load-bearing:
-    // XgDecisionIterator.IterateJsonDirectory parses each export through it.
+    // JSON serialization round-trip. ReadJson is load-bearing: the
+    // internal XgDecisionIterator.IterateJsonDirectory and XgFilter_Lib's
+    // FilteredDecisionIterator both parse each export through it.
     public static string                ToJson(XgFile file, JsonSerializerOptions? options = null);
-    public static string                ReadFileAsJson(string path, JsonSerializerOptions? options = null);
     public static Task                  WriteJsonAsync(XgFile file, string outputPath,
-                                            JsonSerializerOptions? options = null,
-                                            CancellationToken cancellationToken = default);
-    public static Task                  ReadFileToJsonFileAsync(string inputPath, string outputPath,
                                             JsonSerializerOptions? options = null,
                                             CancellationToken cancellationToken = default);
     public static XgFile                ReadJson(string path);
@@ -552,7 +555,6 @@ public static class XgFileWriter
     // byte identity: ReadStream(Write(f)) parses to an equal model.
     public static void   Write(XgFile file, Stream output);
     public static byte[] ToBytes(XgFile file);
-    public static void   WriteFile(XgFile file, string path);
 }
 
 public static class XgpExporter
@@ -562,26 +564,22 @@ public static class XgpExporter
     // decisions for these exports, by design.
     public static void   Write(BgDecisionData decision, Stream output);
     public static byte[] ToBytes(BgDecisionData decision);
-    public static void   WriteFile(BgDecisionData decision, string path);
 
     // Slice path (caller holds the parsed source file + the decision's
     // XgDecisionId coordinates): analysis carried through — the iterator
     // yields exactly one decision for a sliced analyzed decision.
     public static void   Write(XgFile source, int game, int moveNumber, bool isCube, Stream output);
     public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube);
-    public static void   WriteFile(XgFile source, int game, int moveNumber, bool isCube, string path);
 
     // Slice path with options (player-name overrides; everything else
     // still verbatim).
     public static void   Write(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, Stream output);
     public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options);
-    public static void   WriteFile(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, string path);
 
     // Slice path addressed by the iterator-stamped XgDecisionId
     // (compile-time contract — XgpDecisionId has no coordinates and does
-    // not fit; id.Filename is not consulted).
-    public static void   Write(XgFile source, XgDecisionId id, Stream output);
-    public static void   Write(XgFile source, XgDecisionId id, XgpSliceOptions options, Stream output);
+    // not fit; id.Filename is not consulted). The only slice surface with
+    // a path transport, matching its external callers.
     public static byte[] ToBytes(XgFile source, XgDecisionId id);
     public static byte[] ToBytes(XgFile source, XgDecisionId id, XgpSliceOptions options);
     public static void   WriteFile(XgFile source, XgDecisionId id, string path);
@@ -630,16 +628,6 @@ public static class XgDecisionIterator
 
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
         XgFile file, string? sourceFile,
-        XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null);
-
-    public static IEnumerable<DecisionRow> IterateXgDirectory(
-        string xgDir,
-        XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null);
-
-    public static IEnumerable<DecisionRow> IterateJsonDirectory(
-        string jsonDir,
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null);
 
