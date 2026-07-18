@@ -33,6 +33,9 @@ ConvertXgToJson_Lib/
   ConvertXgToJson_Lib.csproj
   BackgammonConstants.cs
   MatchContext.cs
+  OpeningBook.cs
+  OpeningBookEntry.cs
+  OpeningBookKey.cs
   XgContainerLayout.cs
   XgDecisionIterator.cs
   XgFileReader.cs
@@ -52,6 +55,7 @@ ConvertXgToJson_Lib/
   Parsing/
     AfterBoardBuilder.cs
     CommentParser.cs
+    OpeningBookParser.cs
     PascalBinaryReader.cs
     RichGameHeaderParser.cs
     RolloutContextParser.cs
@@ -358,8 +362,9 @@ context) into four parallel forms: the human `Label`, a compact
 `AnalysisDepthClass` — the machine-usable taxonomy behind depth filtering.
 The `LevelInfo` switch is the taxonomy: N-ply → `Ply1`–`Ply7` (rank 1–7;
 XG level `12` "3-ply red" collapses to `Ply3`), `1000/1001/1002` →
-`XgRoller`/`XgRollerPlus`/`XgRollerPlusPlus` (rank 20–22), `998/999`
-(Book V1/V2) → `Book`, the no-context `100` sentinel → `Rollout` floor, and
+`XgRoller`/`XgRollerPlus`/`XgRollerPlusPlus` (rank 20–22), `999/998`
+(Book V1/V2 — note the order: 999 is the *older* V1 book, 998 the V2 one)
+→ `Book`, the no-context `100` sentinel → `Rollout` floor, and
 any unrecognised level → `Unknown`. The class distinguishes `Book` from
 `Unknown` where rank 0 cannot — that separation is deliberate. The rollout
 branch (valid `rolloutIndex`) computes `innerPly = plyLevel + 1` and stamps
@@ -401,6 +406,57 @@ Supporting helpers:
   encoding.
 * `CubeValueActual` — internal static helper, called from `MatchContext`
   and `XgDecisionIterator`'s cube-row / cube-diagram builders.
+
+### Opening book (OpeningBook / OpeningBookParser)
+
+Parser + position-keyed lookup for XG's opening-book database
+(`OpeningBookV2.ob`, installed with XG 2) — the rollout data behind the
+bare 998/999 book level codes that `.xg` files stamp on book-analysed
+candidates. Format decoded empirically; the oracle is XG's own tooltip
+rendering of book entries (two pinned fixtures: the ajhhBG0407 game 9
+Kazaross rollout and a Steven Carey 9-away/9-away rollout).
+
+**File format.** Flat 256-byte blocks, no compression; file size is an
+exact block multiple. Block 0 is the header (`"OBDB"` magic at +4, format
+version, TDateTime, ShortString version text at +32, byte-length-prefixed
+UTF-16 title at +41). Every later block leads with an int32 kind:
+1 = long-description continuation (80 UTF-16 chars at +4, assembled text
+NUL-terminated), 2 = entry, unknown kinds skipped. Blocks are Delphi
+memory dumps — bytes past a block's live fields are stale heap garbage,
+so the parser reads only documented extents. Entry layout (offsets
+in-block): contributor WideChar[32] at +4; the keyed position sbyte[26]
+at +68; context ints at +96 (cube value, cube owner, away pair — −1/−1 =
+money — Jacoby, Beaver, Crawford); seven eval singles at +124 in
+`EvalResult` slot order; entry level at +152 (100 = rollout,
+1002 = Roller++ evaluation with zeroed rollout params); engine version
+pair at +160/+164 (tooltip "XG 2.00"); trials at +168; per-game equity σ
+at +172 (tooltip "±" = 1.96·σ/√trials); rollout moves/cube levels at
++176/+180 (full PLAYERLEVEL codes — cube can be a Roller code); dice
+seed at +188; duration seconds at +196; two TDateTimes at +200/+208
+(added-to-book, analysis date — the tooltip shows the latter). +184 and
++192 hold small unidentified values on ~2% of rollout entries and are
+parsed over, not surfaced.
+
+**Keying.** An entry describes the position *resulting* from a candidate
+play, stored from the perspective of the player on roll after it (the
+mover's opponent); the away pair is (new-on-roll away, mover away) in
+that same frame; the eval vector is from the *mover's* perspective. For
+a book hit XG copies the entry's seven floats into the `.xg` analysis
+pane verbatim (bit-identical), so the pane's `PositionsPlayed[i]` +
+score context is exactly the lookup key: `OpeningBookKey.ForMatchPlay` /
+`ForMoneyPlay` own the normalization (flip player-1-relative record
+positions when player 1 moved; reorder decision-frame away scores).
+Jacoby keys money entries, Crawford keys match entries, Beaver is entry
+data only.
+
+**Selection.** One key can hold many entries (independent community
+rollouts + XG's own Roller++ baseline). `TryGetEntry` returns the entry
+XG displays, per the empirically pinned policy: entry-level rank first
+(rollout > Roller++, via the `ResolveDepthInfo` rank taxonomy — the SSOT
+for level ordering), then rollout moves-level rank, cube-level rank,
+trials, analysis date, file position (import-append: later wins). XG
+demonstrably prefers a deeper-level rollout over one with more games.
+`GetEntries` returns all matches best-first.
 
 ### XgIteratorState
 
@@ -634,6 +690,65 @@ public static class XgDecisionIterator
     public static XgMatchInfo? ExtractMatchInfo(XgFile file);
 }
 
+public sealed class OpeningBook
+{
+    public static OpeningBook Load(string path);
+    public static bool        TryLoad(string path, out OpeningBook? book);
+
+    public int      EntryCount    { get; }
+    public string   Title         { get; }
+    public string   Description   { get; }
+    public string   VersionText   { get; }   // "3.70" in the shipped DB
+    public int      FormatVersion { get; }
+    public DateTime CreatedOn     { get; }
+
+    // Best entry per the documented selection policy (the one XG displays).
+    public bool TryGetEntry(in OpeningBookKey key, out OpeningBookEntry? entry);
+    // All entries for the key, best first; empty when none.
+    public IReadOnlyList<OpeningBookEntry> GetEntries(in OpeningBookKey key);
+}
+
+public readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
+{
+    // Factories own the two normalization conventions (perspective flip,
+    // away-score orientation); positionPlayed is the candidate's resulting
+    // position in the XG record convention (player-1-relative), e.g. an
+    // element of BestMoveAnalysis.PositionsPlayed. Cube-centred-at-1
+    // contexts only (see Pitfalls).
+    public static OpeningBookKey ForMatchPlay(
+        PositionEngine positionPlayed, int activePlayer,
+        int moverAway, int opponentAway, bool isCrawford);
+    public static OpeningBookKey ForMoneyPlay(
+        PositionEngine positionPlayed, int activePlayer, bool jacoby);
+}
+
+public sealed class OpeningBookEntry
+{
+    public string         Contributor     { get; init; }
+    public PositionEngine Position        { get; init; }  // new-on-roll perspective
+    public int  CubeValue     { get; init; }
+    public int  CubeOwnerSign { get; init; }              // raw; perspective unverified
+    public bool IsMoneySession { get; }                   // OnRollAway < 0
+    public int  OnRollAway    { get; init; }              // −1 = money
+    public int  OpponentAway  { get; init; }              // the mover's away; −1 = money
+    public bool Jacoby        { get; init; }
+    public bool Beaver        { get; init; }
+    public bool Crawford      { get; init; }
+    public EvalResult Evaluation { get; init; }           // mover perspective; equity slot is cubeful
+    public int    Level  { get; init; }                   // 100 rollout / 1002 Roller++
+    public int    Trials { get; init; }                   // 0 for evaluation entries
+    public float  EquityStandardDeviation { get; init; }
+    public double? ConfidenceInterval95 { get; }          // 1.96σ/√Trials; null for evals
+    public int    RolloutMovesLevel { get; init; }        // PLAYERLEVEL codes
+    public int    RolloutCubeLevel  { get; init; }
+    public int    Seed { get; init; }
+    public int    EngineVersionMajor { get; init; }
+    public int    EngineVersionMinor { get; init; }
+    public TimeSpan Duration  { get; init; }
+    public DateTime AddedOn   { get; init; }
+    public DateTime AnalyzedOn { get; init; }             // the tooltip date
+}
+
 public sealed class XgIteratorState
 {
     public XgMatchInfo? MatchInfo { get; internal set; }
@@ -850,6 +965,45 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `>= 99999 ? 0` checks in `XgMatchInfo.From` and `MatchContext`. One
   consequence for consumers: `MatchHeaderRecord.IsMoneyMatch` is *not*
   the raw XG byte — it is that byte OR'd with Galaxy detection.
+* **Two opening books, and the level codes read "backwards": 999 = Book V1,
+  998 = Book V2.** XG 1's `OpeningBook.db` (V1) stamps level 999; XG 2's
+  `OpeningBookV2.ob` (V2) stamps 998 — the *lower* code is the *newer*
+  book. `LevelInfo` once had the labels reversed; the spec's PLAYERLEVEL
+  table and the fixture corpus (ajhh openings are 998 = V2 hits) are the
+  ground truth. Only the V2 database is parsed (`OpeningBook`); V1 is
+  deliberately unsupported.
+* **The opening-book key is doubly perspective-normalized — let
+  `OpeningBookKey` do it.** A book entry keys on the position *resulting*
+  from the candidate play, flipped to the player on roll after it, with
+  the away pair stored as (new-on-roll away, mover away) in that flipped
+  frame — while `.xg` record positions are player-1-relative and the
+  decision's context is mover-framed. Hand-building the key invites both a
+  missed flip (player-1 movers flip, player-2 movers don't) and a swapped
+  away pair; the `ForMatchPlay` / `ForMoneyPlay` factories encapsulate
+  exactly these two traps. The eval vector, by contrast, is from the
+  *mover's* perspective (XG copies it into the `.xg` pane verbatim on a
+  book hit — pinned bitwise by `RealDb_FixtureA_…`).
+* **A book entry's equity slot is cubeful and score-contexted; the
+  tooltip's cubeless number is derived.** The same resulting position
+  stores wildly different equities under different away scores (+0.377 at
+  (2,4)-away vs −0.38 at (4,2)-away vs +0.01 at (9,9)-away) — the equity
+  slot is the normalized cubeful candidate equity XG displays, not a
+  money constant. XG's tooltip "cubeless" is
+  (win − lose) + (winG − loseG) + (winBG − loseBG) over the probability
+  slots. Don't compare equities across score contexts, and don't read the
+  slot as cubeless (the `EvalResult.Equity` doc is written for cube
+  panes).
+* **Book selection: deeper rollout levels beat more games.** One key
+  commonly holds several entries; XG demonstrably shows a 12,960-game
+  4-ply/4-ply rollout over a 20,736-game 3-ply/3-ply one, and any rollout
+  over its own Roller++ baseline — recency and file order are only final
+  tiebreaks. One residual ambiguity, documented on `OpeningBook`: moves
+  level is compared before cube level (lexicographic), a choice the
+  shipped DB offers no discriminating case for. Also unverified: the cube
+  *owner sign* convention (22 turned-cube entries, no tooltip oracle), so
+  the public key factories cover centred-cube contexts only; and the
+  entry fields at +184/+192 (small values on ~2% of rollout entries) are
+  parsed over, not surfaced.
 * **`temp.xgc` may carry unreferenced leftovers — orphaned comment-table
   entries are format reality, not a parse failure.** XG saves by bundling
   its working-directory temp files wholesale, so a stale comment table

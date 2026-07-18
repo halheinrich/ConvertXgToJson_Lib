@@ -71,9 +71,16 @@ internal sealed class PascalBinaryReader(Stream stream) : IDisposable
 
     private static readonly DateTime PascalEpoch = new(1899, 12, 30, 0, 0, 0, DateTimeKind.Utc);
 
-    public DateTime ReadTDateTime()
+    public DateTime ReadTDateTime() => FromTDateTime(ReadDouble()); // already 8-byte aligned
+
+    /// <summary>
+    /// Converts a raw TDateTime double (days since 1899-12-30) to a
+    /// <see cref="DateTime"/>. Shared by this reader and
+    /// <see cref="OpeningBookParser"/>, which decodes doubles from a byte
+    /// buffer rather than a stream.
+    /// </summary>
+    internal static DateTime FromTDateTime(double d)
     {
-        double d = ReadDouble(); // already 8-byte aligned
         if (d == 0) return PascalEpoch;
         return PascalEpoch.AddDays(d);
     }
