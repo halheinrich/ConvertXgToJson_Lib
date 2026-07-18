@@ -926,7 +926,8 @@ public static class XgDecisionIterator
     /// label, abbreviation, rank, and
     /// <see cref="AnalysisDepthClass"/> — for <paramref name="evalLevel"/>. The
     /// rank ordering is: N-ply → N (1..7), XG Roller family → 20–22, Book
-    /// V1/V2 → 0, any unrecognised level → 0. The edge case is a "Rollout"
+    /// V1/V2 → 99 (rollout-derived opening book: above XG Roller++ (22), below
+    /// the explicit-rollout floor (100)), any unrecognised level → 0. The edge case is a "Rollout"
     /// sentinel (<c>short 100</c>) without a matching rollout context, which
     /// ranks 100 and classes <see cref="AnalysisDepthClass.Rollout"/> — the
     /// same floor as a no-inner-ply rollout (e.g. truncated at level 0).
@@ -1194,22 +1195,27 @@ public static class XgDecisionIterator
     /// Rank: numeric gaps between categories leave room for future depths
     /// without renumbering — N-ply occupies 1..7, the XG Roller family 20..22,
     /// rollouts 100 + inner-ply (see <see cref="ResolveDepthInfo"/>). Book
-    /// V1/V2 and any unrecognised level rank 0 — a static book lookup is not
-    /// an analysis of the position. "3-ply red" shares rank 3 with plain
-    /// 3-ply: reduced variance narrows the candidate set, it does not deepen
-    /// search. The rank lets downstream rendering flag out-of-order analysis
-    /// across adjacent sorted-by-equity plays.
+    /// V1/V2 rank 99 — XG's opening book is rollout-derived, so it sits above
+    /// XG Roller++ (22) yet below the explicit-rollout floor (100): a cached
+    /// rollout whose parameters the file no longer records ranks under a
+    /// rollout the file actually carries. Any unrecognised level ranks 0 (the
+    /// floor, tied with nothing meaningful). "3-ply red" shares rank 3 with
+    /// plain 3-ply: reduced variance narrows the candidate set, it does not
+    /// deepen search. The rank lets downstream rendering flag out-of-order
+    /// analysis across adjacent sorted-by-equity plays.
     /// </para>
     ///
     /// <para>
     /// <see cref="AnalysisDepthClass"/> is the machine-usable taxonomy behind
     /// the three display forms — the single-sourced classification for depth
-    /// filtering. It parallels <c>Rank</c>'s tiering but is finer where rank
-    /// collapses: unlike rank 0, the class distinguishes <see cref="AnalysisDepthClass.Book"/>
-    /// (a book lookup) from <see cref="AnalysisDepthClass.Unknown"/> (an
-    /// unrecognised level code) — that distinction is deliberate. "3-ply red"
-    /// classes as <see cref="AnalysisDepthClass.Ply3"/> (same as plain 3-ply);
-    /// the no-context rollout sentinel classes as the
+    /// filtering. It names the semantic tier a rank only orders:
+    /// <see cref="AnalysisDepthClass.Book"/> (a rollout-derived opening-book
+    /// lookup, rank 99) and <see cref="AnalysisDepthClass.Unknown"/> (an
+    /// unrecognised level code, rank 0) are distinct classes — the class carries
+    /// that distinction whether or not the ranks happen to differ, and no
+    /// longer leans on a shared rank-0 slot to do so. "3-ply red" classes as
+    /// <see cref="AnalysisDepthClass.Ply3"/> (same as plain 3-ply); the
+    /// no-context rollout sentinel classes as the
     /// <see cref="AnalysisDepthClass.Rollout"/> floor, the rollout tier's known
     /// inner plies being stamped in <see cref="ResolveDepthInfo"/>'s rollout branch.
     /// </para>
@@ -1228,8 +1234,8 @@ public static class XgDecisionIterator
         1000 => ("XG Roller",    "R",         20,  AnalysisDepthClass.XgRoller),
         1001 => ("XG Roller+",   "R+",        21,  AnalysisDepthClass.XgRollerPlus),
         1002 => ("XG Roller++",  "R++",       22,  AnalysisDepthClass.XgRollerPlusPlus),
-        998  => ("Book V1",      "Book",      0,   AnalysisDepthClass.Book),
-        999  => ("Book V2",      "Book",      0,   AnalysisDepthClass.Book),
+        998  => ("Book V1",      "Book",      99,  AnalysisDepthClass.Book),
+        999  => ("Book V2",      "Book",      99,  AnalysisDepthClass.Book),
         _    => ($"level-{level}", $"level-{level}", 0, AnalysisDepthClass.Unknown),
     };
 

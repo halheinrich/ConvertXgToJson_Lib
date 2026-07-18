@@ -835,20 +835,22 @@ public class DiagramRequestIteratorTests
     /// tier — the rank and the class are two projections of one resolution
     /// (see <c>XgDecisionIterator.ResolveDepthInfo</c>) and must never disagree.
     /// </summary>
-    private enum DepthTier { BookOrUnknown, Ply, Roller, Rollout }
+    private enum DepthTier { Unknown, Ply, Roller, Book, Rollout }
 
     private static DepthTier TierOfRank(int rank) => rank switch
     {
-        0 => DepthTier.BookOrUnknown,
+        0 => DepthTier.Unknown,
         >= 1 and <= 7 => DepthTier.Ply,
         >= 20 and <= 22 => DepthTier.Roller,
+        99 => DepthTier.Book,
         >= 100 => DepthTier.Rollout,
         _ => throw new Xunit.Sdk.XunitException($"Unexpected DepthRank {rank}: not in any known tier band"),
     };
 
     private static DepthTier TierOfClass(AnalysisDepthClass cls) => cls switch
     {
-        AnalysisDepthClass.Unknown or AnalysisDepthClass.Book => DepthTier.BookOrUnknown,
+        AnalysisDepthClass.Unknown => DepthTier.Unknown,
+        AnalysisDepthClass.Book => DepthTier.Book,
         >= AnalysisDepthClass.Ply1 and <= AnalysisDepthClass.Ply7 => DepthTier.Ply,
         AnalysisDepthClass.XgRoller
             or AnalysisDepthClass.XgRollerPlus
@@ -860,8 +862,8 @@ public class DiagramRequestIteratorTests
     /// <summary>
     /// For every emitted diagram request across the .xg corpus, the depth
     /// class agrees tier-wise with the ordinal rank — rank 1–7 ⇔ Ply*,
-    /// 20–22 ⇔ the XG Roller family, ≥100 ⇔ the rollout tier, 0 ⇔ Book /
-    /// Unknown. Both are projections of the same <c>ResolveDepthInfo</c>
+    /// 20–22 ⇔ the XG Roller family, 99 ⇔ Book, ≥100 ⇔ the rollout tier,
+    /// 0 ⇔ Unknown. Both are projections of the same <c>ResolveDepthInfo</c>
     /// resolution, so a divergence means one stamping site pulled its class
     /// and rank from different candidates. Move plays check every candidate;
     /// cube requests check the single cube analysis.

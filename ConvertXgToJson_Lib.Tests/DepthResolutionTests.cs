@@ -10,8 +10,12 @@ namespace ConvertXgToJson_Lib.Tests;
 /// (Label / Abbreviation / Rank / Class). Covers every case of the underlying
 /// ply-level switch so the abbreviation, rank, and depth-class tables can't
 /// silently drift. Rollout branch is covered via a synthesized RolloutContext
-/// so it doesn't depend on the binary corpus.
+/// so it doesn't depend on the binary corpus. A single fixture-pinned
+/// regression (<see cref="IterateDiagramRequests_BookOpening_ResolvesToBookRank99"/>)
+/// exercises the book tier end-to-end against a real <c>.xg</c>, which is why
+/// the class joins the file-IO collection.
 /// </summary>
+[Collection("FileIO")]
 public class DepthResolutionTests
 {
     // Empty rollout list shared by every non-rollout-branch test.
@@ -34,8 +38,8 @@ public class DepthResolutionTests
     [InlineData((short)1000, "XG Roller",   "R",         20,  AnalysisDepthClass.XgRoller)]
     [InlineData((short)1001, "XG Roller+",  "R+",        21,  AnalysisDepthClass.XgRollerPlus)]
     [InlineData((short)1002, "XG Roller++", "R++",       22,  AnalysisDepthClass.XgRollerPlusPlus)]
-    [InlineData((short)998,  "Book V1",     "Book",      0,   AnalysisDepthClass.Book)]
-    [InlineData((short)999,  "Book V2",     "Book",      0,   AnalysisDepthClass.Book)]
+    [InlineData((short)998,  "Book V1",     "Book",      99,  AnalysisDepthClass.Book)]
+    [InlineData((short)999,  "Book V2",     "Book",      99,  AnalysisDepthClass.Book)]
     public void ResolveDepthInfo_NonRollout_KnownLevels(
         short level, string expectedLabel, string expectedAbbrev, int expectedRank,
         AnalysisDepthClass expectedClass)
@@ -59,11 +63,11 @@ public class DepthResolutionTests
     /// test doesn't quietly break if the switch gains a new case later.
     ///
     /// <para>
-    /// Note the class distinguishes this from a Book lookup where rank 0
-    /// could not: an unrecognised level is <see cref="AnalysisDepthClass.Unknown"/>,
-    /// a book hit is <see cref="AnalysisDepthClass.Book"/>, even though both
-    /// rank 0. That separation is the deliberate reason the class exists
-    /// alongside the rank.
+    /// The class names the semantic tier a rank only orders: an unrecognised
+    /// level is <see cref="AnalysisDepthClass.Unknown"/> (rank 0), a book hit
+    /// is <see cref="AnalysisDepthClass.Book"/> (rank 99, the rollout-derived
+    /// opening book). The class carries that distinction independently — it no
+    /// longer leans on a shared rank-0 slot to separate the two.
     /// </para>
     /// </summary>
     [Fact]
@@ -230,5 +234,52 @@ public class DepthResolutionTests
         c1.Abbreviation.Should().Be("4p5000");
         c1.Rank.Should().Be(104);
         c1.Class.Should().Be(AnalysisDepthClass.RolloutPly4);
+    }
+
+    // -----------------------------------------------------------------------
+    //  Book tier — fixture-pinned end-to-end regression
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// XG stamps opening-book hits as bare level 998/999 (Book V1/V2) with no
+    /// rollout context. The book is rollout-derived, so a hit ranks 99 — above
+    /// XG Roller++ (rank 22) and below the explicit-rollout floor (rank 100):
+    /// a cached rollout whose parameters the file no longer records ranks under
+    /// a rollout the file actually carries. In <c>ajhhBG0024.xg</c>, game 6's
+    /// opening play (the 52 roll, <c>MoveNumber</c> 1) is such a book hit; it
+    /// must resolve to label "Book V1", class <see cref="AnalysisDepthClass.Book"/>,
+    /// rank 99 all the way through the diagram surface. Pins the rank promotion
+    /// (0 → 99) end-to-end so rollout-depth filtering stops dropping booked
+    /// openings, and guards the <see cref="AnalysisDepthClass.Book"/> class the
+    /// <c>IDecisionFilterData</c> member exposes for filtering.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "FileIO")]
+    public void IterateDiagramRequests_BookOpening_ResolvesToBookRank99()
+    {
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "ajhhBG0024.xg");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on ajhhBG0024.xg being in TestData/FixtureFiles/.");
+
+        var file = XgFileReader.ReadFile(path);
+        string sourceFile = Path.GetFileName(path);
+
+        // Game = 6th GameHeaderRecord; move = its first play (MoveNumber 1).
+        var req = XgDecisionIterator.IterateDiagramRequests(file, sourceFile)
+            .Single(r => !r.Decision.IsCube
+                      && r.Descriptive.Game == 6
+                      && r.Descriptive.MoveNumber == 1);
+
+        // Plays[0] is the best-by-equity candidate after the sort; the
+        // decision's IDecisionFilterData class derives from it (BestPlayIndex 0).
+        var best = req.Decision.Plays[0];
+        best.Depth.Should().Be("Book V1");
+        best.DepthClass.Should().Be(AnalysisDepthClass.Book);
+        best.DepthRank.Should().Be(99);
+
+        req.AnalysisDepthClass.Should().Be(AnalysisDepthClass.Book,
+            "the decision's filter-facing class must report the book tier");
     }
 }
