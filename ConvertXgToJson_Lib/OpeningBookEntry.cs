@@ -99,6 +99,15 @@ public sealed class OpeningBookEntry
     /// </summary>
     public int Level { get; init; }
 
+    /// <summary>
+    /// True for rollout entries (<see cref="Level"/> 100) — the population
+    /// whose rollout parameters (<see cref="Trials"/>,
+    /// <see cref="RolloutMovesLevel"/> / <see cref="RolloutCubeLevel"/>, …)
+    /// are real. Evaluation entries store zeros there, so consumers reading
+    /// those fields must gate on this first (the depth-enrichment path does).
+    /// </summary>
+    public bool IsRollout => Level == 100;
+
     /// <summary>Number of games rolled out; 0 for evaluation entries.</summary>
     public int Trials { get; init; }
 

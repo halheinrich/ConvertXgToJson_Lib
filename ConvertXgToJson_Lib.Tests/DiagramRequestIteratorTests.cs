@@ -825,15 +825,16 @@ public class DiagramRequestIteratorTests
     }
 
     // -----------------------------------------------------------------------
-    //  Depth class — taxonomy population and tier agreement
+    //  Depth taxonomy — pair population and tier agreement
     // -----------------------------------------------------------------------
 
     /// <summary>
     /// Coarse depth tiers shared by the rank scale and the
-    /// <see cref="AnalysisDepthClass"/> taxonomy. The corpus invariant below
-    /// asserts both surfaces classify every emitted decision into the same
-    /// tier — the rank and the class are two projections of one resolution
-    /// (see <c>XgDecisionIterator.ResolveDepthInfo</c>) and must never disagree.
+    /// <see cref="AnalysisMode"/> × <see cref="AnalysisLevel"/> taxonomy
+    /// pair. The corpus invariant below asserts both surfaces classify every
+    /// emitted decision into the same tier — the rank and the pair are two
+    /// projections of one resolution (see
+    /// <c>XgDecisionIterator.ResolveDepthInfo</c>) and must never disagree.
     /// </summary>
     private enum DepthTier { Unknown, Ply, Roller, Book, Rollout }
 
@@ -847,30 +848,36 @@ public class DiagramRequestIteratorTests
         _ => throw new Xunit.Sdk.XunitException($"Unexpected DepthRank {rank}: not in any known tier band"),
     };
 
-    private static DepthTier TierOfClass(AnalysisDepthClass cls) => cls switch
+    private static DepthTier TierOfPair(AnalysisMode mode, AnalysisLevel level) => mode switch
     {
-        AnalysisDepthClass.Unknown => DepthTier.Unknown,
-        AnalysisDepthClass.Book => DepthTier.Book,
-        >= AnalysisDepthClass.Ply1 and <= AnalysisDepthClass.Ply7 => DepthTier.Ply,
-        AnalysisDepthClass.XgRoller
-            or AnalysisDepthClass.XgRollerPlus
-            or AnalysisDepthClass.XgRollerPlusPlus => DepthTier.Roller,
-        >= AnalysisDepthClass.Rollout and <= AnalysisDepthClass.RolloutPly7 => DepthTier.Rollout,
-        _ => throw new Xunit.Sdk.XunitException($"Unexpected AnalysisDepthClass {cls}: not in any known tier"),
+        AnalysisMode.Unknown => DepthTier.Unknown,
+        AnalysisMode.BookRollout => DepthTier.Book,
+        AnalysisMode.Rollout => DepthTier.Rollout,
+        AnalysisMode.Evaluation => level switch
+        {
+            AnalysisLevel.XgRoller
+                or AnalysisLevel.XgRollerPlus
+                or AnalysisLevel.XgRollerPlusPlus => DepthTier.Roller,
+            AnalysisLevel.Unknown => throw new Xunit.Sdk.XunitException(
+                "Evaluation mode must always carry its own level"),
+            _ => DepthTier.Ply,
+        },
+        _ => throw new Xunit.Sdk.XunitException($"Unexpected AnalysisMode {mode}: not in any known tier"),
     };
 
     /// <summary>
-    /// For every emitted diagram request across the .xg corpus, the depth
-    /// class agrees tier-wise with the ordinal rank — rank 1–7 ⇔ Ply*,
-    /// 20–22 ⇔ the XG Roller family, 99 ⇔ Book, ≥100 ⇔ the rollout tier,
-    /// 0 ⇔ Unknown. Both are projections of the same <c>ResolveDepthInfo</c>
-    /// resolution, so a divergence means one stamping site pulled its class
-    /// and rank from different candidates. Move plays check every candidate;
-    /// cube requests check the single cube analysis.
+    /// For every emitted diagram request across the .xg corpus, the taxonomy
+    /// pair agrees tier-wise with the ordinal rank — rank 1–7 ⇔ Evaluation
+    /// ply levels, 20–22 ⇔ Evaluation Roller levels, 99 ⇔ BookRollout,
+    /// ≥100 ⇔ Rollout, 0 ⇔ Unknown. Both are projections of the same
+    /// <c>ResolveDepthInfo</c> resolution, so a divergence means one
+    /// stamping site pulled its pair and rank from different candidates.
+    /// Move plays check every candidate; cube requests check the single
+    /// cube analysis.
     /// </summary>
     [Fact]
     [Trait("Category", "FileIO")]
-    public void IterateDiagramRequests_DepthClassAndRank_AgreeTierWiseForEveryCandidate()
+    public void IterateDiagramRequests_DepthPairAndRank_AgreeTierWiseForEveryCandidate()
     {
         int movePlaysChecked = 0;
         int cubesChecked = 0;
@@ -884,18 +891,18 @@ public class DiagramRequestIteratorTests
             {
                 if (req.Decision.IsCube)
                 {
-                    TierOfClass(req.Decision.CubeDepthClass).Should().Be(
+                    TierOfPair(req.Decision.CubeAnalysisMode, req.Decision.CubeAnalysisLevel).Should().Be(
                         TierOfRank(req.Decision.CubeDepthRank),
-                        $"{sourceFile}: cube depth class and rank must land in the same tier");
+                        $"{sourceFile}: cube depth pair and rank must land in the same tier");
                     cubesChecked++;
                 }
                 else
                 {
                     foreach (var play in req.Decision.Plays)
                     {
-                        TierOfClass(play.DepthClass).Should().Be(
+                        TierOfPair(play.AnalysisMode, play.AnalysisLevel).Should().Be(
                             TierOfRank(play.DepthRank),
-                            $"{sourceFile}: candidate depth class and rank must land in the same tier");
+                            $"{sourceFile}: candidate depth pair and rank must land in the same tier");
                         movePlaysChecked++;
                     }
                 }
@@ -909,20 +916,22 @@ public class DiagramRequestIteratorTests
     }
 
     /// <summary>
-    /// Convergence guarantee. <see cref="BgDecisionData.AnalysisDepthClass"/>
-    /// derives from the <see cref="DecisionData.BestPlayIndex"/> candidate,
-    /// while the class of the best-by-equity candidate is what the CSV surface
-    /// (<c>DecisionRow.AnalysisDepthClass</c>) resolves. This pins that the
-    /// interface-level class equals the class of the play independently located
-    /// as best-by-equity (max <see cref="PlayCandidate.Equity"/>, stable lower
-    /// index on ties) — so the <c>BestPlayIndex</c> surface and the
-    /// best-by-equity surface can never name different candidates. If a
-    /// regression pointed <c>BestPlayIndex</c> away from best-by-equity, this
-    /// fails wherever the two candidates differ in depth.
+    /// Convergence guarantee. <see cref="BgDecisionData.AnalysisMode"/> /
+    /// <see cref="BgDecisionData.AnalysisLevel"/> derive from the
+    /// <see cref="DecisionData.BestPlayIndex"/> candidate, while the pair of
+    /// the best-by-equity candidate is what the CSV surface
+    /// (<c>DecisionRow.AnalysisMode</c> / <c>AnalysisLevel</c>) resolves.
+    /// This pins that the interface-level pair equals the pair of the play
+    /// independently located as best-by-equity (max
+    /// <see cref="PlayCandidate.Equity"/>, stable lower index on ties) — so
+    /// the <c>BestPlayIndex</c> surface and the best-by-equity surface can
+    /// never name different candidates. If a regression pointed
+    /// <c>BestPlayIndex</c> away from best-by-equity, this fails wherever
+    /// the two candidates differ in depth.
     /// </summary>
     [Fact]
     [Trait("Category", "FileIO")]
-    public void IterateDiagramRequests_InterfaceDepthClass_MatchesBestByEquityCandidate()
+    public void IterateDiagramRequests_InterfaceDepthPair_MatchesBestByEquityCandidate()
     {
         int moveDecisionsChecked = 0;
 
@@ -944,8 +953,10 @@ public class DiagramRequestIteratorTests
                 for (int i = 1; i < plays.Count; i++)
                     if (plays[i].Equity > plays[bestByEquity].Equity) bestByEquity = i;
 
-                req.AnalysisDepthClass.Should().Be(plays[bestByEquity].DepthClass,
-                    $"{sourceFile}: interface AnalysisDepthClass must equal the best-by-equity candidate's class");
+                req.AnalysisMode.Should().Be(plays[bestByEquity].AnalysisMode,
+                    $"{sourceFile}: interface AnalysisMode must equal the best-by-equity candidate's mode");
+                req.AnalysisLevel.Should().Be(plays[bestByEquity].AnalysisLevel,
+                    $"{sourceFile}: interface AnalysisLevel must equal the best-by-equity candidate's level");
                 moveDecisionsChecked++;
             }
         }
@@ -956,16 +967,18 @@ public class DiagramRequestIteratorTests
 
     /// <summary>
     /// Cross-surface convergence: for every decision, the CSV surface
-    /// (<c>DecisionRow.AnalysisDepthClass</c>, resolved best-by-equity for
-    /// plays / from the cube analysis for cubes) and the diagram surface
-    /// (<c>BgDecisionData.AnalysisDepthClass</c>, resolved via
-    /// <c>BestPlayIndex</c> / <c>CubeDepthClass</c>) agree. Both route through
-    /// the same skip policy and stamp from the same taxonomy switch, so paired
-    /// by <see cref="DecisionId"/> they must report an identical class.
+    /// (<c>DecisionRow.AnalysisMode</c> / <c>AnalysisLevel</c>, resolved
+    /// best-by-equity for plays / from the cube analysis for cubes) and the
+    /// diagram surface (<c>BgDecisionData.AnalysisMode</c> /
+    /// <c>AnalysisLevel</c>, resolved via <c>BestPlayIndex</c> /
+    /// <c>CubeAnalysisMode</c>+<c>CubeAnalysisLevel</c>) agree. Both route
+    /// through the same skip policy and stamp from the same taxonomy switch,
+    /// so paired by <see cref="DecisionId"/> they must report an identical
+    /// pair.
     /// </summary>
     [Fact]
     [Trait("Category", "FileIO")]
-    public void DepthClass_CsvAndDiagramSurfaces_AgreePairedById()
+    public void DepthPair_CsvAndDiagramSurfaces_AgreePairedById()
     {
         int paired = 0;
 
@@ -974,15 +987,15 @@ public class DiagramRequestIteratorTests
             var file = XgFileReader.ReadFile(path);
             string sourceFile = Path.GetFileName(path);
 
-            var rowClassById = XgDecisionIterator.Iterate(file, sourceFile)
-                .ToDictionary(r => r.Id, r => r.AnalysisDepthClass);
+            var rowPairById = XgDecisionIterator.Iterate(file, sourceFile)
+                .ToDictionary(r => r.Id, r => (r.AnalysisMode, r.AnalysisLevel));
 
             foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, sourceFile))
             {
-                rowClassById.Should().ContainKey(req.Id,
+                rowPairById.Should().ContainKey(req.Id,
                     $"{sourceFile}: every diagram request must pair with a CSV row by Id");
-                req.AnalysisDepthClass.Should().Be(rowClassById[req.Id],
-                    $"{sourceFile}: CSV and diagram surfaces must resolve the same depth class for decision {req.Id}");
+                (req.AnalysisMode, req.AnalysisLevel).Should().Be(rowPairById[req.Id],
+                    $"{sourceFile}: CSV and diagram surfaces must resolve the same depth pair for decision {req.Id}");
                 paired++;
             }
         }

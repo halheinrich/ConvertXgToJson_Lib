@@ -56,6 +56,11 @@ public static class XgDecisionIterator
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/> for
     /// the boundaries at which each predicate fires.
     /// </param>
+    /// <param name="options">
+    /// Optional producer configuration. See <see cref="XgIteratorOptions"/> —
+    /// notably <see cref="XgIteratorOptions.OpeningBook"/> for enriching
+    /// book-stamped candidates with the cached rollout's parameters.
+    /// </param>
     /// <param name="logger">
     /// Optional logger. When a decision is skipped because XG stamped its
     /// played candidate with the illegal-play marker (see
@@ -75,12 +80,13 @@ public static class XgDecisionIterator
         string? sourceFile,
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null,
+        XgIteratorOptions? options = null,
         ILogger? logger = null)
     {
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.Iterate requires a non-null sourceFile for DecisionId stamping.");
-        return IterateCore<DecisionRow>(file, sourceFile, state, callbacks, logger, BuildMoveRow, BuildCubeRows);
+        return IterateCore<DecisionRow>(file, sourceFile, state, callbacks, options, logger, BuildMoveRow, BuildCubeRows);
     }
 
     /// <summary>
@@ -101,13 +107,14 @@ public static class XgDecisionIterator
         string sourceFile,
         XgIteratorState? state,
         XgIteratorCallbacks? callbacks,
+        XgIteratorOptions? options,
         ILogger? logger,
-        Func<MoveRecord, MatchContext, string, List<RolloutContext>, T?> buildMove,
+        Func<MoveRecord, MatchContext, string, List<RolloutContext>, OpeningBook?, T?> buildMove,
         Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
         where T : class, IDecisionFilterData
     {
         var decisions = IterateAnalysedDecisions(
-            file, sourceFile, state, callbacks, logger, buildMove, buildCube);
+            file, sourceFile, state, callbacks, options, logger, buildMove, buildCube);
 
         return IsXgpSource(sourceFile) ? SelectXgpDecision(decisions) : decisions;
     }
@@ -177,12 +184,14 @@ public static class XgDecisionIterator
         string sourceFile,
         XgIteratorState? state,
         XgIteratorCallbacks? callbacks,
+        XgIteratorOptions? options,
         ILogger? logger,
-        Func<MoveRecord, MatchContext, string, List<RolloutContext>, T?> buildMove,
+        Func<MoveRecord, MatchContext, string, List<RolloutContext>, OpeningBook?, T?> buildMove,
         Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
         where T : class, IDecisionFilterData
     {
         logger ??= NullLogger.Instance;
+        var openingBook = options?.OpeningBook;
 
         var context = new MatchContext(file.Records, sourceFile, file.Comments);
 
@@ -240,7 +249,7 @@ public static class XgDecisionIterator
                         continue;
                 }
 
-                var row = buildMove(move, context, sourceFile, file.Rollouts);
+                var row = buildMove(move, context, sourceFile, file.Rollouts, openingBook);
                 if (row != null)
                 {
                     yield return row;
@@ -297,6 +306,10 @@ public static class XgDecisionIterator
     /// <param name="callbacks">
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/>.
     /// </param>
+    /// <param name="options">
+    /// Optional producer configuration. Behaves identically to
+    /// <see cref="Iterate"/> — see <see cref="XgIteratorOptions"/>.
+    /// </param>
     /// <param name="logger">
     /// Optional logger. Behaves identically to <see cref="Iterate"/>: an
     /// illegal-play skip emits a contextual <c>Warning</c>; dances skip
@@ -313,12 +326,13 @@ public static class XgDecisionIterator
         string? sourceFile,
         XgIteratorState? state = null,
         XgIteratorCallbacks? callbacks = null,
+        XgIteratorOptions? options = null,
         ILogger? logger = null)
     {
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.IterateDiagramRequests requires a non-null sourceFile for DecisionId stamping.");
-        return IterateCore<BgDecisionData>(file, sourceFile, state, callbacks, logger, BuildMoveDiagramRequest, BuildCubeDiagramRequests);
+        return IterateCore<BgDecisionData>(file, sourceFile, state, callbacks, options, logger, BuildMoveDiagramRequest, BuildCubeDiagramRequests);
     }
 
     // -----------------------------------------------------------------------
@@ -339,10 +353,13 @@ public static class XgDecisionIterator
     /// <param name="callbacks">Optional skip predicates. Re-evaluated fresh per
     /// file — predicates are stateless from the producer's perspective, so a
     /// match-skip in one file has no effect on the next.</param>
+    /// <param name="options">Optional producer configuration, shared across
+    /// all files in the walk. See <see cref="XgIteratorOptions"/>.</param>
     internal static IEnumerable<DecisionRow> IterateXgDirectory(
         string xgDir,
         XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null)
+        XgIteratorCallbacks? callbacks = null,
+        XgIteratorOptions? options = null)
     {
         foreach (var path in XgFileReader.EnumerateXgFormatFiles(xgDir))
         {
@@ -351,7 +368,7 @@ public static class XgDecisionIterator
             catch { continue; }
 
             string sourceFile = Path.GetFileName(path);
-            foreach (var row in Iterate(file, sourceFile, state, callbacks))
+            foreach (var row in Iterate(file, sourceFile, state, callbacks, options))
                 yield return row;
         }
     }
@@ -362,10 +379,12 @@ public static class XgDecisionIterator
     /// <param name="jsonDir">Directory containing .json files.</param>
     /// <param name="state">Optional read-only observer. See <see cref="Iterate"/>.</param>
     /// <param name="callbacks">Optional skip predicates. See <see cref="IterateXgDirectory"/>.</param>
+    /// <param name="options">Optional producer configuration. See <see cref="IterateXgDirectory"/>.</param>
     internal static IEnumerable<DecisionRow> IterateJsonDirectory(
         string jsonDir,
         XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null)
+        XgIteratorCallbacks? callbacks = null,
+        XgIteratorOptions? options = null)
     {
         foreach (var path in Directory.EnumerateFiles(jsonDir, "*.json"))
         {
@@ -374,7 +393,7 @@ public static class XgDecisionIterator
             catch { continue; }
 
             string sourceFile = Path.GetFileName(path);
-            foreach (var row in Iterate(file, sourceFile, state, callbacks))
+            foreach (var row in Iterate(file, sourceFile, state, callbacks, options))
                 yield return row;
         }
     }
@@ -383,7 +402,7 @@ public static class XgDecisionIterator
     //  Move record — DecisionRow
     // -----------------------------------------------------------------------
 
-    private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
+    private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts, OpeningBook? book)
     {
         var analysis = move.Analysis;
         if (!IsAnalysed(move))
@@ -397,13 +416,16 @@ public static class XgDecisionIterator
         var bestEval = analysis.Evals[bestIdx];
         int dice = DiceToInt(move.Dice);
 
-        // Label and class both key off the same best-by-equity candidate, so
-        // DecisionRow.AnalysisDepth and DecisionRow.AnalysisDepthClass can
-        // never describe different candidates.
-        var (depth, _, _, depthClass) = ResolveDepthInfo(
-            evalLevel: bestIdx < analysis.EvalLevels.Length ? analysis.EvalLevels[bestIdx].Level : (short)0,
+        // Label and taxonomy pair all key off the same best-by-equity
+        // candidate — book entry included — so DecisionRow.AnalysisDepth and
+        // DecisionRow.AnalysisMode/AnalysisLevel can never describe
+        // different candidates.
+        short bestLevel = bestIdx < analysis.EvalLevels.Length ? analysis.EvalLevels[bestIdx].Level : (short)0;
+        var (depth, _, _, mode, level) = ResolveDepthInfo(
+            evalLevel: bestLevel,
             rolloutIndex: bestIdx < move.RolloutIndices.Length ? move.RolloutIndices[bestIdx] : -1,
-            rollouts: rollouts);
+            rollouts: rollouts,
+            bookEntry: LookupBookEntry(book, bestLevel, analysis, bestIdx, move.ActivePlayer, ctx));
 
         string xgid = BuildXgid(
             move.InitialPosition, move.ActivePlayer, ctx.CubeValue, ctx.CubePosition, dice, ctx);
@@ -428,7 +450,8 @@ public static class XgDecisionIterator
             IsStandardStart = ctx.IsStandardStart,
             Roll = dice,
             AnalysisDepth = depth,
-            AnalysisDepthClass = depthClass,
+            AnalysisMode = mode,
+            AnalysisLevel = level,
             Equity = bestEval.Equity,
             Board = board,
             AfterBestBoard = afterBest,
@@ -440,7 +463,7 @@ public static class XgDecisionIterator
     //  Move record — DiagramRequest
     // -----------------------------------------------------------------------
 
-    private static BgDecisionData? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
+    private static BgDecisionData? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts, OpeningBook? book)
     {
         var analysis = move.Analysis;
         if (!IsAnalysed(move))
@@ -489,10 +512,15 @@ public static class XgDecisionIterator
             short evalLevel = i < analysis.EvalLevels.Length
                 ? analysis.EvalLevels[i].Level
                 : (short)0;
-            var (candidateDepth, candidateDepthAbbrev, candidateDepthRank, candidateDepthClass) = ResolveDepthInfo(
+            // Each candidate enriches from its own book entry (keyed by its
+            // own resulting position) — a book-analysed decision can mix
+            // book-stamped and evaluated candidates, and different candidates
+            // resolve to different book rollouts.
+            var (candidateDepth, candidateDepthAbbrev, candidateDepthRank, candidateMode, candidateLevel) = ResolveDepthInfo(
                 evalLevel: evalLevel,
                 rolloutIndex: i < move.RolloutIndices.Length ? move.RolloutIndices[i] : -1,
-                rollouts: rollouts);
+                rollouts: rollouts,
+                bookEntry: LookupBookEntry(book, evalLevel, analysis, i, move.ActivePlayer, ctx));
             // Each candidate gets its own scratch board so hit-tracking in
             // one candidate doesn't leak into the next. Translate once and
             // share the resulting Play between MoveNotation (rendered form)
@@ -506,7 +534,8 @@ public static class XgDecisionIterator
                 Depth = candidateDepth,
                 DepthAbbreviation = candidateDepthAbbrev,
                 DepthRank = candidateDepthRank,
-                DepthClass = candidateDepthClass,
+                AnalysisMode = candidateMode,
+                AnalysisLevel = candidateLevel,
                 Equity = equity,
                 EquityLoss = bestEquity - equity,
                 WinPct = eval.WinSingle,
@@ -570,7 +599,10 @@ public static class XgDecisionIterator
     {
         var analysis = cube.Analysis;
 
-        var (depth, _, _, depthClass) = ResolveDepthInfo(
+        // No book entry: the cube-row keying convention against the opening
+        // book is unproven (see LookupBookEntry), so a book-stamped cube
+        // resolves to the degraded BookRollout + Unknown pair by design.
+        var (depth, _, _, mode, level) = ResolveDepthInfo(
             evalLevel: analysis.LevelRequest,
             rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
@@ -599,7 +631,8 @@ public static class XgDecisionIterator
             IsStandardStart = ctx.IsStandardStart,
             Roll = 0,
             AnalysisDepth = depth,
-            AnalysisDepthClass = depthClass,
+            AnalysisMode = mode,
+            AnalysisLevel = level,
             Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
             Board = board,
             // Cube decisions carry no play; the PlayOutcomeData contract requires
@@ -617,7 +650,8 @@ public static class XgDecisionIterator
     {
         var analysis = cube.Analysis;
 
-        var (depth, depthAbbrev, depthRank, depthClass) = ResolveDepthInfo(
+        // No book entry — same degradation rationale as BuildCubeRows.
+        var (depth, depthAbbrev, depthRank, mode, level) = ResolveDepthInfo(
             evalLevel: analysis.LevelRequest,
             rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
@@ -669,7 +703,8 @@ public static class XgDecisionIterator
                 CubeDepth = depth,
                 CubeDepthAbbreviation = depthAbbrev,
                 CubeDepthRank = depthRank,
-                CubeDepthClass = depthClass,
+                CubeAnalysisMode = mode,
+                CubeAnalysisLevel = level,
                 UserDoubleError = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : (double?)null,
                 UserTakeError = (cube.Doubled == 1 && cube.ErrorTake > -999.0) ? Math.Abs(cube.ErrorTake) : (double?)null,
             },
@@ -897,12 +932,13 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Resolves the analysis depth for a candidate into three parallel
+    /// Resolves the analysis depth for a candidate into five parallel
     /// forms: the full human-readable label, a compact abbreviation for
-    /// narrow cells, and an ordinal rank (higher = deeper / more
-    /// rigorous). All three come from the same structured inputs — no
-    /// string re-parsing — so the producer keeps ownership of depth
-    /// semantics.
+    /// narrow cells, an ordinal rank (higher = deeper / more rigorous),
+    /// and the machine-usable <see cref="AnalysisMode"/> ×
+    /// <see cref="AnalysisLevel"/> taxonomy pair. All five come from the
+    /// same structured inputs — no string re-parsing — so the producer
+    /// keeps ownership of depth semantics.
     ///
     /// <para>
     /// Rollout branch: when <paramref name="rolloutIndex"/> is a valid
@@ -913,39 +949,67 @@ public static class XgDecisionIterator
     /// <c>Abbreviation = "{innerPly}p{trials}"</c> (e.g. "3p1296"),
     /// <c>Rank = 100 + innerPly</c>. The ply-label switch encodes ply as
     /// <c>short - 1</c>, so <c>Level*</c> value 2 is a 3-ply rollout.
-    /// The <see cref="AnalysisDepthClass"/> preserves the inner ply:
-    /// <c>innerPly</c> 1–7 maps to
-    /// <see cref="AnalysisDepthClass.RolloutPly1"/>–<see cref="AnalysisDepthClass.RolloutPly7"/>;
-    /// an <c>innerPly</c> outside that range falls back to the
-    /// <see cref="AnalysisDepthClass.Rollout"/> floor (defensive — a rolled-out
-    /// candidate always carries an inner-ply level in practice).
+    /// The pair is <see cref="AnalysisMode.Rollout"/> plus the inner ply as
+    /// its <see cref="AnalysisLevel"/>: <c>innerPly</c> 1–7 maps to
+    /// <see cref="AnalysisLevel.Ply1"/>–<see cref="AnalysisLevel.Ply7"/>;
+    /// an <c>innerPly</c> outside that range degrades the level to
+    /// <see cref="AnalysisLevel.Unknown"/> while rank / abbreviation still
+    /// reflect the raw value (defensive — a rolled-out candidate always
+    /// carries an in-range inner ply in practice).
+    /// </para>
+    ///
+    /// <para>
+    /// Book branch: when <paramref name="bookEntry"/> is non-null — the
+    /// caller resolved a V2-book-stamped candidate against a loaded
+    /// <see cref="OpeningBook"/> (see <see cref="LookupBookEntry"/>) — and
+    /// the entry is a rollout entry (<c>Level == 100</c>), the entry's
+    /// stored rollout parameters enrich the projection:
+    /// <c>Label = "Book V2: {trials} trials. {moves-level label}"</c>,
+    /// <c>Abbreviation = "B{moves-level token}p{trials}"</c> (e.g.
+    /// "B4p12960"), following the rollout sibling forms above. The pair is
+    /// <see cref="AnalysisMode.BookRollout"/> plus the entry's
+    /// <c>RolloutMovesLevel</c> mapped through <see cref="LevelInfo"/> —
+    /// the moves level, because only checker-play candidates are enriched
+    /// today: the book's cube-row keying convention is unproven (no
+    /// book-stamped cube decision exists in the fixture corpus to pin it),
+    /// so cube rows never pass an entry and degrade to
+    /// <see cref="AnalysisMode.BookRollout"/> +
+    /// <see cref="AnalysisLevel.Unknown"/>. Rank stays 99 — enrichment
+    /// recovers the cached rollout's parameters, but <c>DepthRank</c>
+    /// semantics hold stable across enrichment (the file itself still
+    /// records less than an explicit rollout). A non-rollout entry (the
+    /// book also stores Roller++ evaluation baselines) falls through
+    /// unenriched: its stored levels are zeroed, not rollout parameters.
     /// </para>
     ///
     /// <para>
     /// Non-rollout branch: returns the <see cref="LevelInfo"/> projection —
-    /// label, abbreviation, rank, and
-    /// <see cref="AnalysisDepthClass"/> — for <paramref name="evalLevel"/>. The
-    /// rank ordering is: N-ply → N (1..7), XG Roller family → 20–22, Book
-    /// V1/V2 → 99 (rollout-derived opening book: above XG Roller++ (22), below
-    /// the explicit-rollout floor (100)), any unrecognised level → 0. The edge case is a "Rollout"
+    /// label, abbreviation, rank, and the mode × level pair — for
+    /// <paramref name="evalLevel"/>. The rank ordering is: N-ply → N (1..7),
+    /// XG Roller family → 20–22, Book V1/V2 → 99 (rollout-derived opening
+    /// book: above XG Roller++ (22), below the explicit-rollout floor
+    /// (100)), any unrecognised level → 0. The edge case is a "Rollout"
     /// sentinel (<c>short 100</c>) without a matching rollout context, which
-    /// ranks 100 and classes <see cref="AnalysisDepthClass.Rollout"/> — the
-    /// same floor as a no-inner-ply rollout (e.g. truncated at level 0).
+    /// ranks 100 as <see cref="AnalysisMode.Rollout"/> +
+    /// <see cref="AnalysisLevel.Unknown"/> — the same degradation as a
+    /// no-inner-ply rollout (e.g. truncated at level 0).
     /// </para>
     ///
     /// <para>
     /// Per-candidate scalar input: callers pass the rollout index keyed
     /// to a single candidate (move-path: <c>move.RolloutIndices[i]</c>;
-    /// cube-path: <c>cube.RolloutIndex</c>). The earlier array-shaped
-    /// signature iterated and returned on the first valid hit, which
-    /// caused every candidate in a decision to inherit the rollout
-    /// label whenever any candidate was rolled out.
+    /// cube-path: <c>cube.RolloutIndex</c>) and the book entry resolved
+    /// for that same candidate's resulting position. The earlier
+    /// array-shaped signature iterated and returned on the first valid
+    /// hit, which caused every candidate in a decision to inherit the
+    /// rollout label whenever any candidate was rolled out.
     /// </para>
     /// </summary>
-    internal static (string Label, string Abbreviation, int Rank, AnalysisDepthClass Class) ResolveDepthInfo(
+    internal static (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) ResolveDepthInfo(
         short evalLevel,
         int rolloutIndex,
-        List<RolloutContext> rollouts)
+        List<RolloutContext> rollouts,
+        OpeningBookEntry? bookEntry = null)
     {
         if (rolloutIndex >= 0 && rolloutIndex < rollouts.Count)
         {
@@ -957,32 +1021,129 @@ public static class XgDecisionIterator
             string label = $"Rollout: {ctx.GamesRolled} trials. {LevelInfo((short)plyLevel).Label}";
             string abbrev = $"{innerPly}p{ctx.GamesRolled}";
             int rank = 100 + innerPly;
-            return (label, abbrev, rank, RolloutClassForInnerPly(innerPly));
+            return (label, abbrev, rank, AnalysisMode.Rollout, LevelForInnerPly(innerPly));
         }
+
+        if (bookEntry is { IsRollout: true })
+        {
+            var inner = LevelInfo((short)bookEntry.RolloutMovesLevel);
+            string label = $"Book V2: {bookEntry.Trials} trials. {inner.Label}";
+            string abbrev = $"B{BookInnerToken(inner)}p{bookEntry.Trials}";
+            return (label, abbrev, LevelInfo(evalLevel).Rank, AnalysisMode.BookRollout, inner.Level);
+        }
+
         return LevelInfo(evalLevel);
     }
 
     /// <summary>
-    /// Maps a rollout's inner evaluation ply to its
-    /// <see cref="AnalysisDepthClass"/>. Inner ply 1–7 stamp the matching
-    /// <see cref="AnalysisDepthClass.RolloutPly1"/>–<see cref="AnalysisDepthClass.RolloutPly7"/>;
-    /// anything outside that range falls back to the
-    /// <see cref="AnalysisDepthClass.Rollout"/> floor. A plain arithmetic
+    /// Maps a rollout's inner evaluation ply to the <see cref="AnalysisLevel"/>
+    /// member stamped alongside <see cref="AnalysisMode.Rollout"/>. Inner ply
+    /// 1–7 stamp the matching
+    /// <see cref="AnalysisLevel.Ply1"/>–<see cref="AnalysisLevel.Ply7"/>;
+    /// anything outside that range degrades to
+    /// <see cref="AnalysisLevel.Unknown"/> ("level not recorded" — the
+    /// taxonomy's documented graceful-degradation stamp). A plain arithmetic
     /// offset would couple this to the enum's declaration order, which
-    /// <see cref="AnalysisDepthClass"/> documents as informational-not-contractual;
-    /// the explicit switch keeps the taxonomy single-sourced.
+    /// <see cref="AnalysisLevel"/> documents as informational-not-contractual;
+    /// the explicit switch keeps the mapping single-sourced.
     /// </summary>
-    private static AnalysisDepthClass RolloutClassForInnerPly(int innerPly) => innerPly switch
+    private static AnalysisLevel LevelForInnerPly(int innerPly) => innerPly switch
     {
-        1 => AnalysisDepthClass.RolloutPly1,
-        2 => AnalysisDepthClass.RolloutPly2,
-        3 => AnalysisDepthClass.RolloutPly3,
-        4 => AnalysisDepthClass.RolloutPly4,
-        5 => AnalysisDepthClass.RolloutPly5,
-        6 => AnalysisDepthClass.RolloutPly6,
-        7 => AnalysisDepthClass.RolloutPly7,
-        _ => AnalysisDepthClass.Rollout,
+        1 => AnalysisLevel.Ply1,
+        2 => AnalysisLevel.Ply2,
+        3 => AnalysisLevel.Ply3,
+        4 => AnalysisLevel.Ply4,
+        5 => AnalysisLevel.Ply5,
+        6 => AnalysisLevel.Ply6,
+        7 => AnalysisLevel.Ply7,
+        _ => AnalysisLevel.Unknown,
     };
+
+    /// <summary>
+    /// Compact moves-level token for the enriched book abbreviation
+    /// ("B{token}p{trials}"), parallel to the rollout sibling's inner-ply
+    /// digit ("{innerPly}p{trials}"): a ply level contributes its ply number
+    /// (rank 1–7 <b>is</b> the ply number, so "B4p12960" for a 4-ply-moves
+    /// entry), any other level its <see cref="LevelInfo"/> abbreviation —
+    /// unreachable for moves levels in the shipped database (all ply codes)
+    /// but the book format allows Roller codes, and the cube level
+    /// demonstrably uses them.
+    /// </summary>
+    private static string BookInnerToken(
+        (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) inner) =>
+        inner.Rank is >= 1 and <= 7 ? inner.Rank.ToString() : inner.Abbreviation;
+
+    /// <summary>XG's level code for a V2-book-analysed candidate — the only
+    /// code the enrichment lookup fires on. The V1 code (999) is never looked
+    /// up: only the V2 database is parsed, and a V1 stamp's rollout did not
+    /// come from it.</summary>
+    private const short BookV2Level = 998;
+
+    /// <summary>
+    /// Resolves a book-stamped checker-play candidate against the caller's
+    /// loaded <see cref="OpeningBook"/>, or returns null when enrichment does
+    /// not apply — which is the normal case, checked cheapest-first: no book
+    /// supplied, the candidate is not V2-book-stamped
+    /// (<paramref name="evalLevel"/> ≠ 998), no stored resulting position, a
+    /// decision context outside the proven keying conventions, or a plain
+    /// lookup miss. A null return degrades the candidate to the bare
+    /// <see cref="AnalysisMode.BookRollout"/> + <see cref="AnalysisLevel.Unknown"/>
+    /// stamp in <see cref="ResolveDepthInfo"/>.
+    ///
+    /// <para>
+    /// The key is exactly the pane data session 1 proved bitwise:
+    /// <c>PositionsPlayed[i]</c> (the candidate's resulting position,
+    /// player-1-relative) plus the decision context, normalized by the
+    /// <see cref="OpeningBookKey"/> factories (perspective flip, away-pair
+    /// orientation, Jacoby / Crawford). Two context guards scope the lookup
+    /// to what those factories cover: the cube must be centred at 1 (the
+    /// factories' only supported cube context — the book's turned-cube owner
+    /// sign is unverified), and match play must have both aways ≥ 1 (the
+    /// factories' argument contract; a book stamp outside a real match score
+    /// would be malformed input anyway).
+    /// </para>
+    ///
+    /// <para>
+    /// Checker-play candidates only. Cube rows never reach this helper: the
+    /// book's cube-decision keying convention is unproven — the fixture
+    /// corpus contains no book-stamped cube decision to pin it against — so
+    /// cube book stamps degrade rather than guess (see the cube builders).
+    /// </para>
+    /// </summary>
+    private static OpeningBookEntry? LookupBookEntry(
+        OpeningBook? book,
+        short evalLevel,
+        BestMoveAnalysis analysis,
+        int candidateIndex,
+        int activePlayer,
+        MatchContext ctx)
+    {
+        if (book == null || evalLevel != BookV2Level)
+            return null;
+        if (candidateIndex >= analysis.PositionsPlayed.Length)
+            return null;
+        if (ctx.CubeValue != 1 || ctx.CubePosition != 0)
+            return null;
+
+        OpeningBookKey key;
+        if (ctx.MatchLength == 0)
+        {
+            key = OpeningBookKey.ForMoneyPlay(
+                analysis.PositionsPlayed[candidateIndex], activePlayer, ctx.IsJacoby);
+        }
+        else
+        {
+            int moverAway = ctx.NeedsFor(activePlayer);
+            int opponentAway = ctx.NeedsFor(-activePlayer);
+            if (moverAway < 1 || opponentAway < 1)
+                return null;
+            key = OpeningBookKey.ForMatchPlay(
+                analysis.PositionsPlayed[candidateIndex], activePlayer,
+                moverAway, opponentAway, ctx.IsCrawford);
+        }
+
+        return book.TryGetEntry(key, out var entry) ? entry : null;
+    }
 
     /// <summary>
     /// Thin wrapper returning only the label form of
@@ -1202,41 +1363,54 @@ public static class XgDecisionIterator
     /// floor, tied with nothing meaningful). "3-ply red" shares rank 3 with
     /// plain 3-ply: reduced variance narrows the candidate set, it does not
     /// deepen search. The rank lets downstream rendering flag out-of-order
-    /// analysis across adjacent sorted-by-equity plays.
+    /// analysis across adjacent sorted-by-equity plays. Book enrichment
+    /// (<see cref="ResolveDepthInfo"/>'s book branch) deliberately leaves the
+    /// rank at 99 even when the entry's rollout parameters are recovered —
+    /// <c>DepthRank</c> semantics stay stable across enrichment.
     /// </para>
     ///
     /// <para>
-    /// <see cref="AnalysisDepthClass"/> is the machine-usable taxonomy behind
-    /// the three display forms — the single-sourced classification for depth
-    /// filtering. It names the semantic tier a rank only orders:
-    /// <see cref="AnalysisDepthClass.Book"/> (a rollout-derived opening-book
-    /// lookup, rank 99) and <see cref="AnalysisDepthClass.Unknown"/> (an
-    /// unrecognised level code, rank 0) are distinct classes — the class carries
-    /// that distinction whether or not the ranks happen to differ, and no
-    /// longer leans on a shared rank-0 slot to do so. "3-ply red" classes as
-    /// <see cref="AnalysisDepthClass.Ply3"/> (same as plain 3-ply); the
-    /// no-context rollout sentinel classes as the
-    /// <see cref="AnalysisDepthClass.Rollout"/> floor, the rollout tier's known
-    /// inner plies being stamped in <see cref="ResolveDepthInfo"/>'s rollout branch.
+    /// The <see cref="AnalysisMode"/> × <see cref="AnalysisLevel"/> pair is
+    /// the machine-usable taxonomy behind the three display forms — the
+    /// single-sourced classification for depth filtering. The mode says how
+    /// the numbers were produced (ply searches and the Roller family are
+    /// <see cref="AnalysisMode.Evaluation"/>; the book codes are
+    /// <see cref="AnalysisMode.BookRollout"/> — a cached rollout whose
+    /// parameters live in the book database, not the file); the level is the
+    /// evaluation level itself, or <see cref="AnalysisLevel.Unknown"/> where
+    /// the file does not record one (both book codes here — enrichment in
+    /// <see cref="ResolveDepthInfo"/> supplies the level when a book database
+    /// is available; and the no-context rollout sentinel, whose known inner
+    /// plies are stamped in <see cref="ResolveDepthInfo"/>'s rollout branch).
+    /// "3-ply red" levels as <see cref="AnalysisLevel.Ply3"/> (same as plain
+    /// 3-ply); an unrecognised code is <see cref="AnalysisMode.Unknown"/> +
+    /// <see cref="AnalysisLevel.Unknown"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// The book entry's stored rollout levels (<c>RolloutMovesLevel</c> /
+    /// <c>RolloutCubeLevel</c>) use this same PLAYERLEVEL code space, so the
+    /// book branch maps them through this switch too — the level taxonomy has
+    /// exactly one decoding site.
     /// </para>
     /// </summary>
-    private static (string Label, string Abbreviation, int Rank, AnalysisDepthClass Class) LevelInfo(short level) => level switch
+    private static (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) LevelInfo(short level) => level switch
     {
-        0    => ("1-ply",        "1-ply",     1,   AnalysisDepthClass.Ply1),
-        1    => ("2-ply",        "2-ply",     2,   AnalysisDepthClass.Ply2),
-        2    => ("3-ply",        "3-ply",     3,   AnalysisDepthClass.Ply3),
-        12   => ("3-ply red",    "3-ply red", 3,   AnalysisDepthClass.Ply3),
-        3    => ("4-ply",        "4-ply",     4,   AnalysisDepthClass.Ply4),
-        4    => ("5-ply",        "5-ply",     5,   AnalysisDepthClass.Ply5),
-        5    => ("6-ply",        "6-ply",     6,   AnalysisDepthClass.Ply6),
-        6    => ("7-ply",        "7-ply",     7,   AnalysisDepthClass.Ply7),
-        100  => ("Rollout",      "Ro",        100, AnalysisDepthClass.Rollout),
-        1000 => ("XG Roller",    "R",         20,  AnalysisDepthClass.XgRoller),
-        1001 => ("XG Roller+",   "R+",        21,  AnalysisDepthClass.XgRollerPlus),
-        1002 => ("XG Roller++",  "R++",       22,  AnalysisDepthClass.XgRollerPlusPlus),
-        998  => ("Book V2",      "Book",      99,  AnalysisDepthClass.Book),
-        999  => ("Book V1",      "Book",      99,  AnalysisDepthClass.Book),
-        _    => ($"level-{level}", $"level-{level}", 0, AnalysisDepthClass.Unknown),
+        0    => ("1-ply",        "1-ply",     1,   AnalysisMode.Evaluation,  AnalysisLevel.Ply1),
+        1    => ("2-ply",        "2-ply",     2,   AnalysisMode.Evaluation,  AnalysisLevel.Ply2),
+        2    => ("3-ply",        "3-ply",     3,   AnalysisMode.Evaluation,  AnalysisLevel.Ply3),
+        12   => ("3-ply red",    "3-ply red", 3,   AnalysisMode.Evaluation,  AnalysisLevel.Ply3),
+        3    => ("4-ply",        "4-ply",     4,   AnalysisMode.Evaluation,  AnalysisLevel.Ply4),
+        4    => ("5-ply",        "5-ply",     5,   AnalysisMode.Evaluation,  AnalysisLevel.Ply5),
+        5    => ("6-ply",        "6-ply",     6,   AnalysisMode.Evaluation,  AnalysisLevel.Ply6),
+        6    => ("7-ply",        "7-ply",     7,   AnalysisMode.Evaluation,  AnalysisLevel.Ply7),
+        100  => ("Rollout",      "Ro",        100, AnalysisMode.Rollout,     AnalysisLevel.Unknown),
+        1000 => ("XG Roller",    "R",         20,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller),
+        1001 => ("XG Roller+",   "R+",        21,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlus),
+        1002 => ("XG Roller++",  "R++",       22,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlusPlus),
+        998  => ("Book V2",      "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown),
+        999  => ("Book V1",      "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown),
+        _    => ($"level-{level}", $"level-{level}", 0, AnalysisMode.Unknown, AnalysisLevel.Unknown),
     };
 
 }

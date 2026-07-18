@@ -43,6 +43,7 @@ ConvertXgToJson_Lib/
   XgGameInfo.cs
   XgidEncoder.cs
   XgIteratorCallbacks.cs
+  XgIteratorOptions.cs
   XgIteratorState.cs
   XgMatchInfo.cs
   XgMoveTranslator.cs
@@ -357,40 +358,77 @@ are rank-coupled with the same index.
 
 **Depth resolution.** `ResolveDepthInfo` is the single source of a
 candidate's analysis depth, projecting one XG level (plus optional rollout
-context) into four parallel forms: the human `Label`, a compact
-`Abbreviation`, an ordinal `Rank` (higher = deeper), and an
-`AnalysisDepthClass` — the machine-usable taxonomy behind depth filtering.
-The `LevelInfo` switch is the taxonomy: N-ply → `Ply1`–`Ply7` (rank 1–7;
-XG level `12` "3-ply red" collapses to `Ply3`), `1000/1001/1002` →
+context, plus an optional resolved `OpeningBookEntry`) into five parallel
+forms: the human `Label`, a compact `Abbreviation`, an ordinal `Rank`
+(higher = deeper), and the `AnalysisMode` × `AnalysisLevel` pair — the
+machine-usable two-axis taxonomy behind depth filtering (BgDataTypes_Lib
+owns the enums; this producer stamps them). The `LevelInfo` switch is the
+taxonomy: N-ply → `Evaluation` + `Ply1`–`Ply7` (rank 1–7; XG level `12`
+"3-ply red" collapses to `Ply3`), `1000/1001/1002` → `Evaluation` +
 `XgRoller`/`XgRollerPlus`/`XgRollerPlusPlus` (rank 20–22), `999/998`
 (Book V1/V2 — note the order: 999 is the *older* V1 book, 998 the V2 one)
-→ `Book`, the no-context `100` sentinel → `Rollout` floor, and
-any unrecognised level → `Unknown`. The class distinguishes `Book` from
-`Unknown` where rank 0 cannot — that separation is deliberate. The rollout
+→ `BookRollout` + `Unknown` (rank 99), the no-context `100` sentinel →
+`Rollout` + `Unknown` (rank 100), and any unrecognised level → `Unknown` +
+`Unknown` (rank 0). The mode distinguishes a book hit from an unrecognised
+level where rank 0 could not — that separation is deliberate. The rollout
 branch (valid `rolloutIndex`) computes `innerPly = plyLevel + 1` and stamps
-`RolloutPly1`–`RolloutPly7` (rank 100 + innerPly); an inner ply outside 1–7
-clamps the *class* to the `Rollout` floor while rank/abbreviation still
-reflect the raw value (defensive — real rollouts always carry an in-range
-inner ply). Trial count lives only in `Label`/`Abbreviation`, never the
-class — it is not a taxonomy axis. Rank and class are two projections of
-the *same* resolution; the corpus invariant
-`IterateDiagramRequests_DepthClassAndRank_AgreeTierWiseForEveryCandidate`
+`Rollout` + `Ply1`–`Ply7` (rank 100 + innerPly); an inner ply outside 1–7
+degrades the *level* to `Unknown` while rank/abbreviation still reflect
+the raw value (defensive — real rollouts always carry an in-range inner
+ply). Trial count lives only in `Label`/`Abbreviation`, never the pair —
+it is not a taxonomy axis. Rank and pair are projections of the *same*
+resolution; the corpus invariant
+`IterateDiagramRequests_DepthPairAndRank_AgreeTierWiseForEveryCandidate`
 pins that they never land in different tiers.
 
-The class is stamped at all four emission sites from the same resolution
-that produces the label: `BuildMoveRow` →
-`DecisionRow.AnalysisDepthClass` (best-by-equity candidate),
-`BuildCubeRows` → `DecisionRow.AnalysisDepthClass` (cube analysis),
-`BuildMoveDiagramRequest` → per-candidate `PlayCandidate.DepthClass`,
-`BuildCubeDiagramRequests` → `DecisionData.CubeDepthClass`.
-`BgDecisionData.AnalysisDepthClass` (the `IDecisionFilterData` member)
-derives via `BestPlayIndex`, which the sorted `Plays` list makes index 0 —
-the best-by-equity candidate, converging with the CSV surface's
+The book branch (see "Book enrichment" below) fires when the caller
+resolved a V2-book-stamped candidate to a *rollout* entry: label
+`"Book V2: {trials} trials. {moves-level label}"`, abbreviation
+`"B{moves-level token}p{trials}"` (e.g. `B4p12960` — the token is the ply
+digit, or the Roller abbreviation for a Roller-family level), pair
+`BookRollout` + the entry's `RolloutMovesLevel` mapped through the same
+`LevelInfo` switch (the book's stored levels use the same PLAYERLEVEL code
+space — one decoding site). **Rank stays 99 under enrichment** — the arc
+holds `DepthRank` semantics stable (see next steps: revisit if the
+diagram's out-of-order cue misleads).
+
+The pair is stamped at all four emission sites from the same resolution
+that produces the label: `BuildMoveRow` → `DecisionRow.AnalysisMode` /
+`AnalysisLevel` (best-by-equity candidate), `BuildCubeRows` → the same
+row members (cube analysis), `BuildMoveDiagramRequest` → per-candidate
+`PlayCandidate.AnalysisMode`/`AnalysisLevel`, `BuildCubeDiagramRequests`
+→ `DecisionData.CubeAnalysisMode`/`CubeAnalysisLevel`.
+`BgDecisionData.AnalysisMode`/`AnalysisLevel` (the `IDecisionFilterData`
+members) derive via `BestPlayIndex`, which the sorted `Plays` list makes
+index 0 — the best-by-equity candidate, converging with the CSV surface's
 best-by-equity resolution. That convergence is pinned twice: within the
 diagram surface
-(`IterateDiagramRequests_InterfaceDepthClass_MatchesBestByEquityCandidate`)
+(`IterateDiagramRequests_InterfaceDepthPair_MatchesBestByEquityCandidate`)
 and across surfaces paired by `DecisionId`
-(`DepthClass_CsvAndDiagramSurfaces_AgreePairedById`).
+(`DepthPair_CsvAndDiagramSurfaces_AgreePairedById`).
+
+**Book enrichment.** `Iterate` / `IterateDiagramRequests` accept an
+optional `XgIteratorOptions` whose `OpeningBook` member carries a loaded
+book database (locating the `.ob` on disk is app configuration — this lib
+takes the instance). For each V2-book-stamped (998) checker-play
+candidate, `LookupBookEntry` builds the session-1-proven key —
+`PositionsPlayed[i]` + decision context through the `OpeningBookKey`
+factories — and hands the selected entry to `ResolveDepthInfo`; every
+candidate resolves its own entry (a decision's candidates enrich to
+*different* rollouts). Enrichment is strictly additive: it changes labels
+and levels, never which decisions or candidates are emitted. Degradation
+to the bare `"Book V1"`/`"Book V2"` label with `BookRollout` + `Unknown`
+happens on: no book supplied, a V1 stamp (999 — the V2 database wasn't
+its source), a lookup miss, a context outside the proven keying (cube not
+centred at 1, away score < 1), a rollout-backed entry being absent — and
+notably on a **Roller++-evaluation-backed hit**: fixture (a) proves XG
+stamps 998 even when the book's best entry for that position is its
+Roller++ baseline (Level 1002, zero trials), so there is no cached
+rollout to recover and the fall-through is correct, not a bug. Cube rows
+never look up: no book-stamped cube decision exists anywhere in the
+fixture corpus (438 files / 23,736 cube records scanned — zero 998/999 in
+cube `Level` or `LevelRequest`), so the cube-row keying convention
+remains unproven and cube book stamps degrade by design.
 
 Supporting helpers:
 
@@ -490,6 +528,20 @@ Optional predicate record supplied at call time to
 
 Both `DecisionRow` and `BgDecisionData` implement `IDecisionFilterData`,
 so the post-yield predicates work uniformly across both iterator surfaces.
+
+### XgIteratorOptions
+
+Optional producer configuration record supplied at call time to
+`Iterate` / `IterateDiagramRequests` (and the internal directory walks) —
+the third leg of the iterator's parameter pattern: `XgIteratorState`
+observes, `XgIteratorCallbacks` controls iteration, `XgIteratorOptions`
+configures how rows are built. One member today:
+
+* `OpeningBook` — a loaded book database for depth enrichment (see "Book
+  enrichment" above). Null = no enrichment; book hits degrade gracefully.
+
+Members are caller-loaded resources, not per-decision knobs; null (or a
+null member) always means "default behaviour".
 
 ### XgMoveTranslator
 
@@ -680,15 +732,22 @@ public static class XgDecisionIterator
     public static IEnumerable<DecisionRow> Iterate(
         XgFile file, string? sourceFile,
         XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null);
+        XgIteratorCallbacks? callbacks = null,
+        XgIteratorOptions? options = null,
+        ILogger? logger = null);
 
     public static IEnumerable<BgDecisionData> IterateDiagramRequests(
         XgFile file, string? sourceFile,
         XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null);
+        XgIteratorCallbacks? callbacks = null,
+        XgIteratorOptions? options = null,
+        ILogger? logger = null);
 
     public static XgMatchInfo? ExtractMatchInfo(XgFile file);
 }
+
+public sealed record XgIteratorOptions(
+    OpeningBook? OpeningBook = null);
 
 public sealed class OpeningBook
 {
@@ -736,6 +795,7 @@ public sealed class OpeningBookEntry
     public bool Crawford      { get; init; }
     public EvalResult Evaluation { get; init; }           // mover perspective; equity slot is cubeful
     public int    Level  { get; init; }                   // 100 rollout / 1002 Roller++
+    public bool   IsRollout { get; }                      // Level == 100; gates rollout-parameter reads
     public int    Trials { get; init; }                   // 0 for evaluation entries
     public float  EquityStandardDeviation { get; init; }
     public double? ConfidenceInterval95 { get; }          // 1.96σ/√Trials; null for evals
@@ -993,6 +1053,35 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   slots. Don't compare equities across score contexts, and don't read the
   slot as cubeless (the `EvalResult.Equity` doc is written for cube
   panes).
+* **Book enrichment changes labels and levels, never emission — and a 998
+  stamp is not always rollout-backed.** The optional
+  `XgIteratorOptions.OpeningBook` threading is strictly additive: with and
+  without a book, the same decisions and candidates are emitted (pinned by
+  the fixture (a) with/without pair). Each candidate resolves its *own*
+  entry — fixture (a)'s decision enriches different candidates to
+  different rollouts (12,960-game 4-ply vs 15,552-game 3-ply). And two of
+  its five 998-stamped candidates resolve to the book's **Roller++
+  evaluation baseline** entries (Level 1002, zero trials): XG stamps 998
+  whenever the book supplied the pane numbers, rollout or not. Those hits
+  deliberately stay at the bare "Book V2" label with
+  `BookRollout` + `Unknown` — there is no cached rollout to recover. Do
+  not "fix" that degradation, and never read `RolloutMovesLevel` /
+  `Trials` off an entry without gating on `IsRollout` (evaluation entries
+  store zeros there — a zero moves level would decode as a bogus
+  "1-ply").
+* **Cube rows never book-enrich — the keying is unproven, so they degrade
+  rather than guess.** Session 1 proved the checker-play keying only; the
+  turned-cube owner-sign convention is unknown and the key factories
+  cover centred-cube contexts only. The full fixture corpus was scanned
+  for an oracle (438 files, 23,736 cube records): **zero** cube analyses
+  carry a book code (998/999) in `Level` or `LevelRequest`, against 3,817
+  book-stamped checker-play candidates. With nothing to pin a cube-row
+  key against, a book-stamped cube resolves to `BookRollout` + `Unknown`
+  by design (`BuildCubeRows` / `BuildCubeDiagramRequests` pass no entry).
+  If a book-stamped cube decision ever surfaces, pin the key against it
+  before wiring cube enrichment — `ResolveDepthInfo` would also need to
+  select `RolloutCubeLevel` rather than `RolloutMovesLevel` for that
+  path.
 * **Book selection: deeper rollout levels beat more games.** One key
   commonly holds several entries; XG demonstrably shows a 12,960-game
   4-ply/4-ply rollout over a 20,736-game 3-ply/3-ply one, and any rollout
@@ -1026,6 +1115,15 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 
 ## Subproject-internal next steps
 
+* **`DepthRank` stays 99 for enriched book hits — revisit if the diagram
+  cue misleads.** Enrichment recovers a book hit's real rollout depth
+  (e.g. 4-ply / 12,960 games) but the rank deliberately does not move:
+  this arc holds `DepthRank` semantics stable, and
+  BackgammonDiagram_Lib's out-of-order-depth italic keys on rank. If a
+  book hit rendering as "shallower" than an explicit rollout (99 < 100+)
+  proves misleading next to its enriched 4-ply label, promoting enriched
+  ranks is a deliberate future change — its own arc, coordinated with the
+  diagram consumer.
 * **Unify `EnumerateXgFormatFiles` ordering** — the single-arg overload
   keeps its historical extension-major, filesystem-order contract while
   the `SearchOption` overload sorts by full path (ordinal-insensitive,
