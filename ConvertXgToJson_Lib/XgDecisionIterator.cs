@@ -1234,8 +1234,8 @@ public static class XgDecisionIterator
         1000 => ("XG Roller",    "R",         20,  AnalysisDepthClass.XgRoller),
         1001 => ("XG Roller+",   "R+",        21,  AnalysisDepthClass.XgRollerPlus),
         1002 => ("XG Roller++",  "R++",       22,  AnalysisDepthClass.XgRollerPlusPlus),
-        998  => ("Book V1",      "Book",      99,  AnalysisDepthClass.Book),
-        999  => ("Book V2",      "Book",      99,  AnalysisDepthClass.Book),
+        998  => ("Book V2",      "Book",      99,  AnalysisDepthClass.Book),
+        999  => ("Book V1",      "Book",      99,  AnalysisDepthClass.Book),
         _    => ($"level-{level}", $"level-{level}", 0, AnalysisDepthClass.Unknown),
     };
 

@@ -38,8 +38,8 @@ public class DepthResolutionTests
     [InlineData((short)1000, "XG Roller",   "R",         20,  AnalysisDepthClass.XgRoller)]
     [InlineData((short)1001, "XG Roller+",  "R+",        21,  AnalysisDepthClass.XgRollerPlus)]
     [InlineData((short)1002, "XG Roller++", "R++",       22,  AnalysisDepthClass.XgRollerPlusPlus)]
-    [InlineData((short)998,  "Book V1",     "Book",      99,  AnalysisDepthClass.Book)]
-    [InlineData((short)999,  "Book V2",     "Book",      99,  AnalysisDepthClass.Book)]
+    [InlineData((short)998,  "Book V2",     "Book",      99,  AnalysisDepthClass.Book)]
+    [InlineData((short)999,  "Book V1",     "Book",      99,  AnalysisDepthClass.Book)]
     public void ResolveDepthInfo_NonRollout_KnownLevels(
         short level, string expectedLabel, string expectedAbbrev, int expectedRank,
         AnalysisDepthClass expectedClass)
@@ -241,13 +241,13 @@ public class DepthResolutionTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// XG stamps opening-book hits as bare level 998/999 (Book V1/V2) with no
+    /// XG stamps opening-book hits as bare level 999/998 (Book V1/V2) with no
     /// rollout context. The book is rollout-derived, so a hit ranks 99 — above
     /// XG Roller++ (rank 22) and below the explicit-rollout floor (rank 100):
     /// a cached rollout whose parameters the file no longer records ranks under
     /// a rollout the file actually carries. In <c>ajhhBG0024.xg</c>, game 6's
-    /// opening play (the 52 roll, <c>MoveNumber</c> 1) is such a book hit; it
-    /// must resolve to label "Book V1", class <see cref="AnalysisDepthClass.Book"/>,
+    /// opening play (the 52 roll, <c>MoveNumber</c> 1) is such a book hit
+    /// (level 998); it must resolve to label "Book V2", class <see cref="AnalysisDepthClass.Book"/>,
     /// rank 99 all the way through the diagram surface. Pins the rank promotion
     /// (0 → 99) end-to-end so rollout-depth filtering stops dropping booked
     /// openings, and guards the <see cref="AnalysisDepthClass.Book"/> class the
@@ -275,7 +275,7 @@ public class DepthResolutionTests
         // Plays[0] is the best-by-equity candidate after the sort; the
         // decision's IDecisionFilterData class derives from it (BestPlayIndex 0).
         var best = req.Decision.Plays[0];
-        best.Depth.Should().Be("Book V1");
+        best.Depth.Should().Be("Book V2");
         best.DepthClass.Should().Be(AnalysisDepthClass.Book);
         best.DepthRank.Should().Be(99);
 
