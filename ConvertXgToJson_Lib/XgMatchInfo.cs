@@ -21,7 +21,7 @@ public sealed class XgMatchInfo : IMatchInfo
 
     /// <summary>
     /// Match length (points to win). 0 = unlimited / money session.
-    /// XG's 99999 sentinel is normalized to 0 by <see cref="From"/>, honouring
+    /// XG's 99999 sentinel is normalized to 0 by <see cref="From"/>, honoring
     /// the producer contract documented on <see cref="IMatchInfo.MatchLength"/>.
     /// </summary>
     public int MatchLength { get; init; }

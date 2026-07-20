@@ -205,7 +205,7 @@ internal static class SaveRecordParser
             EntryType              = type,
             Player1Ansi            = player1Ansi,
             Player2Ansi            = player2Ansi,
-            MatchLength            = isGalaxyMoneyGame ? 99999 : matchLength,
+            MatchLength            = isGalaxyMoneyGame ? MatchHeaderRecord.MoneyMatchLengthSentinel : matchLength,
             Variation              = variation,
             Crawford               = crawford,
             Jacoby                 = jacoby,
