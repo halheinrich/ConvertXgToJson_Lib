@@ -399,11 +399,21 @@ public sealed class MatchHeaderRecord : SaveRecord
     /// <summary>ANSI (XG1 compat) twin of <see cref="Player2"/>; 40-byte Pascal string.</summary>
     public string   Player2Ansi    { get; init; } = "";
     /// <summary>
-    /// Match length in points; <b>99999 is XG's money-session sentinel</b>
-    /// (normalized to 0 downstream). Backgammon Galaxy money games — which
-    /// abuse this field as a cube limit — are detected and rewritten to
-    /// 99999 at parse time, so past the parser one money representation
-    /// exists.
+    /// XG's money-session sentinel for <see cref="MatchLength"/> — the single
+    /// spelling of the wire-format magic number. This is the <i>raw</i> rule
+    /// (<c>99999</c> = money) and is independent of the <i>normalized</i> rule
+    /// (<c>0</c> = money, spelled <c>IsMoneyGame</c>): the two are the same
+    /// concept expressed at different layers, so they are single-sourced
+    /// separately by design.
+    /// </summary>
+    internal const int MoneyMatchLengthSentinel = 99999;
+
+    /// <summary>
+    /// Match length in points; <b><see cref="MoneyMatchLengthSentinel"/> is XG's
+    /// money-session sentinel</b> (normalized to 0 downstream). Backgammon Galaxy
+    /// money games — which abuse this field as a cube limit — are detected and
+    /// rewritten to the sentinel at parse time, so past the parser one money
+    /// representation exists.
     /// </summary>
     public int      MatchLength    { get; init; }
     /// <summary>Game variant: 0=Backgammon, 1=Nackgammon, 2=Hypergammon, 3=Longgammon.</summary>

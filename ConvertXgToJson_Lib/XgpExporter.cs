@@ -478,8 +478,14 @@ public static class XgpExporter
             {
                 HeaderVersion = 1,
                 GameId = XgpGameId,
+                // Raw wire domain: mh is the un-normalized source header, so
+                // "is money" is read directly off the 99999 sentinel. The
+                // normalized IsMoneyGame predicate (0 = money) deliberately
+                // does NOT apply here — the sentinel is re-emitted verbatim
+                // downstream (see BuildMatchHeader), so normalizing then
+                // denormalizing would be pointless ceremony.
                 SaveName = BuildSaveName(
-                    isMoney: mh.MatchLength >= 99999,
+                    isMoney: mh.MatchLength >= MatchHeaderRecord.MoneyMatchLengthSentinel,
                     matchLength: mh.MatchLength,
                     score1: gh.Score1,
                     score2: gh.Score2,
@@ -913,7 +919,7 @@ public static class XgpExporter
             Player2Ansi = player2,
             Player1 = player1,
             Player2 = player2,
-            MatchLength = isMoney ? 99999 : matchLength,
+            MatchLength = isMoney ? MatchHeaderRecord.MoneyMatchLengthSentinel : matchLength,
             Variation = 0,
             Crawford = true,           // XG writes the rule flag on even for money sessions
             Jacoby = isMoney && jacoby,

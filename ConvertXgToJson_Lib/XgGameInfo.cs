@@ -1,4 +1,5 @@
-﻿using ConvertXgToJson_Lib.Models;
+﻿using BgDataTypes_Lib;
+using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
 
@@ -8,8 +9,10 @@ namespace ConvertXgToJson_Lib;
 /// <see cref="XgIteratorState.GameInfo"/> before any rows are yielded from
 /// the game, allowing the caller to skip the game entirely.
 /// Money sessions: Away1 = 0, Away2 = 0, IsCrawfordGame = false.
+/// Satisfies <see cref="IGameInfo"/> so filter layers can consume it without
+/// referencing this type.
 /// </summary>
-public sealed class XgGameInfo
+public sealed class XgGameInfo : IGameInfo
 {
     /// <summary>
     /// Points still needed by player 1 to win the match.

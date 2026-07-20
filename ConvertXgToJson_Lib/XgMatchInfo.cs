@@ -1,4 +1,5 @@
-﻿using ConvertXgToJson_Lib.Models;
+﻿using BgDataTypes_Lib;
+using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
 
@@ -6,8 +7,11 @@ namespace ConvertXgToJson_Lib;
 /// Match-level metadata extracted from <see cref="MatchHeaderRecord"/>.
 /// Populated on <see cref="XgIteratorState.MatchInfo"/> before any rows
 /// are yielded from the match, allowing the caller to skip the match entirely.
+/// Satisfies <see cref="IMatchInfo"/> so filter layers can consume it without
+/// referencing this type; <see cref="IMatchInfo.IsMoneyGame"/> is inherited
+/// from the contract rather than restated here.
 /// </summary>
-public sealed class XgMatchInfo
+public sealed class XgMatchInfo : IMatchInfo
 {
     /// <summary>Name of player 1 (bottom player in XG).</summary>
     public string Player1 { get; init; } = string.Empty;
@@ -17,6 +21,8 @@ public sealed class XgMatchInfo
 
     /// <summary>
     /// Match length (points to win). 0 = unlimited / money session.
+    /// XG's 99999 sentinel is normalized to 0 by <see cref="From"/>, honouring
+    /// the producer contract documented on <see cref="IMatchInfo.MatchLength"/>.
     /// </summary>
     public int MatchLength { get; init; }
 
@@ -29,6 +35,6 @@ public sealed class XgMatchInfo
     {
         Player1 = hm.Player1,
         Player2 = hm.Player2,
-        MatchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength,
+        MatchLength = hm.MatchLength >= MatchHeaderRecord.MoneyMatchLengthSentinel ? 0 : hm.MatchLength,
     };
 }

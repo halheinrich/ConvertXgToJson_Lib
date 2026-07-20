@@ -17,6 +17,18 @@ internal sealed class MatchContext
     public bool IsJacoby { get; }
     public bool IsBeaver { get; }
 
+    /// <summary>
+    /// True for an unlimited (money) session. Deliberately a local property
+    /// rather than an inherited <see cref="BgDataTypes_Lib.IMatchInfo"/>
+    /// default: this type keeps the player names private behind
+    /// <see cref="PlayerName"/>, so implementing that contract would widen the
+    /// surface purely to inherit this one member. The derivation is kept
+    /// identical to <see cref="BgDataTypes_Lib.IMatchInfo.IsMoneyGame"/>, which
+    /// remains the rule's definition — valid here for the same reason it is
+    /// there: the 99999 sentinel is normalized away in the constructor.
+    /// </summary>
+    public bool IsMoneyGame => MatchLength == 0;
+
     public int CubeValue { get; private set; } = 1;
     public int CubePosition { get; private set; }
     public int GameNumber { get; private set; }
@@ -48,9 +60,9 @@ internal sealed class MatchContext
             throw new InvalidDataException("XG file must begin with a MatchHeaderRecord.");
         _player1 = hm.Player1;
         _player2 = hm.Player2;
-        MatchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength;
-        IsJacoby = MatchLength == 0 && hm.Jacoby;
-        IsBeaver = MatchLength == 0 && hm.Beaver;
+        MatchLength = hm.MatchLength >= MatchHeaderRecord.MoneyMatchLengthSentinel ? 0 : hm.MatchLength;
+        IsJacoby = IsMoneyGame && hm.Jacoby;
+        IsBeaver = IsMoneyGame && hm.Beaver;
         MaxCubeLimit = hm.CubeLimit > 0 ? hm.CubeLimit : 6;
     }
 
@@ -60,7 +72,7 @@ internal sealed class MatchContext
     /// with the XG binary semantics; XgidEncoder consumes this unchanged.
     /// </summary>
     public int XgidCrawfordJacobyField =>
-        MatchLength > 0
+        !IsMoneyGame
             ? (IsCrawford ? 1 : 0)
             : (IsJacoby ? 1 : 0) + (IsBeaver ? 2 : 0);
 
@@ -73,7 +85,7 @@ internal sealed class MatchContext
                 MoveNumber = 0;
                 Score1 = gh.Score1;
                 Score2 = gh.Score2;
-                IsCrawford = MatchLength > 0 && gh.CrawfordApplies;
+                IsCrawford = !IsMoneyGame && gh.CrawfordApplies;
                 IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition);
                 CubeValue = 1;
                 CubePosition = 0;

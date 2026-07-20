@@ -1126,7 +1126,7 @@ public static class XgDecisionIterator
             return null;
 
         OpeningBookKey key;
-        if (ctx.MatchLength == 0)
+        if (ctx.IsMoneyGame)
         {
             key = OpeningBookKey.ForMoneyPlay(
                 analysis.PositionsPlayed[candidateIndex], activePlayer, ctx.IsJacoby);
