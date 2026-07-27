@@ -1132,6 +1132,20 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   single-arg form through `(directory, TopDirectoryOnly)` so the class
   carries one order contract. Deliberate behavior change, not a drive-by:
   it alters `IterateXgDirectory`'s file order — its own session.
+* **Probe the corpus for cube depth labels resolved from the wrong field.**
+  Cube depth labels resolve from `DoubleActionAnalysis.LevelRequest` (what the
+  user *asked* XG to run) while the emission gate checks `Level` (what
+  actually *ran*) — `BuildCubeRows` / `BuildCubeDiagramRequests` vs
+  `IsAnalysed(CubeRecord)`. The known divergence (phantom cube: requested
+  `1002`, ran `-100`) is gated out, but a cube where both are positive and
+  different would pass the gate with equities from the ran level and a label
+  naming the requested one. Unverified whether XG ever writes that state — and
+  the int `Level`'s cube-side encoding may not match the `LevelInfo` short
+  taxonomy, which may be *why* the code uses `LevelRequest`. Deferred work:
+  probe the corpus for gated-in cubes with `Level ≠ LevelRequest`; if they
+  exist, label from what ran. Surfaced (and deliberately not folded in) during
+  the `.xgp` play-over-cube arc, which removed depth from the emission policy
+  and made this harmless to that arc.
 * **Analysis carry-through landed as the slice exporter** (`XgpExporter`'s
   `XgFile` + coordinates surface) — the original "Option B"
   (reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from
