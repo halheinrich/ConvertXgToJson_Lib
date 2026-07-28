@@ -57,7 +57,7 @@ public class BoardTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
-                row.Board[0].Should().BeLessOrEqualTo(0,
+                row.Board[0].Should().BeLessThanOrEqualTo(0,
                     $"board[0] is opponent bar — never positive [{Path.GetFileName(path)} " +
                     $"Game {row.Game} Move {row.MoveNumber}]");
             }
@@ -74,7 +74,7 @@ public class BoardTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
-                row.Board[25].Should().BeGreaterOrEqualTo(0,
+                row.Board[25].Should().BeGreaterThanOrEqualTo(0,
                     $"board[25] is player on roll bar — never negative [{Path.GetFileName(path)} " +
                     $"Game {row.Game} Move {row.MoveNumber}]");
             }
@@ -114,7 +114,7 @@ public class BoardTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
-                row.Board[0].Should().BeLessOrEqualTo(0,
+                row.Board[0].Should().BeLessThanOrEqualTo(0,
                     $"board[0] is opponent bar — never positive [{Path.GetFileName(path)} " +
                     $"Game {row.Game} Move {row.MoveNumber}]");
             }
@@ -131,7 +131,7 @@ public class BoardTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
-                row.Board[25].Should().BeGreaterOrEqualTo(0,
+                row.Board[25].Should().BeGreaterThanOrEqualTo(0,
                     $"board[25] is player on roll bar — never negative [{Path.GetFileName(path)} " +
                     $"Game {row.Game} Move {row.MoveNumber}]");
             }

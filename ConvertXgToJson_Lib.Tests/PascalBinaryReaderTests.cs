@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using ConvertXgToJson_Lib.Parsing;
 using ConvertXgToJson_Lib.Tests.Helpers;
 

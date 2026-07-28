@@ -1,5 +1,5 @@
 using System.IO.Compression;
-using FluentAssertions;
+using AwesomeAssertions;
 using ConvertXgToJson_Lib.Parsing;
 using ConvertXgToJson_Lib.Tests.Helpers;
 using ConvertXgToJson_Lib.Writing;
