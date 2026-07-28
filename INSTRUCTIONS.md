@@ -608,6 +608,39 @@ doubler's board (no flip). Cube-side equity and error fields
 `cube.ErrorTake`) are written from the doubler's perspective; there is
 no second taker-perspective row.
 
+`IterateDiagramRequests` also stamps the **played** cube action onto
+`DecisionData.UserDoublerAction` / `UserTakerAction`, mapped from the raw
+`CubeRecord.Doubled` / `Taken` pane state. `Doubled` is a pane-state field,
+not a flag — only `1` (doubled) and `0` (no double) record a played action:
+
+| `Doubled` | `Taken`    | Doubler    | Taker  |
+|-----------|------------|------------|--------|
+| `1`       | `1` / `2`  | `Double`   | `Take` |
+| `1`       | `0`        | `Double`   | `Pass` |
+| `1`       | `-1`       | `Double`   | *null* |
+| `0`       | (any)      | `NoDouble` | *null* |
+| `-1`/`-2` | (any)      | *null*     | *null* |
+
+`-2` is the incidental cube pane beside a checker play (never analysed, so
+it never reaches a row); `-1` is the pane XG writes where a game ended with
+no cube action taken — every analysed `-1` record in the corpus is the last
+record of its game, followed by a footer whose `Termination` is ≥ 100
+(by resignation), and it is also what `XgpExporter` writes for a curated
+`.xgp` cube problem. Both map to *null* — "played action not recorded" —
+rather than being flattened into `NoDouble`.
+
+The mapping is keyed off the pane state alone, **not** off `ErrorCube`'s
+`-999` sentinel: the played action is a game fact, the error an analysis
+fact. They coincide in the corpus only because a record with no action has
+nothing to score. `Taken == 2` (beaver) maps to `Take` — the taker half
+models the accept-or-decline axis and a beaver accepts; no beaver appears
+in the corpus, so that arm is reasoned rather than fixture-pinned.
+
+Cross-half consistency (a recorded taker response implies the doubler
+doubled) is a producer contract `DecisionData` documents but does not
+guard; it is enforced here by gating the taker half on the doubler half,
+and pinned corpus-wide in `XgDecisionIteratorCubeActionTests`.
+
 ### `.xgp` file handling
 
 `.xgp` files (positions-only) encode "no analysis" differently from `.xg`

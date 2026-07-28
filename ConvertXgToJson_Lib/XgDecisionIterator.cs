@@ -665,6 +665,11 @@ public static class XgDecisionIterator
         int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
         ComputePipCounts(board, out int onRollPips, out int opponentPips);
 
+        // Resolved once: the doubler half is both a stamped field and the
+        // "a double was offered" gate on the take error, so the two can
+        // never disagree about whether this record holds a double.
+        CubeAction? doublerAction = UserDoublerActionOf(cube);
+
         yield return new BgDecisionData
         {
             Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true),
@@ -706,7 +711,11 @@ public static class XgDecisionIterator
                 CubeAnalysisMode = mode,
                 CubeAnalysisLevel = level,
                 UserDoubleError = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : (double?)null,
-                UserTakeError = (cube.Doubled == 1 && cube.ErrorTake > -999.0) ? Math.Abs(cube.ErrorTake) : (double?)null,
+                UserTakeError = (doublerAction is CubeAction.Double && cube.ErrorTake > -999.0)
+                    ? Math.Abs(cube.ErrorTake)
+                    : (double?)null,
+                UserDoublerAction = doublerAction,
+                UserTakerAction = UserTakerActionOf(cube),
             },
             Descriptive = new DescriptiveData
             {
@@ -729,6 +738,95 @@ public static class XgDecisionIterator
             },
         };
     }
+
+    // -----------------------------------------------------------------------
+    //  Cube record — played action
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Maps <see cref="CubeRecord.Doubled"/> onto the doubler-half
+    /// <see cref="CubeAction"/> the player on roll actually played, or
+    /// <see langword="null"/> when the record holds no played cube action.
+    /// Single source of the "a double was offered" test for this producer —
+    /// the take-error gate reads it too.
+    ///
+    /// <para>
+    /// <c>Doubled</c> is a pane-state field, not a two-valued flag: only
+    /// <c>1</c> (doubled) and <c>0</c> (declined to double, rolled) record
+    /// an action that was played. Neither negative value does. <c>-2</c> is
+    /// the incidental cube pane XG writes beside a checker play, and
+    /// <c>-1</c> is the pane XG writes where a game ended with no cube
+    /// action taken — every analysed <c>-1</c> record in the local corpus
+    /// is the last record of its game, each followed by a game footer whose
+    /// <see cref="GameFooterRecord.Termination"/> is ≥ 100, XG's
+    /// by-resignation encoding. <c>-1</c> is also the pane state
+    /// <see cref="XgpExporter"/> writes for a curated <c>.xgp</c> cube
+    /// problem, which likewise records nothing played. Both map to null —
+    /// the carrier's "played action not recorded" — rather than being
+    /// flattened into <see cref="CubeAction.NoDouble"/>, which would assert
+    /// a decision the player never made.
+    /// </para>
+    ///
+    /// <para>
+    /// Deliberately independent of <see cref="CubeRecord.ErrorCube"/>: the
+    /// played action is a fact about the game, its error a fact about the
+    /// analysis, and a decision can be one without the other. The corpus
+    /// makes the two look interchangeable — <c>ErrorCube</c> carries its
+    /// −1000 not-analysed sentinel on exactly the <c>Doubled == -1</c>
+    /// records — but that is a consequence of there being no action to
+    /// score, not evidence that an unscored action is an unknown one.
+    /// Keying off <c>ErrorCube</c> would make the null rule an accident of
+    /// this corpus.
+    /// </para>
+    /// </summary>
+    private static CubeAction? UserDoublerActionOf(CubeRecord cube) => cube.Doubled switch
+    {
+        1 => CubeAction.Double,
+        0 => CubeAction.NoDouble,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Maps <see cref="CubeRecord.Taken"/> onto the taker-half
+    /// <see cref="CubeAction"/> the opponent actually played, or
+    /// <see langword="null"/> when no response is recorded.
+    ///
+    /// <para>
+    /// Gated on the doubler half rather than on <c>Taken</c> alone. XG
+    /// leaves <c>Taken</c> at its <c>-1</c> "no response" value on every
+    /// undoubled record, so reading it in isolation would happen to satisfy
+    /// the carrier's cross-half producer contract — a recorded taker
+    /// response implies the doubler doubled — by accident of the source
+    /// data rather than by anything this producer guarantees.
+    /// </para>
+    ///
+    /// <para>
+    /// A recorded double with no response (<c>-1</c>) is a real shape and
+    /// stays null: the corpus holds a handful, each the last record of a
+    /// game that ended by resignation before the opponent formally
+    /// answered. That is exactly the case the per-half carrier exists to
+    /// express — doubler recorded, taker not.
+    /// </para>
+    ///
+    /// <para>
+    /// A beaver (<c>2</c>) maps to <see cref="CubeAction.Take"/>. The taker
+    /// half models the accept-or-decline axis and a beaver accepts; the
+    /// immediate redouble it carries is a separate action, recorded
+    /// separately in <see cref="CubeRecord.BeaverAccepted"/>. Null would
+    /// assert "no response recorded", which is false. No beaver appears
+    /// anywhere in the local corpus, so this arm is reasoned rather than
+    /// pinned by a fixture.
+    /// </para>
+    /// </summary>
+    private static CubeAction? UserTakerActionOf(CubeRecord cube) =>
+        UserDoublerActionOf(cube) is not CubeAction.Double
+            ? null
+            : cube.Taken switch
+            {
+                1 or 2 => CubeAction.Take,
+                0 => CubeAction.Pass,
+                _ => null,
+            };
 
     // -----------------------------------------------------------------------
     //  Board helpers
