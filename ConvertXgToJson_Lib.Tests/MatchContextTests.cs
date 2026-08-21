@@ -1,4 +1,4 @@
-using ConvertXgToJson_Lib.Models;
+﻿using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests;
 
@@ -118,6 +118,40 @@ public class MatchContextTests
         var ctx = BuildContext(matchLength: 0, jacoby: true, beaver: false, crawfordApplies: true);
 
         ctx.IsCrawford.Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    //  JacobyStamp — the money-only fact as stamped onto a decision record
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="MatchContext.JacobyStamp"/> is what the iterator writes to
+    /// <see cref="BgDataTypes_Lib.PositionData.IsJacoby"/>. Off money the
+    /// fact does not exist, so the stamp is <see langword="null"/> rather
+    /// than a <c>false</c> that would answer a question the record never
+    /// poses — including when the match header carries the flag anyway
+    /// (halheinrich/backgammon#120; SPEC-stats-identity.md §1, amended
+    /// 2026-08-20).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MatchPlay_JacobyStampIsNull_WhateverTheHeaderSays(bool jacoby)
+    {
+        var ctx = BuildContext(matchLength: 7, jacoby: jacoby, beaver: false, crawfordApplies: false);
+
+        ctx.JacobyStamp.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MoneyGame_JacobyStampIsTheFact(bool jacoby)
+    {
+        var ctx = BuildContext(matchLength: 0, jacoby: jacoby, beaver: true, crawfordApplies: false);
+
+        ctx.JacobyStamp.Should().Be(jacoby,
+            "in a money game the question arises and the header answers it");
     }
 
     // -----------------------------------------------------------------------

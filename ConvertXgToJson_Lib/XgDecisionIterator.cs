@@ -1,4 +1,4 @@
-using BgDataTypes_Lib;
+﻿using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
 using Microsoft.Extensions.Logging;
@@ -561,6 +561,7 @@ public static class XgDecisionIterator
                 CubeSize = ctx.CubeValue,
                 CubeOwner = CubeOwnerFor(ctx.CubePosition, move.ActivePlayer),
                 IsCrawford = ctx.IsCrawford,
+                IsJacoby = ctx.JacobyStamp,
             },
             Decision = new DecisionData
             {
@@ -684,6 +685,7 @@ public static class XgDecisionIterator
                 CubeSize = cubeActual,
                 CubeOwner = CubeOwnerFor(cubePos, cube.ActivePlayer),
                 IsCrawford = ctx.IsCrawford,
+                IsJacoby = ctx.JacobyStamp,
             },
             Decision = new DecisionData
             {

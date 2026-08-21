@@ -67,6 +67,31 @@ internal sealed class MatchContext
     }
 
     /// <summary>
+    /// The Jacoby fact as it is stamped onto a decision record's
+    /// <see cref="BgDataTypes_Lib.PositionData.IsJacoby"/>: the fact itself
+    /// for a money session, <see langword="null"/> for match play.
+    ///
+    /// <para>
+    /// The <see langword="null"/> is deliberate, not a shrug. Jacoby is
+    /// meaningless off money, so a match record does not pose the question —
+    /// and a stamped <c>false</c> would answer it anyway, asserting "the
+    /// Jacoby rule was not in force" about a game the rule cannot apply to.
+    /// Which kind of record it is stays the away-scores pair's job, the
+    /// single source of that truth; this member only carries the fact where
+    /// the fact exists. Consumers ignore it on match records either way
+    /// (SPEC-stats-identity.md §1, amended 2026-08-20;
+    /// halheinrich/backgammon#120).
+    /// </para>
+    ///
+    /// <para>
+    /// Derived here rather than at each stamping site so the money-only rule
+    /// keeps one home, beside <see cref="IsJacoby"/> and
+    /// <see cref="XgidCrawfordJacobyField"/>.
+    /// </para>
+    /// </summary>
+    public bool? JacobyStamp => IsMoneyGame ? IsJacoby : null;
+
+    /// <summary>
     /// XGID field 8: match play encodes Crawford as 1/0; money games encode
     /// Jacoby + 2×Beaver. Collocated here so the wire-format knowledge stays
     /// with the XG binary semantics; XgidEncoder consumes this unchanged.
