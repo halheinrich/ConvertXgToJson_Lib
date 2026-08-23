@@ -29,7 +29,7 @@ namespace ConvertXgToJson_Lib;
 /// XG Roller++) have zeros there — <see cref="Trials"/> 0 marks them.
 /// </para>
 /// </summary>
-public sealed class OpeningBookEntry
+internal sealed class OpeningBookEntry
 {
     /// <summary>Name of the contributor who rolled out or evaluated the
     /// position (e.g. "Neil Kazaross"; "GameSite 2000, Ltd" is XG itself).</summary>

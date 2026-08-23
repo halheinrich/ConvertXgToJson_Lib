@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ConvertXgToJson_Lib.Models;
 
 // ---------------------------------------------------------------------------
@@ -9,7 +11,7 @@ namespace ConvertXgToJson_Lib.Models;
 /// offset 8 of every 2560-byte TSaveRec; the parser dispatches on it and
 /// the writer stamps it back.
 /// </summary>
-public enum RecordType : byte
+internal enum RecordType : byte
 {
     /// <summary>tsHeaderMatch — match-level metadata; always the first record.</summary>
     HeaderMatch  = 0,
@@ -30,7 +32,7 @@ public enum RecordType : byte
 }
 
 /// <summary>Clock discipline of a <see cref="TimeSetting"/>.</summary>
-public enum ClockType
+internal enum ClockType
 {
     /// <summary>No clock.</summary>
     None       = 0,
@@ -41,7 +43,7 @@ public enum ClockType
 }
 
 /// <summary>XG play mode recorded in the match header.</summary>
-public enum GameMode
+internal enum GameMode
 {
     /// <summary>Free play.</summary>
     Free       = 0,
@@ -65,7 +67,7 @@ public enum GameMode
 /// <see cref="XgpExporter"/> both write <c>(SiteId)(-1)</c> for local saves,
 /// so consumers must tolerate values outside the named range.
 /// </summary>
-public enum SiteId
+internal enum SiteId
 {
     /// <summary>GammonSite.</summary>
     GammonSite    = 0,
@@ -102,7 +104,7 @@ public enum SiteId
 }
 
 /// <summary>Stake currency of a money session, per XG's currency table.</summary>
-public enum CurrencyId
+internal enum CurrencyId
 {
     /// <summary>US dollar.</summary>
     Dollar          = 0,
@@ -128,7 +130,7 @@ public enum CurrencyId
 /// <see cref="ThumbnailOffset"/>). The embedded thumbnail is not modeled:
 /// the writer always omits it and real XG tolerates that.
 /// </summary>
-public sealed class RichGameHeader
+internal sealed class RichGameHeader
 {
     /// <summary>File signature; must be 0x484D4752 ("RGMH" little-endian).</summary>
     public uint     MagicNumber      { get; init; }
@@ -177,7 +179,7 @@ public sealed class RichGameHeader
 /// Index 0 = opponent bar, 1-24 = points, 25 = player bar.
 /// Positive = player's checkers, negative = opponent's checkers.
 /// </summary>
-public sealed class PositionEngine
+internal sealed class PositionEngine
 {
     /// <summary>Raw signed-byte values, indices 0-25.</summary>
     public sbyte[] Points { get; init; } = new sbyte[26];
@@ -190,7 +192,7 @@ public sealed class PositionEngine
 /// them; the iterator surfaces them verbatim onto
 /// <c>PlayCandidate</c> / <c>DecisionData</c> (WinSingle → WinPct, etc.).
 /// </summary>
-public sealed class EvalResult
+internal sealed class EvalResult
 {
     /// <summary>Probability the on-roll player loses a backgammon.</summary>
     public float LoseBackgammon { get; init; }
@@ -220,7 +222,7 @@ public sealed class EvalResult
 /// −100 = never analysed. <c>XgDecisionIterator.ResolveDepthInfo</c> is the
 /// single projection of this taxonomy into labels / ranks / depth classes.
 /// </summary>
-public sealed class EvalLevel
+internal sealed class EvalLevel
 {
     /// <summary>XG analysis level (taxonomy above).</summary>
     public short Level    { get; init; }
@@ -229,7 +231,7 @@ public sealed class EvalLevel
 }
 
 /// <summary>Clock/time-control settings (32 bytes), as stored by XG.</summary>
-public sealed class TimeSetting
+internal sealed class TimeSetting
 {
     /// <summary>Clock discipline; <see cref="ClockType.None"/> when unclocked.</summary>
     public ClockType ClockType     { get; init; }
@@ -262,7 +264,7 @@ public sealed class TimeSetting
 /// <c>XgDecisionIterator.FindBestByEquityIndex</c> to locate the best
 /// candidate rather than assuming index 0.
 /// </summary>
-public sealed class BestMoveAnalysis
+internal sealed class BestMoveAnalysis
 {
     /// <summary>Position the analysis evaluated (XG's stored snapshot).</summary>
     public PositionEngine          Position      { get; init; } = new();
@@ -322,7 +324,7 @@ public sealed class BestMoveAnalysis
 /// <i>asks</i> and Level when the analysis <i>runs</i>, so a queued-but-
 /// unfinished rollout has Level == −100 with a non-zero LevelRequest.
 /// </summary>
-public sealed class DoubleActionAnalysis
+internal sealed class DoubleActionAnalysis
 {
     /// <summary>Position the analysis evaluated (XG's stored snapshot).</summary>
     public PositionEngine Position     { get; init; } = new();
@@ -375,7 +377,7 @@ public sealed class DoubleActionAnalysis
 /// deliberately encoded twice — <c>Parsing/SaveRecordParser</c> and
 /// <c>Writing/SaveRecordWriter</c> must change together, field-for-field.
 /// </summary>
-public abstract class SaveRecord
+internal abstract class SaveRecord
 {
     /// <summary>Record variant tag (byte at offset 8 of the raw record).</summary>
     public RecordType EntryType { get; init; }
@@ -392,7 +394,7 @@ public abstract class SaveRecord
 /// (players truncate at 128 chars). Writers must keep each twin pair in
 /// agreement.</para>
 /// </summary>
-public sealed class MatchHeaderRecord : SaveRecord
+internal sealed class MatchHeaderRecord : SaveRecord
 {
     /// <summary>ANSI (XG1 compat) twin of <see cref="Player1"/>; 40-byte Pascal string.</summary>
     public string   Player1Ansi    { get; init; } = "";
@@ -548,7 +550,7 @@ public sealed class MatchHeaderRecord : SaveRecord
 }
 
 /// <summary>tsHeaderGame (record type 1) – per-game header.</summary>
-public sealed class GameHeaderRecord : SaveRecord
+internal sealed class GameHeaderRecord : SaveRecord
 {
     /// <summary>Player 1 score entering the game.</summary>
     public int            Score1              { get; init; }
@@ -582,7 +584,7 @@ public sealed class GameHeaderRecord : SaveRecord
 /// treat a value &gt; −999.0 as present; <c>!= 0</c> / <c>HasValue</c>
 /// checks silently misread unanalyzed positions as zero-error.
 /// </summary>
-public sealed class CubeRecord : SaveRecord
+internal sealed class CubeRecord : SaveRecord
 {
     /// <summary>The doubler: 1 = player 1, −1 = player 2 (≥ 0 is player 1 everywhere).</summary>
     public int                 ActivePlayer     { get; init; }
@@ -673,7 +675,7 @@ public sealed class CubeRecord : SaveRecord
 /// tsMove (record type 3) – checker play. Error fields use the −1000
 /// "unanalyzed" sentinel — treat a value &gt; −999.0 as present.
 /// </summary>
-public sealed class MoveRecord : SaveRecord
+internal sealed class MoveRecord : SaveRecord
 {
     /// <summary>Position before the play, from player 1's perspective.</summary>
     public PositionEngine   InitialPosition  { get; init; } = new();
@@ -749,7 +751,7 @@ public sealed class MoveRecord : SaveRecord
 }
 
 /// <summary>tsFooterGame (record type 4) – end-of-game summary.</summary>
-public sealed class GameFooterRecord : SaveRecord
+internal sealed class GameFooterRecord : SaveRecord
 {
     /// <summary>Player 1 score after the game.</summary>
     public int      Score1           { get; init; }
@@ -775,7 +777,7 @@ public sealed class GameFooterRecord : SaveRecord
 }
 
 /// <summary>tsFooterMatch (record type 5) – end-of-match summary.</summary>
-public sealed class MatchFooterRecord : SaveRecord
+internal sealed class MatchFooterRecord : SaveRecord
 {
     /// <summary>Player 1 final score.</summary>
     public int      Score1    { get; init; }
@@ -810,7 +812,7 @@ public sealed class MatchFooterRecord : SaveRecord
 /// accumulator arrays are XG-internal (per first-roll bucketing) and are
 /// not interpreted by this library.
 /// </summary>
-public sealed class RolloutContext
+internal sealed class RolloutContext
 {
     /// <summary>Input: whether the rollout truncates after a fixed depth.</summary>
     public bool   Truncated           { get; init; }
@@ -946,15 +948,40 @@ public sealed class RolloutContext
 //  Top-level parsed file
 // ---------------------------------------------------------------------------
 
-/// <summary>Everything extracted from a single .XG file.</summary>
+/// <summary>
+/// A parsed or synthesized XG file — the opaque handle every public surface
+/// of this library exchanges: <see cref="XgFileReader"/> produces one,
+/// <see cref="XgFileWriter"/> / <see cref="XgpExporter"/> /
+/// <see cref="XgDecisionIterator"/> consume one, and
+/// <see cref="XgFileBuilder"/> is the one public way to make one in memory.
+///
+/// <para>
+/// The XG record model behind it is internal by design: consumers say what
+/// a match <i>is</i> through the builder and never see the on-disk record
+/// structure. The collections below carry <see cref="JsonIncludeAttribute"/>
+/// so <see cref="XgFileReader.ToJson"/> / <see cref="XgFileReader.ReadJson"/>
+/// round-trip the same JSON document they always did — the document shape
+/// is a published output contract and is pinned by the test suite.
+/// </para>
+/// </summary>
 public sealed class XgFile
 {
+    /// <summary>
+    /// In-assembly construction only: the reader, the exporter's record
+    /// assembly, the JSON deserializer, and <see cref="XgFileBuilder"/>.
+    /// </summary>
+    [JsonConstructor]
+    internal XgFile() { }
+
     /// <summary>The outer RichGameFormat header (thumbnail bytes not carried).</summary>
-    public RichGameHeader   Header          { get; init; } = new();
+    [JsonInclude]
+    internal RichGameHeader   Header          { get; init; } = new();
     /// <summary>All save records from temp.xg in order.</summary>
-    public List<SaveRecord> Records         { get; init; } = [];
+    [JsonInclude]
+    internal List<SaveRecord> Records         { get; init; } = [];
     /// <summary>All rollout contexts from temp.xgr in order.</summary>
-    public List<RolloutContext> Rollouts    { get; init; } = [];
+    [JsonInclude]
+    internal List<RolloutContext> Rollouts    { get; init; } = [];
     /// <summary>
     /// Raw comment lines from temp.xgc (RTF, one entry per record), joined
     /// by the records' comment indices. May carry unreferenced leftovers —
@@ -962,5 +989,6 @@ public sealed class XgFile
     /// format reality, not a parse failure. An interior empty entry is a
     /// real (empty) comment; skipping it desyncs every later index.
     /// </summary>
-    public List<string>     Comments        { get; init; } = [];
+    [JsonInclude]
+    internal List<string>     Comments        { get; init; } = [];
 }

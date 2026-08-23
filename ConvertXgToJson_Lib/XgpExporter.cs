@@ -68,30 +68,6 @@ namespace ConvertXgToJson_Lib;
 /// </summary>
 public static class XgpExporter
 {
-    /// <summary>
-    /// The GameId GUID real XG stamps into every <c>.xgp</c> RichGameHeader.
-    /// Constant across files and XG versions in the fixture corpus (2010
-    /// through current), so it is an XG format constant, not a per-file id.
-    /// </summary>
-    private static readonly Guid XgpGameId = new("2f5af5e1-e021-4832-a423-ef480ec58a0b");
-
-    /// <summary>
-    /// Producer fingerprint written into the match header's Location fields.
-    /// The ecosystem treats Location as tool provenance — Backgammon Galaxy
-    /// writes "BackgammonGalaxy" there (and XG imports those files happily),
-    /// and <see cref="Parsing.SaveRecordParser.IsGalaxyMoneyGame"/> keys on
-    /// it — so exports self-identify rather than mimicking XG's own
-    /// "eXtreme Gammon". Keep the string stable: it is the hook for ever
-    /// special-casing our own exports the way Galaxy's are special-cased.
-    /// </summary>
-    private const string ExporterLocation = "ConvertXgToJson_Lib";
-
-    /// <summary>Sentinel: analysis level "queued / never ran".</summary>
-    private const int UnanalysedLevel = -100;
-
-    /// <summary>Sentinel: error field "unanalyzed".</summary>
-    private const double UnanalysedError = -1000.0;
-
     // ------------------------------------------------------------------ //
     //  Public API
     // ------------------------------------------------------------------ //
@@ -463,34 +439,30 @@ public static class XgpExporter
             // shape) carrying the roll.
             records.Add(cube != null
                 ? SliceCubeRecord(cube, RemapCubeRollout, RemapComment)
-                : UnanalysedCubeRecord(
+                : XgRecordFactory.UnanalysedCubeRecord(
                     activePlayer: move!.ActivePlayer,
                     position: move.InitialPosition,
                     cubeValueRaw: move.CubeValue,
                     doubled: -2,
+                    taken: -1,
                     diceRolled: $"{move.Dice[0]}{move.Dice[1]}"));
             records.Add(SliceMoveRecord(move!, Remap, RemapComment));
         }
 
         return new XgFile
         {
-            Header = new RichGameHeader
-            {
-                HeaderVersion = 1,
-                GameId = XgpGameId,
-                // Raw wire domain: mh is the un-normalized source header, so
-                // "is money" is read directly off the 99999 sentinel. The
-                // normalized IsMoneyGame predicate (0 = money) deliberately
-                // does NOT apply here — the sentinel is re-emitted verbatim
-                // downstream (see BuildMatchHeader), so normalizing then
-                // denormalizing would be pointless ceremony.
-                SaveName = BuildSaveName(
-                    isMoney: mh.MatchLength >= MatchHeaderRecord.MoneyMatchLengthSentinel,
-                    matchLength: mh.MatchLength,
-                    score1: gh.Score1,
-                    score2: gh.Score2,
-                    jacoby: mh.Jacoby),
-            },
+            // Raw wire domain: mh is the un-normalized source header, so
+            // "is money" is read directly off the 99999 sentinel. The
+            // normalized IsMoneyGame predicate (0 = money) deliberately
+            // does NOT apply here — the sentinel is re-emitted verbatim
+            // downstream (CopyMatchHeader), so normalizing then
+            // denormalizing would be pointless ceremony.
+            Header = XgRecordFactory.FileHeader(BuildSaveName(
+                isMoney: mh.MatchLength >= MatchHeaderRecord.MoneyMatchLengthSentinel,
+                matchLength: mh.MatchLength,
+                score1: gh.Score1,
+                score2: gh.Score2,
+                jacoby: mh.Jacoby)),
             Records = records,
             Rollouts = rollouts,
             Comments = comments,
@@ -845,8 +817,9 @@ public static class XgpExporter
 
         var records = new List<SaveRecord>
         {
-            BuildMatchHeader(decision, isMoney, matchLength, jacoby, beaver, player1, player2),
-            BuildGameHeader(position, score1, score2, crawfordApplies),
+            BuildMatchHeader(decision, matchLength, jacoby, beaver, player1, player2),
+            // XG's position-editor pattern: the game "starts" at the saved position.
+            XgRecordFactory.GameHeader(position, score1, score2, crawfordApplies, gameNumber: 1),
             BuildCubeRecord(decision, position, cubeRaw),
         };
         if (!decision.Decision.IsCube)
@@ -854,12 +827,8 @@ public static class XgpExporter
 
         return new XgFile
         {
-            Header = new RichGameHeader
-            {
-                HeaderVersion = 1,
-                GameId = XgpGameId,
-                SaveName = BuildSaveName(isMoney, matchLength, score1, score2, jacoby),
-            },
+            Header = XgRecordFactory.FileHeader(
+                BuildSaveName(isMoney, matchLength, score1, score2, jacoby)),
             Records = records,
         };
     }
@@ -899,12 +868,13 @@ public static class XgpExporter
     }
 
     // ------------------------------------------------------------------ //
-    //  Record builders — values mirror what real XG writes for a position
-    //  saved from its editor (NoAnalysis/PlayAnalysis/DoubleAnalysis fixtures)
+    //  Record builders — decision-specific mapping over the XG-conformant
+    //  defaults in XgRecordFactory (the SSOT for what a synthesized record
+    //  looks like; shared with XgFileBuilder)
     // ------------------------------------------------------------------ //
 
     private static MatchHeaderRecord BuildMatchHeader(
-        BgDecisionData decision, bool isMoney, int matchLength,
+        BgDecisionData decision, int matchLength,
         bool jacoby, bool beaver, string player1, string player2)
     {
         string eventName = decision.Descriptive.Event ?? "";
@@ -912,61 +882,16 @@ public static class XgpExporter
             ? d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)
             : default;
 
-        return new MatchHeaderRecord
-        {
-            EntryType = RecordType.HeaderMatch,
-            Player1Ansi = player1,
-            Player2Ansi = player2,
-            Player1 = player1,
-            Player2 = player2,
-            MatchLength = isMoney ? MatchHeaderRecord.MoneyMatchLengthSentinel : matchLength,
-            Variation = 0,
-            Crawford = true,           // XG writes the rule flag on even for money sessions
-            Jacoby = isMoney && jacoby,
-            Beaver = isMoney && beaver,
-            AutoDouble = false,
-            Elo1 = 1600,
-            Elo2 = 1600,
-            Date = date,
-            EventAnsi = eventName,
-            Event = eventName,
-            GameId = DeterministicGameId(decision),
-            CompLevel1 = -1,
-            CompLevel2 = -1,
-            LocationAnsi = ExporterLocation,
-            Location = ExporterLocation,
-            GameMode = GameMode.Competition,
-            Invert = 1,
-            Version = 30,
-            Magic = 1229737284,        // constant XG stamps into every save
-            CommentHeaderMatchIndex = -1,
-            CommentFooterMatchIndex = -1,
-            IsMoneyMatch = false,      // XG leaves this false; 99999 is the money signal
-            SiteId = (SiteId)(-1),
-            CubeLimit = 10,            // XG default: max cube 2^10
-        };
+        return XgRecordFactory.MatchHeader(
+            matchLength, jacoby, beaver, player1, player2,
+            eventName, date, gameId: DeterministicGameId(decision));
     }
-
-    private static GameHeaderRecord BuildGameHeader(
-        sbyte[] position, int score1, int score2, bool crawfordApplies) => new()
-    {
-        EntryType = RecordType.HeaderGame,
-        Score1 = score1,
-        Score2 = score2,
-        CrawfordApplies = crawfordApplies,
-        // XG's position-editor pattern: the game "starts" at the saved position.
-        InitialPosition = new PositionEngine { Points = position },
-        GameNumber = 1,
-        InProgress = true,
-        CommentHeaderGameIndex = -1,
-        CommentFooterGameIndex = -1,
-    };
 
     private static CubeRecord BuildCubeRecord(
         BgDecisionData decision, sbyte[] position, int cubeRaw)
     {
         bool isCube = decision.Decision.IsCube;
-        return UnanalysedCubeRecord(
+        return XgRecordFactory.UnanalysedCubeRecord(
             activePlayer: 1,
             position: new PositionEngine { Points = position },
             cubeValueRaw: cubeRaw,
@@ -974,73 +899,23 @@ public static class XgpExporter
             // problem (DoubleAnalysis fixture), -2 when the position is a
             // play decision and the cube pane is incidental (PlayAnalysis).
             doubled: isCube ? -1 : -2,
+            taken: -1,
             // XG writes "11" as the cube-pane placeholder of a pre-roll
             // position; a play decision carries its real roll.
             diceRolled: isCube ? "11" : $"{decision.Decision.Dice[0]}{decision.Decision.Dice[1]}");
     }
 
-    /// <summary>
-    /// XG's incidental / never-analysed cube pane, exactly as real XG
-    /// writes it (NoAnalysis / PlayAnalysis fixtures). Shared by the
-    /// clean-position path (normalized perspective) and the slice path
-    /// (source perspective) — only the pane-state inputs differ.
-    /// </summary>
-    private static CubeRecord UnanalysedCubeRecord(
-        int activePlayer, PositionEngine position, int cubeValueRaw,
-        int doubled, string diceRolled) => new()
-    {
-        EntryType = RecordType.Cube,
-        ActivePlayer = activePlayer,
-        Doubled = doubled,
-        Taken = -1,
-        BeaverAccepted = -1,
-        RaccoonAccepted = -1,
-        CubeValue = cubeValueRaw,
-        Position = position,
-        Analysis = UnanalysedDoubleAction(),
-        ErrorCube = UnanalysedError,
-        DiceRolled = diceRolled,
-        ErrorTake = UnanalysedError,
-        RolloutIndex = -1,
-        AnalyzeLevel = -1,
-        ErrorBeaver = UnanalysedError,
-        ErrorRaccoon = UnanalysedError,
-        AnalyzeLevelRequested = -1,
-        TutorCube = -1,
-        TutorTake = -1,
-        ErrorTutorCube = UnanalysedError,
-        ErrorTutorTake = UnanalysedError,
-        CommentIndex = -1,
-    };
-
     private static MoveRecord BuildMoveRecord(
-        BgDecisionData decision, sbyte[] position, int cubeRaw) => new()
-    {
-        EntryType = RecordType.Move,
-        InitialPosition = new PositionEngine { Points = position },
-        FinalPosition = new PositionEngine(),   // no play made — XG leaves this zeroed
-        ActivePlayer = 1,
-        Dice = [decision.Decision.Dice[0], decision.Decision.Dice[1]],
-        CubeValue = cubeRaw,
-        Analysis = new BestMoveAnalysis { Level = UnanalysedLevel },
-        MoveError = UnanalysedError,
-        RolloutIndices = [.. Enumerable.Repeat(-1, 32)],
-        AnalyzeLevel = -1,
-        AnalyzeLevelLuck = -1,
-        TutorMoveIndex = -1,
-        ErrorTutorMove = UnanalysedError,
-        CommentIndex = -1,
-    };
-
-    /// <summary>
-    /// The "never analysed" cube-analysis block exactly as XG writes it
-    /// (NoAnalysis fixture): level −100, IsBeaver −100, all else zero.
-    /// </summary>
-    private static DoubleActionAnalysis UnanalysedDoubleAction() => new()
-    {
-        Level = UnanalysedLevel,
-        IsBeaver = UnanalysedLevel,
-    };
+        BgDecisionData decision, sbyte[] position, int cubeRaw) =>
+        XgRecordFactory.UnanalysedMoveRecord(
+            activePlayer: 1,
+            position: new PositionEngine { Points = position },
+            finalPosition: new PositionEngine(),   // no play made — XG leaves this zeroed
+            moveList: new int[8],
+            played: false,
+            cubeValueRaw: cubeRaw,
+            die1: decision.Decision.Dice[0],
+            die2: decision.Decision.Dice[1]);
 
     // ------------------------------------------------------------------ //
     //  Derivation helpers
@@ -1064,20 +939,17 @@ public static class XgpExporter
     }
 
     /// <summary>
-    /// Encodes cube size + owner into XG's signed-log2 record field:
-    /// 0 = centred 1-cube; +n = player 1 (the on-roll player here) owns
-    /// 2^n; −n = player 2 owns 2^n.
+    /// Encodes cube size + owner into XG's signed-log2 record field. The
+    /// on-roll player is written as player 1 on this path, so
+    /// <see cref="CubeOwner.OnRoll"/> is the player-1 sign.
     /// </summary>
-    private static int EncodeCube(int cubeSize, CubeOwner owner)
-    {
-        int log2 = BitOperations.Log2((uint)cubeSize);
-        return owner switch
+    private static int EncodeCube(int cubeSize, CubeOwner owner) =>
+        XgRecordFactory.EncodeCube(cubeSize, owner switch
         {
-            CubeOwner.OnRoll => log2,
-            CubeOwner.Opponent => -log2,
+            CubeOwner.OnRoll => 1,
+            CubeOwner.Opponent => -1,
             _ => 0,
-        };
-    }
+        });
 
     /// <summary>
     /// Recovers the money-game Jacoby/Beaver flags from XGID field 8

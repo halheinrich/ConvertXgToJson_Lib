@@ -14,7 +14,7 @@ public class MatchHeaderRecordTests
         string p1 = "Alice", string p2 = "Bob",
         int matchLen = 7, DateTime? date = null)
     {
-        var stream = XgFileBuilder.BuildMinimalXgFile(p1, p2, matchLen, date);
+        var stream = XgBytesBuilder.BuildMinimalXgFile(p1, p2, matchLen, date);
         return XgFileReader.ReadStream(stream);
     }
 

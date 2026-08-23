@@ -1,3 +1,4 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests;
@@ -37,35 +38,39 @@ namespace ConvertXgToJson_Lib.Tests;
 public class XgDecisionIteratorSentinelTests
 {
     // -----------------------------------------------------------------------
-    //  Synthetic — deterministic coverage of both sentinel encodings
+    //  Synthetic — deterministic coverage of both sentinel intents
     // -----------------------------------------------------------------------
 
+    /// <summary>
+    /// The two non-play shapes XG records as a checker-play's only
+    /// candidate, as the builder expresses them: the illegal-play marker
+    /// and the dance. The raw encodings ((-100, -100) / (0, 0)) are the
+    /// builder's and <see cref="XgMoveEncodingTests"/>' concern.
+    /// </summary>
+    public static TheoryData<string> SentinelKinds => new() { "illegal play", "dance" };
+
     [Theory]
-    [InlineData(-100, -100)]
-    [InlineData(0, 0)]
-    public void Iterate_SentinelOnlyAnalysis_RowSkipped(int from, int to)
+    [MemberData(nameof(SentinelKinds))]
+    public void Iterate_SentinelOnlyAnalysis_RowSkipped(string kind)
     {
-        var file = BuildFileWithSentinelOnlyMove((sbyte)from, (sbyte)to);
+        var file = BuildFileWithSentinelOnlyMove(kind);
 
         var rows = XgDecisionIterator.Iterate(file, sourceFile: "synthetic.xg").ToList();
 
         rows.Should().BeEmpty(
-            "the only MoveRecord in the file carries a sentinel-only analysis " +
-            $"({from}, {to}); iterator must filter it");
+            $"the only move in the file is a {kind}, a sentinel-only analysis; iterator must filter it");
     }
 
     [Theory]
-    [InlineData(-100, -100)]
-    [InlineData(0, 0)]
-    public void IterateDiagramRequests_SentinelOnlyAnalysis_RequestSkipped(int from, int to)
+    [MemberData(nameof(SentinelKinds))]
+    public void IterateDiagramRequests_SentinelOnlyAnalysis_RequestSkipped(string kind)
     {
-        var file = BuildFileWithSentinelOnlyMove((sbyte)from, (sbyte)to);
+        var file = BuildFileWithSentinelOnlyMove(kind);
 
         var requests = XgDecisionIterator.IterateDiagramRequests(file, sourceFile: "synthetic.xg").ToList();
 
         requests.Should().BeEmpty(
-            "the only MoveRecord in the file carries a sentinel-only analysis " +
-            $"({from}, {to}); diagram-request iterator must filter it");
+            $"the only move in the file is a {kind}, a sentinel-only analysis; diagram-request iterator must filter it");
     }
 
     /// <summary>
@@ -76,11 +81,13 @@ public class XgDecisionIteratorSentinelTests
     [Fact]
     public void Iterate_RealCandidate_RowEmitted()
     {
-        // 24/23 — raw (23, 22). Just a benign single-checker move with no
-        // hits and no bear-offs. The active player is on point 24.
-        var file = BuildFileWithMoves((sbyte)23, (sbyte)22);
+        // 24/23 — a benign single-checker move with no hits and no bear-offs.
+        var play = new Play();
+        play.Add(new Move(24, 23));
+        var builder = XgFileBuilder.ForMatch(7, "P1", "P2");
+        builder.AddGame(initialPosition: OneCheckerOn24()).Play(XgPlayer.Player1, new DiceRoll(3, 1), play);
 
-        var rows = XgDecisionIterator.Iterate(file, sourceFile: "synthetic.xg").ToList();
+        var rows = XgDecisionIterator.Iterate(builder.Build(), sourceFile: "synthetic.xg").ToList();
 
         rows.Should().HaveCount(1);
     }
@@ -143,87 +150,33 @@ public class XgDecisionIteratorSentinelTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Builds a minimal in-memory <see cref="XgFile"/> containing a single
-    /// MoveRecord whose analysis carries one candidate consisting of the
-    /// supplied <paramref name="from"/> / <paramref name="to"/> sentinel pair
-    /// followed by terminator filler.
+    /// Builds a minimal in-memory <see cref="XgFile"/> whose single move
+    /// record is the named sentinel — through <see cref="XgFileBuilder"/>,
+    /// the fixture SSOT.
     /// </summary>
-    private static XgFile BuildFileWithSentinelOnlyMove(sbyte from, sbyte to)
+    private static XgFile BuildFileWithSentinelOnlyMove(string kind)
     {
-        var moves = new sbyte[] { from, to, -1, -1, -1, -1, -1, -1 };
-        return BuildFileWithMoves(moves);
+        var builder = XgFileBuilder.ForMatch(7, "P1", "P2");
+        var game = builder.AddGame(initialPosition: OneCheckerOn24());
+        var dice = new DiceRoll(3, 1);
+        switch (kind)
+        {
+            case "illegal play": game.IllegalPlay(XgPlayer.Player1, dice); break;
+            case "dance": game.Dance(XgPlayer.Player1, dice); break;
+            default: throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown sentinel kind.");
+        }
+        return builder.Build();
     }
 
     /// <summary>
-    /// Builds a minimal in-memory <see cref="XgFile"/> with a single MoveRecord
-    /// whose first candidate's <c>Moves</c> array is the supplied <paramref name="vals"/>,
-    /// padded with -1 to length 8.
+    /// A board with one player-1 checker on point 24 — enough that a
+    /// synthetic non-sentinel test move (24/23) is plausible without the
+    /// test having to model a full game position.
     /// </summary>
-    private static XgFile BuildFileWithMoves(params sbyte[] vals)
+    private static int[] OneCheckerOn24()
     {
-        var moves = new sbyte[8];
-        for (int i = 0; i < 8; i++) moves[i] = i < vals.Length ? vals[i] : (sbyte)-1;
-
-        var initialPos = new PositionEngine
-        {
-            // One active checker on point 24 so a real (23, 22) move
-            // wouldn't underflow. Sentinel cases never read it.
-            Points = MakeStandardEnoughBoard(),
-        };
-
-        var move = new MoveRecord
-        {
-            EntryType = RecordType.Move,
-            InitialPosition = initialPos,
-            FinalPosition = initialPos,        // unused on the sentinel path
-            ActivePlayer = 1,
-            Dice = [3, 1],
-            CubeValue = 0,
-            MoveError = -1000.0,               // unanalysed-error sentinel
-            Analysis = new BestMoveAnalysis
-            {
-                MoveCount = 1,
-                Evals = [new EvalResult { Equity = 0.0f }],
-                Moves = [moves],
-                EvalLevels = [new EvalLevel { Level = 1 }],
-                PositionsPlayed = [initialPos],
-            },
-            RolloutIndices = new int[32].Select(_ => -1).ToArray(),
-        };
-
-        return new XgFile
-        {
-            Records =
-            {
-                new MatchHeaderRecord { EntryType = RecordType.HeaderMatch, MatchLength = 7, Player1 = "P1", Player2 = "P2" },
-                new GameHeaderRecord
-                {
-                    EntryType = RecordType.HeaderGame,
-                    InitialPosition = new PositionEngine { Points = StandardOpening() },
-                },
-                move,
-            },
-        };
-    }
-
-    /// <summary>
-    /// A 26-element board with one active checker on point 24 — enough that
-    /// a synthetic non-sentinel test move (24/23) is plausible without
-    /// the test having to model a full game position.
-    /// </summary>
-    private static sbyte[] MakeStandardEnoughBoard()
-    {
-        var pts = new sbyte[26];
+        var pts = new int[26];
         pts[24] = 1;
-        return pts;
-    }
-
-    private static sbyte[] StandardOpening()
-    {
-        var pts = new sbyte[26];
-        // Standard backgammon opening, on-roll-relative (player1 perspective).
-        pts[6]  = -5; pts[8]  = -3; pts[13] =  5; pts[24] = -2;
-        pts[19] =  5; pts[17] =  3; pts[12] = -5; pts[1]  =  2;
         return pts;
     }
 

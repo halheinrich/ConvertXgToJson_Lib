@@ -31,4 +31,10 @@
   <ItemGroup>
     <Folder Include="TestData\Output\" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Pre-change captures of XgFileReader.ToJson over FixtureFiles — the
+         JSON document contract JsonContractTests pins. Regenerate only for a
+         deliberate, documented contract change. -->
+    <EmbeddedResource Include="Golden\*.json" LogicalName="Golden.%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

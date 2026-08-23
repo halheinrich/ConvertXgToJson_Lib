@@ -14,7 +14,7 @@ namespace ConvertXgToJson_Lib.Tests;
 public class JsonOutputTests
 {
     private static XgFile BuildFile() =>
-        XgFileReader.ReadStream(XgFileBuilder.BuildMinimalXgFile("Alice", "Bob", 7));
+        XgFileReader.ReadStream(XgBytesBuilder.BuildMinimalXgFile("Alice", "Bob", 7));
 
     private static JsonDocument Serialize(XgFile file) =>
         JsonDocument.Parse(XgFileReader.ToJson(file));

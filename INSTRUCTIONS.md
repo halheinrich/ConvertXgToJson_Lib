@@ -37,9 +37,12 @@ ConvertXgToJson_Lib/
   OpeningBookEntry.cs
   OpeningBookKey.cs
   XgContainerLayout.cs
+  XgCubeEquities.cs
   XgDecisionIterator.cs
+  XgFileBuilder.cs
   XgFileReader.cs
   XgFileWriter.cs
+  XgGameBuilder.cs
   XgGameInfo.cs
   XgidEncoder.cs
   XgIteratorCallbacks.cs
@@ -48,6 +51,9 @@ ConvertXgToJson_Lib/
   XgMatchInfo.cs
   XgMoveTranslator.cs
   XgpExporter.cs
+  XgPlayCandidate.cs
+  XgPlayer.cs
+  XgRecordFactory.cs
   XgpSliceOptions.cs
   Json/
     XgJsonOptions.cs
@@ -77,11 +83,15 @@ ConvertXgToJson_Lib.Tests/
   DiagramRequestIteratorTests.cs
   FileIOCollection.cs
   GlobalUsings.cs
+  Golden/            (embedded pre-change ToJson captures; JsonContractTests)
+  JsonContractTests.cs
+  PublicSurfaceTests.cs
   ReadMatchInfoBenchmarkTests.cs
   RealFileTests.cs
   SaveRecordWriterTests.cs
   TestPaths.cs
   XgDecisionIteratorTests.cs
+  XgFileBuilderTests.cs
   XgFileWriterTests.cs
   XgpExporterTests.cs
   XgpExportXgAgreementTests.cs
@@ -92,6 +102,20 @@ The test directory lists principal classes only; additional `*Tests.cs`
 files exist per parser, builder, and analysis surface.
 
 ## Architecture
+
+### Record model is internal
+
+The XG on-disk record model (`Models/Models.cs`: `SaveRecord` and its six
+variants, `RolloutContext`, `RichGameHeader`, the analysis/eval carriers,
+their enums; plus `OpeningBookEntry` / `OpeningBookKey`) is `internal` by
+design (halheinrich/backgammon#131 — the deep-module cut). `XgFile` is the
+public opaque handle: internal constructor, internal `[JsonInclude]`
+collections, no public members. Consumers say what a match *is* through
+`XgFileBuilder` and consume decisions through the iterator; nothing outside
+this assembly (plus its test project via `InternalsVisibleTo`) sees a
+record. `PublicSurfaceTests` pins this; `JsonContractTests` pins that the
+JSON document (XgToJson's output contract) survived the change
+byte-for-byte, against goldens embedded in the test project.
 
 ### Pipeline
 
@@ -285,6 +309,51 @@ perspective, the clean path normalizes); slice comparisons are direct
 record equivalence — analysis included — with one documented exclusion:
 the tutor family (`ErrorTutor*`, `TutorPosition`), which XG initializes at
 runtime while imported sources carry zeros. Never byte identity.
+
+### Synthesis (XgFileBuilder / XgGameBuilder)
+
+The one public way to make an in-memory `XgFile` — intent-level inputs, the
+record stream synthesized behind the handle. `XgFileBuilder.ForMatch` /
+`ForMoneySession` name the players and the match form; `AddGame` takes the
+entering score, optional Crawford flag, and optional initial position (all
+positions in the public surface are 26-cell boards in XG's player-1 frame);
+the returned `XgGameBuilder` records decisions in play order:
+
+* `Play(player, dice, played)` — analysed play whose analysis is the played
+  move as its only 1-ply candidate (XG's analysed forced play); the
+  `candidates` overload takes explicit `XgPlayCandidate`s (Play + equity +
+  ply). `UnanalysedPlay` advances the position but never emits.
+  `Dance` / `IllegalPlay` record XG's two non-play sentinels as intents —
+  the raw encodings stay the builder's business.
+* `CubeDecision(doubler, XgCubeEquities, ply, doublerAction, takerAction)` —
+  analysed cube; XG's stored errors are *derived* from the equities and the
+  played actions, and the played actions map onto the `Doubled`/`Taken`
+  pane state (the inverse of the iterator's UserDoublerAction mapping).
+  `UnanalysedCube` is the incidental pane; its actions still move the cube.
+* State is tracked per game: plays advance the position (validated against
+  the board through `BgDataTypes_Lib.BoardState` — from-point occupied, no
+  blocked destination, hit flag agreeing with a blot; dice legality is
+  deliberately not checked), a taken double doubles the cube to the taker,
+  a pass ends the game (further decisions throw). `AtPosition` resets the
+  tracked position for mid-game problem positions.
+* Validation is eager and loud (`ArgumentException` at the offending call);
+  an unrepresentable match — Crawford at a non-Crawford score, a 16-checker
+  board, a reply without a double — never reaches `Build()`.
+* Output is deterministic (no timestamps or random ids; two `Build()` calls
+  write identical bytes) and self-identifies via the Location fingerprint
+  shared with `XgpExporter`.
+
+`XgRecordFactory` (internal) is the SSOT both synthesis paths draw from —
+XG's editor-save header defaults, the never-analysed panes, the incidental
+cube pane, the signed-log2 cube encoding, the producer fingerprint.
+`XgpExporter`'s clean-position path and the builder must keep sharing it.
+
+Two level-code facts live here: XG's PLAYERLEVEL code for an N-ply
+evaluation is **N − 1** (`ToLevelCode`; `LevelInfo` is the decode
+direction), and because the iterator gates analysed cubes on `Level > 0`, a
+1-ply cube pane (level 0) is downstream-indistinguishable from an
+unanalysed one — `CubeDecision` therefore refuses `ply: 1` (min 2) rather
+than synthesize a decision that silently never emits.
 
 ### XgDecisionIterator
 
@@ -488,8 +557,10 @@ Jacoby keys money entries, Crawford keys match entries, Beaver is entry
 data only.
 
 **Selection.** One key can hold many entries (independent community
-rollouts + XG's own Roller++ baseline). `TryGetEntry` returns the entry
-XG displays, per the empirically pinned policy: entry-level rank first
+rollouts + XG's own Roller++ baseline). `TryGetEntry` (internal, like the
+whole keyed-lookup surface — the key needs the internal record position
+convention, so the public intent is `XgIteratorOptions.OpeningBook`
+enrichment, never direct lookup) returns the entry XG displays, per the empirically pinned policy: entry-level rank first
 (rollout > Roller++, via the `ResolveDepthInfo` rank taxonomy — the SSOT
 for level ordering), then rollout moves-level rank, cube-level rank,
 trials, analysis date, file position (import-append: later wins). XG
@@ -664,6 +735,72 @@ match files:
 ## Public API
 
 ```csharp
+// The opaque handle every surface exchanges. No public members: reading,
+// writing, iterating, exporting, and synthesis all take or return the
+// handle whole. (Namespace ConvertXgToJson_Lib.Models — the model types
+// around it are internal; the namespace placement predates that and moves
+// with the #19 rename, not before.)
+public sealed class XgFile { }
+
+// Intent-level synthesis — the one public way to make an in-memory XgFile.
+// Positions are 26-cell boards in XG's player-1 frame; plays are
+// BgDataTypes_Lib.Play in the mover's numbering. Eager, loud validation;
+// deterministic output. See "Synthesis" above for semantics.
+public sealed class XgFileBuilder
+{
+    public static XgFileBuilder ForMatch(int matchLength, string player1, string player2);
+    public static XgFileBuilder ForMoneySession(string player1, string player2,
+                                                bool jacoby = true, bool beaver = false);
+
+    public int    MatchLength    { get; }   // 0 = money
+    public bool   IsMoneySession { get; }
+    public string Player1        { get; }
+    public string Player2        { get; }
+    public bool   IsJacoby       { get; }
+    public bool   IsBeaver       { get; }
+
+    public XgGameBuilder AddGame(int score1 = 0, int score2 = 0, bool isCrawford = false,
+                                 IReadOnlyList<int>? initialPosition = null);
+    public XgFile        Build();           // header-only file when no games
+}
+
+public sealed class XgGameBuilder           // from AddGame; methods chain
+{
+    public int  GameNumber { get; }
+    public int  Score1 { get; }
+    public int  Score2 { get; }
+    public bool IsCrawford { get; }
+    public int  DecisionCount { get; }
+
+    public XgGameBuilder AtPosition(IReadOnlyList<int> position);
+
+    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, Play played);
+    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, Play played,
+                              IReadOnlyList<XgPlayCandidate> candidates);
+    public XgGameBuilder UnanalysedPlay(XgPlayer player, DiceRoll dice, Play played);
+    public XgGameBuilder Dance(XgPlayer player, DiceRoll dice);
+    public XgGameBuilder IllegalPlay(XgPlayer player, DiceRoll dice);
+
+    public XgGameBuilder CubeDecision(XgPlayer doubler, XgCubeEquities equities,
+                                      int ply = 2,   // 2–7; 1-ply cube is unrepresentable
+                                      CubeAction? doublerAction = null,
+                                      CubeAction? takerAction = null);
+    public XgGameBuilder UnanalysedCube(XgPlayer doubler,
+                                        CubeAction? doublerAction = null,
+                                        CubeAction? takerAction = null);
+}
+
+public enum XgPlayer { Player1, Player2 }   // header slots, not roles
+
+// One analysed candidate: the play, its equity (mover's perspective), and
+// its depth (1–7 plies). Invalid depth unrepresentable.
+public sealed record XgPlayCandidate(Play Play, double Equity, int Ply = 1);
+
+// The three cubeful equities of an analysed cube decision, doubler's
+// perspective; proper actions and played-action errors derive from these.
+public readonly record struct XgCubeEquities(
+    double NoDouble, double DoubleTake, double DoubleDrop);
+
 public static class XgFileReader
 {
     // File discovery
@@ -794,52 +931,10 @@ public sealed class OpeningBook
     public int      FormatVersion { get; }
     public DateTime CreatedOn     { get; }
 
-    // Best entry per the documented selection policy (the one XG displays).
-    public bool TryGetEntry(in OpeningBookKey key, out OpeningBookEntry? entry);
-    // All entries for the key, best first; empty when none.
-    public IReadOnlyList<OpeningBookEntry> GetEntries(in OpeningBookKey key);
-}
-
-public readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
-{
-    // Factories own the two normalization conventions (perspective flip,
-    // away-score orientation); positionPlayed is the candidate's resulting
-    // position in the XG record convention (player-1-relative), e.g. an
-    // element of BestMoveAnalysis.PositionsPlayed. Cube-centred-at-1
-    // contexts only (see Pitfalls).
-    public static OpeningBookKey ForMatchPlay(
-        PositionEngine positionPlayed, int activePlayer,
-        int moverAway, int opponentAway, bool isCrawford);
-    public static OpeningBookKey ForMoneyPlay(
-        PositionEngine positionPlayed, int activePlayer, bool jacoby);
-}
-
-public sealed class OpeningBookEntry
-{
-    public string         Contributor     { get; init; }
-    public PositionEngine Position        { get; init; }  // new-on-roll perspective
-    public int  CubeValue     { get; init; }
-    public int  CubeOwnerSign { get; init; }              // raw; perspective unverified
-    public bool IsMoneySession { get; }                   // OnRollAway < 0
-    public int  OnRollAway    { get; init; }              // −1 = money
-    public int  OpponentAway  { get; init; }              // the mover's away; −1 = money
-    public bool Jacoby        { get; init; }
-    public bool Beaver        { get; init; }
-    public bool Crawford      { get; init; }
-    public EvalResult Evaluation { get; init; }           // mover perspective; equity slot is cubeful
-    public int    Level  { get; init; }                   // 100 rollout / 1002 Roller++
-    public bool   IsRollout { get; }                      // Level == 100; gates rollout-parameter reads
-    public int    Trials { get; init; }                   // 0 for evaluation entries
-    public float  EquityStandardDeviation { get; init; }
-    public double? ConfidenceInterval95 { get; }          // 1.96σ/√Trials; null for evals
-    public int    RolloutMovesLevel { get; init; }        // PLAYERLEVEL codes
-    public int    RolloutCubeLevel  { get; init; }
-    public int    Seed { get; init; }
-    public int    EngineVersionMajor { get; init; }
-    public int    EngineVersionMinor { get; init; }
-    public TimeSpan Duration  { get; init; }
-    public DateTime AddedOn   { get; init; }
-    public DateTime AnalyzedOn { get; init; }             // the tooltip date
+    // The keyed lookup (TryGetEntry / GetEntries over OpeningBookKey) and
+    // OpeningBookEntry are internal: keying needs the internal record
+    // position convention. Public intent is handing the instance to
+    // XgIteratorOptions.OpeningBook for depth enrichment.
 }
 
 public sealed class XgIteratorState
@@ -949,6 +1044,19 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   branch to either leaf. The encapsulation principle is that sentinel
   semantics belong with the iterator that decides what to emit, not with
   the leaf that operates on the resulting move encoding.
+* **The record model is internal by design; the builder is the only
+  synthesis path.** Do not re-publicize a record type to unblock a caller —
+  the caller's need is a missing intent on `XgFileBuilder` (or, for tests
+  of this repo only, `InternalsVisibleTo` already covers it).
+  `PublicSurfaceTests` fails on any drift back to `public`, and
+  `JsonContractTests` pins the JSON output contract against embedded
+  goldens captured before the change — regenerate those goldens only for a
+  deliberate, documented contract change, and re-tie them to the binary
+  fixtures (the `Golden_ParsesToTheSameModel` leg) when you do.
+* **`XgRecordFactory` is the synthesized-record SSOT.** The builder and
+  `XgpExporter`'s clean path must keep drawing header defaults, sentinel
+  panes, and the cube encoding from it; a field added to a synthesized
+  record shape belongs there, not in either caller.
 * **The TSaveRec byte layout is encoded twice — parser and writer.** A
   deliberate serializer duality: `Parsing/SaveRecordParser` and
   `Writing/SaveRecordWriter` (likewise the rollout, comment, and outer-header

@@ -5,12 +5,22 @@ using ConvertXgToJson_Lib.Parsing;
 namespace ConvertXgToJson_Lib;
 
 /// <summary>
-/// Position-keyed lookup over XG's opening-book database
-/// (<c>OpeningBookV2.ob</c>, installed with eXtreme Gammon 2). Load once
-/// with <see cref="Load"/> / <see cref="TryLoad"/>, then resolve candidate
-/// plays to book entries with <see cref="TryGetEntry"/> — the data behind
-/// the bare 998/999 book level codes that <c>.xg</c> files stamp on
-/// book-analysed candidates.
+/// A loaded XG opening-book database (<c>OpeningBookV2.ob</c>, installed
+/// with eXtreme Gammon 2) — the rollout data behind the bare 998/999 book
+/// level codes that <c>.xg</c> files stamp on book-analysed candidates.
+/// Load once with <see cref="Load"/> / <see cref="TryLoad"/> and hand the
+/// instance to the decision iterator through
+/// <see cref="XgIteratorOptions.OpeningBook"/>; the iterator resolves each
+/// book-stamped candidate to its entry and enriches the emitted depth
+/// labels and levels.
+///
+/// <para>
+/// Position-keyed lookup (<see cref="TryGetEntry"/> / <see cref="GetEntries"/>
+/// over an <see cref="OpeningBookKey"/>) is internal to that enrichment:
+/// keying needs the XG record position convention, which is not part of
+/// the public surface, so a consumer's intent is "enrich with this book",
+/// never "look this position up".
+/// </para>
 ///
 /// <para>
 /// The book may hold several entries for one <see cref="OpeningBookKey"/>
@@ -131,7 +141,7 @@ public sealed class OpeningBook
     /// play: the best matching entry under the selection policy documented
     /// on the class. Returns false when the book holds no entry for the key.
     /// </summary>
-    public bool TryGetEntry(in OpeningBookKey key, [NotNullWhen(true)] out OpeningBookEntry? entry)
+    internal bool TryGetEntry(in OpeningBookKey key, [NotNullWhen(true)] out OpeningBookEntry? entry)
     {
         if (!_index.TryGetValue(key, out var indices))
         {
@@ -153,7 +163,7 @@ public sealed class OpeningBook
     /// first under the selection policy documented on the class; empty when
     /// the book holds none.
     /// </summary>
-    public IReadOnlyList<OpeningBookEntry> GetEntries(in OpeningBookKey key)
+    internal IReadOnlyList<OpeningBookEntry> GetEntries(in OpeningBookKey key)
     {
         if (!_index.TryGetValue(key, out var indices))
             return [];

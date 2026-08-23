@@ -161,9 +161,9 @@ public class DecompressionTests
 
     private static byte[] BuildTwoRecordXg()
     {
-        byte[] rec0 = XgFileBuilder.BuildMatchHeaderRecord("Alice", "Bob", 7,
+        byte[] rec0 = XgBytesBuilder.BuildMatchHeaderRecord("Alice", "Bob", 7,
             new DateTime(2024, 1, 15, 14, 30, 0, DateTimeKind.Utc));
-        byte[] rec1 = XgFileBuilder.BuildMatchFooterRecord(7);
+        byte[] rec1 = XgBytesBuilder.BuildMatchFooterRecord(7);
         return [.. rec0, .. rec1];
     }
 

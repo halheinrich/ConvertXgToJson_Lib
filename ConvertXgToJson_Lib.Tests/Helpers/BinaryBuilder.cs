@@ -164,7 +164,7 @@ internal sealed class BinaryBuilder
 /// Builds complete .XG file byte payloads for integration-level tests,
 /// assembling: RichGameHeader + thumbnail + compressed(xg+xgi+xgr+xgc).
 /// </summary>
-internal static class XgFileBuilder
+internal static class XgBytesBuilder
 {
     private const uint RmMagicNumber = 0x484D4752u;   // "RGMH"
     private const uint HeaderSize = 8232u;

@@ -54,7 +54,7 @@ public class GalaxyMoneyGameTests
     public void Parser_GalaxyMoneyGame_MatchLengthRewrittenToSentinel_IsMoneyMatchTrue()
     {
         var file = XgFileReader.ReadStream(
-            XgFileBuilder.BuildMinimalXgFile(matchLength: 16, location: "BackgammonGalaxy"));
+            XgBytesBuilder.BuildMinimalXgFile(matchLength: 16, location: "BackgammonGalaxy"));
         var header = file.Records.OfType<MatchHeaderRecord>().First();
 
         header.MatchLength.Should().Be(99999,
@@ -68,7 +68,7 @@ public class GalaxyMoneyGameTests
     {
         // A genuine 16-point rated match at a non-Galaxy site is not money.
         var file = XgFileReader.ReadStream(
-            XgFileBuilder.BuildMinimalXgFile(matchLength: 16, location: "Monaco"));
+            XgBytesBuilder.BuildMinimalXgFile(matchLength: 16, location: "Monaco"));
         var header = file.Records.OfType<MatchHeaderRecord>().First();
 
         header.MatchLength.Should().Be(16, "a non-Galaxy match length is left untouched");
@@ -80,7 +80,7 @@ public class GalaxyMoneyGameTests
     {
         // Galaxy location but an odd length: a genuine Galaxy rated match.
         var file = XgFileReader.ReadStream(
-            XgFileBuilder.BuildMinimalXgFile(matchLength: 7, location: "BackgammonGalaxy"));
+            XgBytesBuilder.BuildMinimalXgFile(matchLength: 7, location: "BackgammonGalaxy"));
         var header = file.Records.OfType<MatchHeaderRecord>().First();
 
         header.MatchLength.Should().Be(7,
@@ -94,7 +94,7 @@ public class GalaxyMoneyGameTests
         // XG's native 99999 money sentinel is not Galaxy's kludge; the parser
         // leaves it raw on the record (consumers normalize the sentinel).
         var file = XgFileReader.ReadStream(
-            XgFileBuilder.BuildMinimalXgFile(matchLength: 99999, location: "Monaco"));
+            XgBytesBuilder.BuildMinimalXgFile(matchLength: 99999, location: "Monaco"));
         var header = file.Records.OfType<MatchHeaderRecord>().First();
 
         header.MatchLength.Should().Be(99999, "the 99999 sentinel is left raw on the record");

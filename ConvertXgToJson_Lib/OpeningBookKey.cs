@@ -35,7 +35,7 @@ namespace ConvertXgToJson_Lib;
 /// the convention is proven.
 /// </para>
 /// </summary>
-public readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
+internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
 {
     // The 26 position sbytes packed into four little-endian ulongs
     // (zero-padded to 32 bytes) so the struct is equatable and hashable

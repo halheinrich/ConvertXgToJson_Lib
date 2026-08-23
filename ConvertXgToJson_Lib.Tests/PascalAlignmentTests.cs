@@ -23,7 +23,7 @@ public class PascalAlignmentTests
     [Fact]
     public void MatchHeaderRecord_MatchLengthStartsAt92()
     {
-        byte[] bytes = XgFileBuilder.BuildMatchHeaderRecord("Alice", "Bob", 99, DateTime.UtcNow);
+        byte[] bytes = XgBytesBuilder.BuildMatchHeaderRecord("Alice", "Bob", 99, DateTime.UtcNow);
         // SPlayer1 at 9, length=41 → ends at 49 (inclusive) = offset 50
         // SPlayer2 at 50, length=41 → ends at 90 (inclusive) = offset 91
         // MatchLength: AlignTo(4) from 91 → pad 1 → starts at 92
@@ -39,7 +39,7 @@ public class PascalAlignmentTests
     [Fact]
     public void MatchHeaderRecord_Elo1StartsAt104()
     {
-        byte[] bytes = XgFileBuilder.BuildMatchHeaderRecord("X", "Y", 1, DateTime.UtcNow);
+        byte[] bytes = XgBytesBuilder.BuildMatchHeaderRecord("X", "Y", 1, DateTime.UtcNow);
         // Offset 104 in the record (positions relative to record start byte 0)
         double elo1 = BitConverter.ToDouble(bytes, 104);
         elo1.Should().BeApproximately(1500.0, 1e-9);
@@ -53,7 +53,7 @@ public class PascalAlignmentTests
     [Fact]
     public void MatchHeaderRecord_GameIdStartsAt268()
     {
-        byte[] bytes = XgFileBuilder.BuildMatchHeaderRecord("X", "Y", 1, DateTime.UtcNow);
+        byte[] bytes = XgBytesBuilder.BuildMatchHeaderRecord("X", "Y", 1, DateTime.UtcNow);
         int gameId = BitConverter.ToInt32(bytes, 268);
         gameId.Should().Be(42);
     }
@@ -67,7 +67,7 @@ public class PascalAlignmentTests
     {
         // Crawford(101), Jacoby(102), Beaver(103), AutoDouble(104-1=103 then Elo1@104)
         // The four booleans should pack consecutively with no gaps.
-        byte[] bytes = XgFileBuilder.BuildMatchHeaderRecord("A", "B", 7, DateTime.UtcNow);
+        byte[] bytes = XgBytesBuilder.BuildMatchHeaderRecord("A", "B", 7, DateTime.UtcNow);
         // Crawford=true, Jacoby=false, Beaver=false, AutoDouble=false
         bytes[100].Should().Be(1); // Crawford = true
         bytes[101].Should().Be(0); // Jacoby   = false
@@ -235,7 +235,7 @@ public class PascalAlignmentTests
         // Elo1(104-111) Elo2(112-119) exp1(120-123) exp2(124-127)
         // Date(128-135) SEvent(136-264) pad3(265-267) GameId(268-271)
 
-        byte[] bytes = XgFileBuilder.BuildMatchHeaderRecord(
+        byte[] bytes = XgBytesBuilder.BuildMatchHeaderRecord(
             "Alice", "Bob", 11, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
         bytes[8].Should().Be(0, "EntryType=tsHeaderMatch(0) at offset 8");

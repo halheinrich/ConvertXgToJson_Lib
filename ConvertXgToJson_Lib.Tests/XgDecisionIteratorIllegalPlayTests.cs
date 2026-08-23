@@ -1,3 +1,4 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using Microsoft.Extensions.Logging;
 
@@ -11,17 +12,15 @@ namespace ConvertXgToJson_Lib.Tests;
 /// so the historical <see cref="IndexOutOfRangeException"/> can't fire), the
 /// decisions surrounding it still emit, and a contextual <c>Warning</c> is
 /// logged. Dance ((0, 0)) and the regression cases stay covered by
-/// <see cref="XgDecisionIteratorSentinelTests"/>; this file adds the broadened
-/// <c>(-100, X)</c> marker and the logging contract.
+/// <see cref="XgDecisionIteratorSentinelTests"/>; this file adds the
+/// surrounding-decisions behaviour and the logging contract. (The broadened
+/// <c>(-100, X)</c> marker shape seen in tournament files is an encoding
+/// fact, pinned by <see cref="XgMoveEncodingTests"/> — the fixture here is
+/// built through <see cref="XgFileBuilder"/> and does not spell the bytes.)
 /// </summary>
 [Collection("FileIO")]
 public class XgDecisionIteratorIllegalPlayTests
 {
-    // The marker XG stamps at the user-play slot when the recorded play was
-    // illegal — first element -100, partner a stray index. Real shape seen in
-    // tournament files; broader than the (-100, -100) regression pair.
-    private static readonly sbyte[] IllegalPlayCandidate = [-100, 10, 10, 7, 6, 7, 6, 7];
-
     [Fact]
     public void Iterate_IllegalPlaySurroundedByLegalMoves_SkipsOnlyIllegalAndEmitsRest()
     {
@@ -80,67 +79,28 @@ public class XgDecisionIteratorIllegalPlayTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// One game with three analysed move records: a legal move (roll 3-1),
-    /// the illegal-play marker (roll 5-2), then another legal move (roll 3-1).
+    /// One game with three move records: a legal play (roll 3-1), the
+    /// illegal-play marker (roll 5-2), then another legal play (roll 3-1).
+    /// Synthesized through <see cref="XgFileBuilder"/> — the fixture SSOT;
+    /// the marker's raw encoding is the builder's concern, not this test's.
     /// </summary>
     private static XgFile BuildFileWithThreeMoves()
     {
-        return new XgFile
-        {
-            Records =
-            {
-                new MatchHeaderRecord { EntryType = RecordType.HeaderMatch, MatchLength = 7, Player1 = "P1", Player2 = "P2" },
-                new GameHeaderRecord
-                {
-                    EntryType = RecordType.HeaderGame,
-                    InitialPosition = new PositionEngine { Points = StandardOpening() },
-                },
-                MakeMove([23, 22, -1, -1, -1, -1, -1, -1], dice: [3, 1]),
-                MakeMove(IllegalPlayCandidate,               dice: [5, 2]),
-                MakeMove([23, 22, -1, -1, -1, -1, -1, -1], dice: [3, 1]),
-            },
-        };
+        var builder = XgFileBuilder.ForMatch(7, "P1", "P2");
+        builder.AddGame()
+            .Play(XgPlayer.Player1, new DiceRoll(3, 1), MakeFivePoint())
+            .IllegalPlay(XgPlayer.Player2, new DiceRoll(5, 2))
+            .Play(XgPlayer.Player2, new DiceRoll(3, 1), MakeFivePoint());
+        return builder.Build();
     }
 
-    private static MoveRecord MakeMove(sbyte[] moves, int[] dice)
+    /// <summary>8/5 6/5 in the mover's numbering — legal from the opening for either side.</summary>
+    private static Play MakeFivePoint()
     {
-        var pos = new PositionEngine { Points = OneCheckerOn24() };
-        return new MoveRecord
-        {
-            EntryType = RecordType.Move,
-            InitialPosition = pos,
-            FinalPosition = pos,            // unused on the skip path; matches PositionsPlayed[0]
-            ActivePlayer = 1,
-            Dice = dice,
-            CubeValue = 0,
-            MoveError = -1000.0,            // unanalysed-error sentinel
-            Analysis = new BestMoveAnalysis
-            {
-                MoveCount = 1,
-                Evals = [new EvalResult { Equity = 0.0f }],
-                Moves = [moves],
-                EvalLevels = [new EvalLevel { Level = 1 }],
-                PositionsPlayed = [pos],
-            },
-            RolloutIndices = new int[32].Select(_ => -1).ToArray(),
-        };
-    }
-
-    /// <summary>One active checker on point 24, so a legal (23, 22) move decodes
-    /// without underflowing. The illegal/skip path never reads it.</summary>
-    private static sbyte[] OneCheckerOn24()
-    {
-        var pts = new sbyte[26];
-        pts[24] = 1;
-        return pts;
-    }
-
-    private static sbyte[] StandardOpening()
-    {
-        var pts = new sbyte[26];
-        pts[6]  = -5; pts[8]  = -3; pts[13] =  5; pts[24] = -2;
-        pts[19] =  5; pts[17] =  3; pts[12] = -5; pts[1]  =  2;
-        return pts;
+        var play = new Play();
+        play.Add(new Move(8, 5));
+        play.Add(new Move(6, 5));
+        return play;
     }
 
     /// <summary>
