@@ -365,6 +365,27 @@ Two iteration surfaces over the same underlying record stream:
   yield exactly **one** `BgDecisionData` per decision (see "Cube decisions"
   below for the producer-perspective contract).
 
+**Rows and records are parallel enumerations of the same facts, kept
+agreeing by a pin.** The two surfaces share one walk (`IterateCore` →
+`IterateAnalysedDecisions`) but assemble their output at four separate
+sites — `BuildMoveRow` / `BuildCubeRows` for the row, `BuildMoveDiagramRequest`
+/ `BuildCubeDiagramRequests` for the record — each spelling out the same
+`MatchContext` facts field by field. That is a second enumeration nothing
+checks, and it goes stale silently: a fact stamped on one construction and not
+the other is invisible until a consumer notices the hole. It happened — the
+row sites never stamped `IsJacoby` after the row gained the member
+(`halheinrich/backgammon#121`), while the record sites had carried it since
+`halheinrich/backgammon#120`; every row from a real money file rendered the
+honest-unknown bare `money` (`halheinrich/backgammon#144`). Pinned by
+`XgDecisionIteratorRowRecordAgreementTests`: `IDecisionFilterData` — the
+interface both types implement — enumerates the shared facts, so the compiler
+keeps that list current, and the pin requires the row and record built from
+one iteration of one fixture to agree on every one of them. A completeness
+check intersects the two types' member names and fails on any shared name not
+pinned, so a fact added to both types must join the agreement before it can
+drift. **When adding a fact to one construction, add it to its sibling in the
+same change.**
+
 Every emitted `DecisionRow` / `BgDecisionData` is stamped with a
 `BgDataTypes_Lib.DecisionId` in its `Id` field. The stamp is built by the
 internal `BuildDecisionId(sourceFile, game, moveNumber, isCube)` helper
