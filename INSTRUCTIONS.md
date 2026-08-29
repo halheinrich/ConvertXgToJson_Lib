@@ -453,14 +453,49 @@ forms: the human `Label`, a compact `Abbreviation`, an ordinal `Rank`
 (higher = deeper), and the `AnalysisMode` × `AnalysisLevel` pair — the
 machine-usable two-axis taxonomy behind depth filtering (BgDataTypes_Lib
 owns the enums; this producer stamps them). The `LevelInfo` switch is the
-taxonomy: N-ply → `Evaluation` + `Ply1`–`Ply7` (rank 1–7; XG level `12`
-"3-ply red" collapses to `Ply3`), `1000/1001/1002` → `Evaluation` +
-`XgRoller`/`XgRollerPlus`/`XgRollerPlusPlus` (rank 20–22), `999/998`
-(Book V1/V2 — note the order: 999 is the *older* V1 book, 998 the V2 one)
-→ `BookRollout` + `Unknown` (rank 99), the no-context `100` sentinel →
-`Rollout` + `Unknown` (rank 100), and any unrecognised level → `Unknown` +
-`Unknown` (rank 0). The mode distinguishes a book hit from an unrecognised
-level where rank 0 could not — that separation is deliberate. The rollout
+taxonomy — one table, read by the checker side and the cube side alike, so
+everything below governs cube depth ordering identically:
+
+| XG code | Label | Level | Rank |
+|---|---|---|---|
+| `0` | 1-ply | `Ply1` | 10 |
+| `1` | 2-ply | `Ply2` | 20 |
+| `12` | 3-ply Red | `Ply3Red` | 25 |
+| `2` | 3-ply | `Ply3` | 30 |
+| `1000` | XG Roller | `XgRoller` | 35 |
+| `3` | 4-ply | `Ply4` | 40 |
+| `1001` | XG Roller+ | `XgRollerPlus` | 45 |
+| `4` | 5-ply | `Ply5` | 50 |
+| `5` | 6-ply | `Ply6` | 60 |
+| `6` | 7-ply | `Ply7` | 70 |
+| `1002` | XG Roller++ | `XgRollerPlusPlus` | 75 |
+| `999`/`998` | Book V1/V2 | `Unknown` | 99 |
+| `100` | Rollout (no context) | `Unknown` | 100 |
+| *anything else* | `level-{N}` | `Unknown` | 0 |
+
+Every row above `999/998` is `Evaluation`; the book codes are
+`BookRollout`, the `100` sentinel `Rollout`, the fallback `Unknown`. Note
+the book order: 999 is the *older* V1 book, 998 the V2 one.
+
+**The evaluation order is XG's own menu order, and the two families
+interleave** — 3-ply Red below 3-ply, XG Roller between 3-ply and 4-ply,
+XG Roller+ between 4-ply and 5-ply, XG Roller++ above 7-ply. They are not
+two blocks. That is the user's ruling of 2026-08-28 on the authority of
+XG's menu, the same order `AnalysisLevel` declares contractually
+(BgDataTypes_Lib), amended the same day to give `Ply3Red` its own member
+rather than collapsing XG level `12` onto `Ply3`. The rank values are a
+decade grid — a full N-ply ranks 10×N, an interleaved level takes the
+midpoint — which restates the old flat scale's "leave room for future
+depths" intent now that a contiguous ply block is impossible. **Only the
+ordering is meaningful**: downstream consumers compare ranks with each
+other, never against a constant, and none may start. (The producer's own
+corpus invariant does map absolute ranks to tiers — it pins this table
+against itself rather than consuming a record.) `DepthResolutionTests.ResolveDepthInfo_Rank_StrictlyIncreasesAlongRuledRigorOrder`
+pins the whole sequence, and its sibling pins that every ranked
+`AnalysisLevel` member holds a position in it — a new enum member fails
+there rather than slipping in unranked. The mode distinguishes a book hit
+from an unrecognised level where rank 0 could not — that separation is
+deliberate. The rollout
 branch (valid `rolloutIndex`) computes `innerPly = plyLevel + 1` and stamps
 `Rollout` + `Ply1`–`Ply7` (rank 100 + innerPly); an inner ply outside 1–7
 degrades the *level* to `Unknown` while rank/abbreviation still reflect
@@ -478,9 +513,22 @@ resolved a V2-book-stamped candidate to a *rollout* entry: label
 digit, or the Roller abbreviation for a Roller-family level), pair
 `BookRollout` + the entry's `RolloutMovesLevel` mapped through the same
 `LevelInfo` switch (the book's stored levels use the same PLAYERLEVEL code
-space — one decoding site). **Rank stays 99 under enrichment** — the arc
-holds `DepthRank` semantics stable (see next steps: revisit if the
-diagram's out-of-order cue misleads).
+space — one decoding site). **Rank stays 99 under enrichment, ruled
+2026-08-28** — the producer holds `DepthRank` semantics stable whether or
+not the book database was available, so the rank answers "what does the
+file record?", not "what was ultimately computed?".
+
+That ruling *re-affirms* the earlier stance and retires the standing
+"revisit if the diagram layer sorts by depth" clause — its trigger has
+fired. BackgammonDiagram_Lib now does sort candidates by depth
+(`DiagramRenderer` orders by `DepthRank` descending), and the observed
+consequence is the intended one: **a book hit sorts below an explicit
+rollout (99 < 100+) and above every evaluation (99 > 75)**. That reads
+truthfully — a cached rollout whose parameters the file no longer carries
+is worth less than a rollout the file does carry, and more than any
+evaluation. Promoting enriched ranks to the recovered rollout's depth
+would make a book hit indistinguishable from the rollout it was cached
+from, losing the distinction for no gain. Closed, not deferred.
 
 The pair is stamped at all four emission sites from the same resolution
 that produces the label: `BuildMoveRow` → `DecisionRow.AnalysisMode` /
@@ -1277,15 +1325,6 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 
 ## Subproject-internal next steps
 
-* **`DepthRank` stays 99 for enriched book hits — revisit if the diagram
-  cue misleads.** Enrichment recovers a book hit's real rollout depth
-  (e.g. 4-ply / 12,960 games) but the rank deliberately does not move:
-  this arc holds `DepthRank` semantics stable, and
-  BackgammonDiagram_Lib's out-of-order-depth italic keys on rank. If a
-  book hit rendering as "shallower" than an explicit rollout (99 < 100+)
-  proves misleading next to its enriched 4-ply label, promoting enriched
-  ranks is a deliberate future change — its own arc, coordinated with the
-  diagram consumer.
 * **Unify `EnumerateXgFormatFiles` ordering** — the single-arg overload
   keeps its historical extension-major, filesystem-order contract while
   the `SearchOption` overload sorts by full path (ordinal-insensitive,

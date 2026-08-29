@@ -217,7 +217,7 @@ internal sealed class EvalResult
 
 /// <summary>
 /// Evaluation level descriptor (4 bytes). <see cref="Level"/> uses XG's
-/// level taxonomy: 1–7 = N-ply (12 = "3-ply red"), 1000/1001/1002 =
+/// level taxonomy: 1–7 = N-ply (12 = "3-ply Red"), 1000/1001/1002 =
 /// XG Roller / + / ++, 999/998 = Book V1/V2, 100 = rollout sentinel,
 /// −100 = never analysed. <c>XgDecisionIterator.ResolveDepthInfo</c> is the
 /// single projection of this taxonomy into labels / ranks / depth classes.

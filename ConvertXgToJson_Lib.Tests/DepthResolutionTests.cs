@@ -28,20 +28,20 @@ public class DepthResolutionTests
     // -----------------------------------------------------------------------
 
     [Theory]
-    [InlineData((short)0,    "1-ply",       "1-ply",     1,   AnalysisMode.Evaluation,  AnalysisLevel.Ply1)]
-    [InlineData((short)1,    "2-ply",       "2-ply",     2,   AnalysisMode.Evaluation,  AnalysisLevel.Ply2)]
-    [InlineData((short)2,    "3-ply",       "3-ply",     3,   AnalysisMode.Evaluation,  AnalysisLevel.Ply3)]
-    [InlineData((short)12,   "3-ply red",   "3-ply red", 3,   AnalysisMode.Evaluation,  AnalysisLevel.Ply3)]
-    [InlineData((short)3,    "4-ply",       "4-ply",     4,   AnalysisMode.Evaluation,  AnalysisLevel.Ply4)]
-    [InlineData((short)4,    "5-ply",       "5-ply",     5,   AnalysisMode.Evaluation,  AnalysisLevel.Ply5)]
-    [InlineData((short)5,    "6-ply",       "6-ply",     6,   AnalysisMode.Evaluation,  AnalysisLevel.Ply6)]
-    [InlineData((short)6,    "7-ply",       "7-ply",     7,   AnalysisMode.Evaluation,  AnalysisLevel.Ply7)]
-    [InlineData((short)100,  "Rollout",     "Ro",        100, AnalysisMode.Rollout,     AnalysisLevel.Unknown)]
-    [InlineData((short)1000, "XG Roller",   "R",         20,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller)]
-    [InlineData((short)1001, "XG Roller+",  "R+",        21,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlus)]
-    [InlineData((short)1002, "XG Roller++", "R++",       22,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlusPlus)]
+    [InlineData((short)0,    "1-ply",       "1-ply",     10,  AnalysisMode.Evaluation,  AnalysisLevel.Ply1)]
+    [InlineData((short)1,    "2-ply",       "2-ply",     20,  AnalysisMode.Evaluation,  AnalysisLevel.Ply2)]
+    [InlineData((short)12,   "3-ply Red",   "3-ply Red", 25,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3Red)]
+    [InlineData((short)2,    "3-ply",       "3-ply",     30,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3)]
+    [InlineData((short)1000, "XG Roller",   "R",         35,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller)]
+    [InlineData((short)3,    "4-ply",       "4-ply",     40,  AnalysisMode.Evaluation,  AnalysisLevel.Ply4)]
+    [InlineData((short)1001, "XG Roller+",  "R+",        45,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlus)]
+    [InlineData((short)4,    "5-ply",       "5-ply",     50,  AnalysisMode.Evaluation,  AnalysisLevel.Ply5)]
+    [InlineData((short)5,    "6-ply",       "6-ply",     60,  AnalysisMode.Evaluation,  AnalysisLevel.Ply6)]
+    [InlineData((short)6,    "7-ply",       "7-ply",     70,  AnalysisMode.Evaluation,  AnalysisLevel.Ply7)]
+    [InlineData((short)1002, "XG Roller++", "R++",       75,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlusPlus)]
     [InlineData((short)998,  "Book V2",     "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown)]
     [InlineData((short)999,  "Book V1",     "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown)]
+    [InlineData((short)100,  "Rollout",     "Ro",        100, AnalysisMode.Rollout,     AnalysisLevel.Unknown)]
     public void ResolveDepthInfo_NonRollout_KnownLevels(
         short level, string expectedLabel, string expectedAbbrev, int expectedRank,
         AnalysisMode expectedMode, AnalysisLevel expectedLevel)
@@ -108,9 +108,110 @@ public class DepthResolutionTests
 
         label.Should().Be("3-ply");
         abbrev.Should().Be("3-ply");
-        rank.Should().Be(3);
+        rank.Should().Be(30);
         mode.Should().Be(AnalysisMode.Evaluation);
         level.Should().Be(AnalysisLevel.Ply3);
+    }
+
+    // -----------------------------------------------------------------------
+    //  Rank ordering — the ruled interleaved sequence
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// XG's analysis levels in the contractual order of its own menu, lowest
+    /// rigor first, given as the XG level codes the producer decodes. This is
+    /// the user's ruling of 2026-08-28, mirroring
+    /// <see cref="AnalysisLevel"/>'s contractual declaration order: the ply
+    /// family and the XG Roller family <i>interleave</i> rather than forming
+    /// two blocks, and "3-ply Red" sits below a full 3-ply.
+    /// </summary>
+    private static readonly (short Code, AnalysisLevel Level)[] RuledRigorOrder =
+    [
+        (0,    AnalysisLevel.Ply1),
+        (1,    AnalysisLevel.Ply2),
+        (12,   AnalysisLevel.Ply3Red),
+        (2,    AnalysisLevel.Ply3),
+        (1000, AnalysisLevel.XgRoller),
+        (3,    AnalysisLevel.Ply4),
+        (1001, AnalysisLevel.XgRollerPlus),
+        (4,    AnalysisLevel.Ply5),
+        (5,    AnalysisLevel.Ply6),
+        (6,    AnalysisLevel.Ply7),
+        (1002, AnalysisLevel.XgRollerPlusPlus),
+    ];
+
+    private static int RankOf(short code) =>
+        XgDecisionIterator.ResolveDepthInfo(code, rolloutIndex: -1, rollouts: NoRollouts).Rank;
+
+    /// <summary>
+    /// The rank scale increases strictly along the whole ruled sequence — the
+    /// <i>relationship</i> pin that the individual row values above cannot
+    /// give. A future rank edit that leaves every value individually
+    /// plausible but breaks the interleave (re-blocking the Roller family
+    /// above the plies, or letting "3-ply Red" tie with a full 3-ply as it
+    /// did before 2026-08-28) fails here, naming the adjacent pair that
+    /// regressed. The cube side reads the same table, so this pins cube depth
+    /// ordering too.
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_Rank_StrictlyIncreasesAlongRuledRigorOrder()
+    {
+        for (int i = 1; i < RuledRigorOrder.Length; i++)
+        {
+            var lower = RuledRigorOrder[i - 1];
+            var higher = RuledRigorOrder[i];
+
+            RankOf(higher.Code).Should().BeGreaterThan(RankOf(lower.Code),
+                $"{higher.Level} outranks {lower.Level} in XG's own menu order");
+        }
+    }
+
+    /// <summary>
+    /// Every level in the ruled sequence resolves to its own
+    /// <see cref="AnalysisLevel"/> member, and the sequence covers every
+    /// member of the enum except <see cref="AnalysisLevel.Unknown"/> — which
+    /// sits outside the rigor scale ("level not recorded"), not at the bottom
+    /// of it. The coverage half is what makes a future enum member fail here
+    /// rather than slip in unranked: adding one without giving it a rigor
+    /// position breaks this test.
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_RuledRigorOrder_CoversEveryRankedAnalysisLevel()
+    {
+        foreach (var (code, expected) in RuledRigorOrder)
+        {
+            XgDecisionIterator
+                .ResolveDepthInfo(code, rolloutIndex: -1, rollouts: NoRollouts)
+                .Level.Should().Be(expected, $"XG level code {code} is {expected}");
+        }
+
+        RuledRigorOrder.Select(e => e.Level).Should().BeEquivalentTo(
+            Enum.GetValues<AnalysisLevel>().Where(l => l != AnalysisLevel.Unknown),
+            "every ranked AnalysisLevel member must hold a position in the ruled order");
+    }
+
+    /// <summary>
+    /// The floors and ceilings bracketing the evaluation scale: the opening
+    /// book (99) sits above every evaluation and below the explicit-rollout
+    /// floor, and an unrecognised level (0) sits below everything meaningful.
+    /// Book hits are rollout-derived, so under depth-first ordering they sort
+    /// below an explicit rollout the file actually carries and above every
+    /// evaluation — the observed consequence the stance was re-affirmed on
+    /// (2026-08-28).
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_Rank_BookSitsAboveEveryEvaluationAndBelowRollout()
+    {
+        int deepestEvaluation = RuledRigorOrder.Max(e => RankOf(e.Code));
+        int shallowestEvaluation = RuledRigorOrder.Min(e => RankOf(e.Code));
+
+        RankOf(998).Should().Be(RankOf(999), "both book versions rank alike");
+        RankOf(998).Should().BeGreaterThan(deepestEvaluation,
+            "XG's opening book is rollout-derived, so it outranks every evaluation");
+        RankOf(998).Should().BeLessThan(RankOf(100),
+            "a cached rollout the file no longer describes ranks under one it carries");
+        RankOf(7777).Should().BeLessThan(shallowestEvaluation,
+            "the fallback rank is the floor, below everything meaningful");
     }
 
     // -----------------------------------------------------------------------
@@ -264,7 +365,7 @@ public class DepthResolutionTests
     [Theory]
     [InlineData(3,    12960, "Book V2: 12960 trials. 4-ply",     "B4p12960",   AnalysisLevel.Ply4)]
     [InlineData(2,    20736, "Book V2: 20736 trials. 3-ply",     "B3p20736",   AnalysisLevel.Ply3)]
-    [InlineData(12,     648, "Book V2: 648 trials. 3-ply red",   "B3p648",     AnalysisLevel.Ply3)]
+    [InlineData(12,     648, "Book V2: 648 trials. 3-ply Red",   "B3p648",     AnalysisLevel.Ply3Red)]
     [InlineData(1000, 20736, "Book V2: 20736 trials. XG Roller", "BRp20736",   AnalysisLevel.XgRoller)]
     public void ResolveDepthInfo_BookEntry_Rollout_EnrichesLabelAbbreviationAndLevel(
         int movesLevel, int trials, string expectedLabel, string expectedAbbrev,
@@ -564,5 +665,60 @@ public class DepthResolutionTests
         row.AnalysisDepth.Should().Be("Book V2: 12960 trials. 4-ply");
         row.AnalysisMode.Should().Be(AnalysisMode.BookRollout);
         row.AnalysisLevel.Should().Be(AnalysisLevel.Ply4);
+    }
+
+    // -----------------------------------------------------------------------
+    //  3-ply Red — fixture-pinned against a real file (local-only)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A real XG file analysed at "3-ply Red" resolves to
+    /// <see cref="AnalysisLevel.Ply3Red"/> with XG's own label casing and the
+    /// interleaved rank — the end-to-end counterpart to the synthesized level
+    /// table above, evidence that XG really does stamp level 12 for this
+    /// setting rather than a variant of the plain 3-ply code.
+    ///
+    /// <para>
+    /// Local-only by the TestData rule: the fixture lives in the gitignored
+    /// <c>TestData/FixtureFiles/</c>, so this test carries the CI-excluded
+    /// <c>RequiresFixtureFiles</c> trait and nothing gating depends on it.
+    /// The gating coverage for level 12 is the synthesized level table.
+    /// </para>
+    ///
+    /// <para>
+    /// Observed when the fixture was first read (2026-08-28): the decision's
+    /// two strongest candidates carry XG level 12, the tail carries level 0
+    /// (1-ply), and three middle candidates carry XG level code <b>11</b> —
+    /// a code this taxonomy does not map, which degrades to the documented
+    /// <see cref="AnalysisMode.Unknown"/> + <see cref="AnalysisLevel.Unknown"/>
+    /// floor. Code 11 appears nowhere in the 553-file local corpus; naming it
+    /// needs XG-menu authority and is outside this arc.
+    /// </para>
+    /// </summary>
+    [Fact]
+    [Trait("Category", "RequiresFixtureFiles")]
+    public void IterateDiagramRequests_ThreePlyRedFixture_ResolvesToPly3Red()
+    {
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "3-ply Red.xgp");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on the 3-ply Red fixture in TestData/FixtureFiles/.");
+
+        var file = XgFileReader.ReadFile(path);
+        var plays = XgDecisionIterator
+            .IterateDiagramRequests(file, Path.GetFileName(path))
+            .Single(r => !r.Decision.IsCube)
+            .Decision.Plays;
+
+        var red = plays.Where(p => p.AnalysisLevel == AnalysisLevel.Ply3Red).ToList();
+
+        red.Should().NotBeEmpty("the fixture is a 3-ply Red analysis");
+        red.Should().OnlyContain(
+            p => p.Depth == "3-ply Red"
+              && p.DepthAbbreviation == "3-ply Red"
+              && p.DepthRank == 25
+              && p.AnalysisMode == AnalysisMode.Evaluation,
+            "level 12 carries XG's own casing and the interleaved rank");
     }
 }

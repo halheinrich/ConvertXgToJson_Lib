@@ -199,7 +199,11 @@ public sealed class OpeningBook
     /// <summary>
     /// Depth rank of an XG level code, routed through the level taxonomy's
     /// single source (<see cref="XgDecisionIterator.ResolveDepthInfo"/>):
-    /// rollout 100 ranks above the Roller family, which ranks above plies.
+    /// rollout (100) ranks above the opening book (99), which ranks above
+    /// every evaluation. Within the evaluations the ply and XG Roller
+    /// families <i>interleave</i> per XG's own menu, so this comparison is a
+    /// rigor ordering — not "Roller beats ply". Only the ordering is used;
+    /// the absolute values are the taxonomy's business.
     /// </summary>
     private static int Rank(int level) =>
         XgDecisionIterator.ResolveDepthInfo((short)level, rolloutIndex: -1, NoRollouts).Rank;

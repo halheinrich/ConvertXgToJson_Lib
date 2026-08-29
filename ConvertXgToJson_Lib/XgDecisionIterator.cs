@@ -1087,10 +1087,12 @@ public static class XgDecisionIterator
     /// <para>
     /// Non-rollout branch: returns the <see cref="LevelInfo"/> projection —
     /// label, abbreviation, rank, and the mode × level pair — for
-    /// <paramref name="evalLevel"/>. The rank ordering is: N-ply → N (1..7),
-    /// XG Roller family → 20–22, Book V1/V2 → 99 (rollout-derived opening
-    /// book: above XG Roller++ (22), below the explicit-rollout floor
-    /// (100)), any unrecognised level → 0. The edge case is a "Rollout"
+    /// <paramref name="evalLevel"/>. The rank ordering follows XG's own
+    /// interleaved menu — 1-ply 10, 2-ply 20, 3-ply Red 25, 3-ply 30,
+    /// XG Roller 35, 4-ply 40, XG Roller+ 45, 5-ply 50, 6-ply 60, 7-ply 70,
+    /// XG Roller++ 75 — then Book V1/V2 → 99 (rollout-derived opening book:
+    /// above every evaluation, below the explicit-rollout floor (100)), and
+    /// any unrecognised level → 0. The edge case is a "Rollout"
     /// sentinel (<c>short 100</c>) without a matching rollout context, which
     /// ranks 100 as <see cref="AnalysisMode.Rollout"/> +
     /// <see cref="AnalysisLevel.Unknown"/> — the same degradation as a
@@ -1144,10 +1146,14 @@ public static class XgDecisionIterator
     /// <see cref="AnalysisLevel.Ply1"/>–<see cref="AnalysisLevel.Ply7"/>;
     /// anything outside that range degrades to
     /// <see cref="AnalysisLevel.Unknown"/> ("level not recorded" — the
-    /// taxonomy's documented graceful-degradation stamp). A plain arithmetic
-    /// offset would couple this to the enum's declaration order, which
-    /// <see cref="AnalysisLevel"/> documents as informational-not-contractual;
-    /// the explicit switch keeps the mapping single-sourced.
+    /// taxonomy's documented graceful-degradation stamp). The switch is
+    /// explicit because no arithmetic offset can express the mapping: the
+    /// ply members are not contiguous in <see cref="AnalysisLevel"/> —
+    /// <see cref="AnalysisLevel.Ply3Red"/> and the XG Roller family
+    /// interleave among them — so <c>Ply1 + (innerPly - 1)</c> would land on
+    /// the wrong member from inner ply 3 upward. A rollout's inner evaluation
+    /// is always a full N-ply search, never the reduced-variance
+    /// <see cref="AnalysisLevel.Ply3Red"/>.
     /// </summary>
     private static AnalysisLevel LevelForInnerPly(int innerPly) => innerPly switch
     {
@@ -1165,15 +1171,41 @@ public static class XgDecisionIterator
     /// Compact moves-level token for the enriched book abbreviation
     /// ("B{token}p{trials}"), parallel to the rollout sibling's inner-ply
     /// digit ("{innerPly}p{trials}"): a ply level contributes its ply number
-    /// (rank 1–7 <b>is</b> the ply number, so "B4p12960" for a 4-ply-moves
-    /// entry), any other level its <see cref="LevelInfo"/> abbreviation —
-    /// unreachable for moves levels in the shipped database (all ply codes)
-    /// but the book format allows Roller codes, and the cube level
-    /// demonstrably uses them.
+    /// ("B4p12960" for a 4-ply-moves entry), any other level its
+    /// <see cref="LevelInfo"/> abbreviation — unreachable for moves levels in
+    /// the shipped database (all ply codes) but the book format allows Roller
+    /// codes, and the cube level demonstrably uses them.
+    ///
+    /// <para>
+    /// The ply number comes from the <see cref="AnalysisLevel"/> member, not
+    /// from <c>Rank</c>. Ranks used to <i>be</i> the ply number (1–7), so the
+    /// token read them directly; the interleaved rank grid ended that
+    /// coincidence, and the level axis — which names the ply outright — is
+    /// the honest source either way.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="AnalysisLevel.Ply3Red"/> contributes "3", the same token as
+    /// a full <see cref="AnalysisLevel.Ply3"/>: it is a 3-ply search, and the
+    /// abbreviation is the deliberately lossy form. The Red distinction
+    /// survives in the enriched <c>Label</c> ("Book V2: 648 trials.
+    /// 3-ply Red"), exactly as the Book V1/V2 distinction survives there
+    /// while both abbreviate to "Book".
+    /// </para>
     /// </summary>
     private static string BookInnerToken(
         (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) inner) =>
-        inner.Rank is >= 1 and <= 7 ? inner.Rank.ToString() : inner.Abbreviation;
+        inner.Level switch
+        {
+            AnalysisLevel.Ply1                          => "1",
+            AnalysisLevel.Ply2                          => "2",
+            AnalysisLevel.Ply3Red or AnalysisLevel.Ply3 => "3",
+            AnalysisLevel.Ply4                          => "4",
+            AnalysisLevel.Ply5                          => "5",
+            AnalysisLevel.Ply6                          => "6",
+            AnalysisLevel.Ply7                          => "7",
+            _                                           => inner.Abbreviation,
+        };
 
     /// <summary>XG's level code for a V2-book-analysed candidate — the only
     /// code the enrichment lookup fires on. The V1 code (999) is never looked
@@ -1455,20 +1487,46 @@ public static class XgDecisionIterator
     /// </para>
     ///
     /// <para>
-    /// Rank: numeric gaps between categories leave room for future depths
-    /// without renumbering — N-ply occupies 1..7, the XG Roller family 20..22,
-    /// rollouts 100 + inner-ply (see <see cref="ResolveDepthInfo"/>). Book
-    /// V1/V2 rank 99 — XG's opening book is rollout-derived, so it sits above
-    /// XG Roller++ (22) yet below the explicit-rollout floor (100): a cached
-    /// rollout whose parameters the file no longer records ranks under a
-    /// rollout the file actually carries. Any unrecognised level ranks 0 (the
-    /// floor, tied with nothing meaningful). "3-ply red" shares rank 3 with
-    /// plain 3-ply: reduced variance narrows the candidate set, it does not
-    /// deepen search. The rank lets downstream rendering flag out-of-order
-    /// analysis across adjacent sorted-by-equity plays. Book enrichment
-    /// (<see cref="ResolveDepthInfo"/>'s book branch) deliberately leaves the
-    /// rank at 99 even when the entry's rollout parameters are recovered —
-    /// <c>DepthRank</c> semantics stay stable across enrichment.
+    /// Rank: the evaluation ranks follow XG's own analysis-level menu, in
+    /// which the ply family and the XG Roller family <i>interleave</i> rather
+    /// than forming two blocks — 1-ply, 2-ply, 3-ply Red, 3-ply, XG Roller,
+    /// 4-ply, XG Roller+, 5-ply, 6-ply, 7-ply, XG Roller++. That is the
+    /// user's ruling of 2026-08-28 on the authority of XG's menu, the same
+    /// order <see cref="AnalysisLevel"/> declares contractually. The values
+    /// are a decade grid: a full N-ply ranks 10 × N, and a level sitting
+    /// between two plies takes the midpoint — 3-ply Red 25, XG Roller 35,
+    /// XG Roller+ 45, XG Roller++ 75. The grid restates the "leave room for
+    /// future depths without renumbering" intent that the flat 1..7 / 20..22
+    /// scale carried before the interleave made a contiguous ply block
+    /// impossible: every gap can absorb a new level in place. Only the
+    /// <i>ordering</i> is meaningful: downstream consumers compare ranks with
+    /// each other, never against a constant, and none may start. (The
+    /// producer's own corpus invariant does map absolute ranks to tiers — it
+    /// is pinning this table against itself, not consuming a record.)
+    /// </para>
+    ///
+    /// <para>
+    /// Above the evaluations: Book V1/V2 rank 99 — XG's opening book is
+    /// rollout-derived, so it sits above every evaluation (XG Roller++, 75)
+    /// yet below the explicit-rollout floor (100 + inner-ply, see
+    /// <see cref="ResolveDepthInfo"/>): a cached rollout whose parameters the
+    /// file no longer records ranks under a rollout the file actually
+    /// carries. Any unrecognised level ranks 0 — the floor, below everything
+    /// meaningful. The rank lets downstream rendering order candidates by
+    /// depth and flag out-of-order analysis across adjacent sorted-by-equity
+    /// plays. Book enrichment (<see cref="ResolveDepthInfo"/>'s book branch)
+    /// deliberately leaves the rank at 99 even when the entry's rollout
+    /// parameters are recovered — <c>DepthRank</c> semantics stay stable
+    /// across enrichment.
+    /// </para>
+    ///
+    /// <para>
+    /// One table, both axes: the cube side resolves its depth through this
+    /// same switch (<c>CubeDepth</c> / <c>CubeDepthRank</c> /
+    /// <c>CubeAnalysisLevel</c> reach it via <see cref="ResolveDepthInfo"/>
+    /// exactly as the checker side does), so the interleaved order governs
+    /// cube depth ordering identically and on the same authority. There is no
+    /// second scale to keep in step.
     /// </para>
     ///
     /// <para>
@@ -1484,8 +1542,12 @@ public static class XgDecisionIterator
     /// <see cref="ResolveDepthInfo"/> supplies the level when a book database
     /// is available; and the no-context rollout sentinel, whose known inner
     /// plies are stamped in <see cref="ResolveDepthInfo"/>'s rollout branch).
-    /// "3-ply red" levels as <see cref="AnalysisLevel.Ply3"/> (same as plain
-    /// 3-ply); an unrecognised code is <see cref="AnalysisMode.Unknown"/> +
+    /// XG level 12 ("3-ply Red") levels as its own
+    /// <see cref="AnalysisLevel.Ply3Red"/>: XG's menu ranks its
+    /// reduced-variance 3-ply search <i>below</i> a full 3-ply, so it is a
+    /// distinct level rather than a label variant of
+    /// <see cref="AnalysisLevel.Ply3"/> (ruled 2026-08-28). An unrecognised
+    /// code is <see cref="AnalysisMode.Unknown"/> +
     /// <see cref="AnalysisLevel.Unknown"/>.
     /// </para>
     ///
@@ -1498,20 +1560,21 @@ public static class XgDecisionIterator
     /// </summary>
     private static (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) LevelInfo(short level) => level switch
     {
-        0    => ("1-ply",        "1-ply",     1,   AnalysisMode.Evaluation,  AnalysisLevel.Ply1),
-        1    => ("2-ply",        "2-ply",     2,   AnalysisMode.Evaluation,  AnalysisLevel.Ply2),
-        2    => ("3-ply",        "3-ply",     3,   AnalysisMode.Evaluation,  AnalysisLevel.Ply3),
-        12   => ("3-ply red",    "3-ply red", 3,   AnalysisMode.Evaluation,  AnalysisLevel.Ply3),
-        3    => ("4-ply",        "4-ply",     4,   AnalysisMode.Evaluation,  AnalysisLevel.Ply4),
-        4    => ("5-ply",        "5-ply",     5,   AnalysisMode.Evaluation,  AnalysisLevel.Ply5),
-        5    => ("6-ply",        "6-ply",     6,   AnalysisMode.Evaluation,  AnalysisLevel.Ply6),
-        6    => ("7-ply",        "7-ply",     7,   AnalysisMode.Evaluation,  AnalysisLevel.Ply7),
-        100  => ("Rollout",      "Ro",        100, AnalysisMode.Rollout,     AnalysisLevel.Unknown),
-        1000 => ("XG Roller",    "R",         20,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller),
-        1001 => ("XG Roller+",   "R+",        21,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlus),
-        1002 => ("XG Roller++",  "R++",       22,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlusPlus),
+        // Arms read in ascending rigor — XG's menu order, not XG's code order.
+        0    => ("1-ply",        "1-ply",     10,  AnalysisMode.Evaluation,  AnalysisLevel.Ply1),
+        1    => ("2-ply",        "2-ply",     20,  AnalysisMode.Evaluation,  AnalysisLevel.Ply2),
+        12   => ("3-ply Red",    "3-ply Red", 25,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3Red),
+        2    => ("3-ply",        "3-ply",     30,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3),
+        1000 => ("XG Roller",    "R",         35,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller),
+        3    => ("4-ply",        "4-ply",     40,  AnalysisMode.Evaluation,  AnalysisLevel.Ply4),
+        1001 => ("XG Roller+",   "R+",        45,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlus),
+        4    => ("5-ply",        "5-ply",     50,  AnalysisMode.Evaluation,  AnalysisLevel.Ply5),
+        5    => ("6-ply",        "6-ply",     60,  AnalysisMode.Evaluation,  AnalysisLevel.Ply6),
+        6    => ("7-ply",        "7-ply",     70,  AnalysisMode.Evaluation,  AnalysisLevel.Ply7),
+        1002 => ("XG Roller++",  "R++",       75,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlusPlus),
         998  => ("Book V2",      "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown),
         999  => ("Book V1",      "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown),
+        100  => ("Rollout",      "Ro",        100, AnalysisMode.Rollout,     AnalysisLevel.Unknown),
         _    => ($"level-{level}", $"level-{level}", 0, AnalysisMode.Unknown, AnalysisLevel.Unknown),
     };
 

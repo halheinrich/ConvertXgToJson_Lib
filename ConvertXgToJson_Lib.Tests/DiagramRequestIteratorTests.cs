@@ -838,11 +838,15 @@ public class DiagramRequestIteratorTests
     /// </summary>
     private enum DepthTier { Unknown, Ply, Roller, Book, Rollout }
 
+    // The ply and Roller ranks interleave on one decade grid (XG's own menu
+    // order), so neither tier is a contiguous band any more: both are spelled
+    // as explicit value sets, mirroring the producer's LevelInfo table. A rank
+    // the table can emit but neither set names fails loudly below.
     private static DepthTier TierOfRank(int rank) => rank switch
     {
         0 => DepthTier.Unknown,
-        >= 1 and <= 7 => DepthTier.Ply,
-        >= 20 and <= 22 => DepthTier.Roller,
+        10 or 20 or 25 or 30 or 40 or 50 or 60 or 70 => DepthTier.Ply,
+        35 or 45 or 75 => DepthTier.Roller,
         99 => DepthTier.Book,
         >= 100 => DepthTier.Rollout,
         _ => throw new Xunit.Sdk.XunitException($"Unexpected DepthRank {rank}: not in any known tier band"),
@@ -867,8 +871,9 @@ public class DiagramRequestIteratorTests
 
     /// <summary>
     /// For every emitted diagram request across the .xg corpus, the taxonomy
-    /// pair agrees tier-wise with the ordinal rank — rank 1–7 ⇔ Evaluation
-    /// ply levels, 20–22 ⇔ Evaluation Roller levels, 99 ⇔ BookRollout,
+    /// pair agrees tier-wise with the ordinal rank — the ply ranks
+    /// (10/20/25/30/40/50/60/70) ⇔ Evaluation ply levels, the Roller ranks
+    /// (35/45/75) ⇔ Evaluation Roller levels, 99 ⇔ BookRollout,
     /// ≥100 ⇔ Rollout, 0 ⇔ Unknown. Both are projections of the same
     /// <c>ResolveDepthInfo</c> resolution, so a divergence means one
     /// stamping site pulled its pair and rank from different candidates.
