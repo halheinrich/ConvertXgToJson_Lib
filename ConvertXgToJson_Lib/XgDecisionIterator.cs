@@ -1552,6 +1552,19 @@ public static class XgDecisionIterator
     /// </para>
     ///
     /// <para>
+    /// Codes <c>1</c> and <c>11</c> both mean 2-ply and deliberately share one
+    /// arm, so the two can never drift apart. Code 11 was identified by XG's
+    /// own display — the designated authority — opened over the three code-11
+    /// rows of the "3-ply Red" fixture: XG shows <c>Level: 2-ply</c> for each,
+    /// drawing no distinction from plain 2-ply. So 11 takes code 1's exact
+    /// tuple rather than a new <see cref="AnalysisLevel"/> member (user-ruled
+    /// 2026-08-28, halheinrich/backgammon#160). An earlier conditional
+    /// identification as a 3-ply-Red sibling — inferred only from 11 sitting
+    /// adjacent to 12 in the code space — was superseded by that observation
+    /// the same day; the trail is on halheinrich/backgammon#160.
+    /// </para>
+    ///
+    /// <para>
     /// The book entry's stored rollout levels (<c>RolloutMovesLevel</c> /
     /// <c>RolloutCubeLevel</c>) use this same PLAYERLEVEL code space, so the
     /// book branch maps them through this switch too — the level taxonomy has
@@ -1562,7 +1575,8 @@ public static class XgDecisionIterator
     {
         // Arms read in ascending rigor — XG's menu order, not XG's code order.
         0    => ("1-ply",        "1-ply",     10,  AnalysisMode.Evaluation,  AnalysisLevel.Ply1),
-        1    => ("2-ply",        "2-ply",     20,  AnalysisMode.Evaluation,  AnalysisLevel.Ply2),
+        1 or
+        11   => ("2-ply",        "2-ply",     20,  AnalysisMode.Evaluation,  AnalysisLevel.Ply2),
         12   => ("3-ply Red",    "3-ply Red", 25,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3Red),
         2    => ("3-ply",        "3-ply",     30,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3),
         1000 => ("XG Roller",    "R",         35,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller),

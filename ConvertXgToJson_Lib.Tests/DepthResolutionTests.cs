@@ -30,6 +30,7 @@ public class DepthResolutionTests
     [Theory]
     [InlineData((short)0,    "1-ply",       "1-ply",     10,  AnalysisMode.Evaluation,  AnalysisLevel.Ply1)]
     [InlineData((short)1,    "2-ply",       "2-ply",     20,  AnalysisMode.Evaluation,  AnalysisLevel.Ply2)]
+    [InlineData((short)11,   "2-ply",       "2-ply",     20,  AnalysisMode.Evaluation,  AnalysisLevel.Ply2)]
     [InlineData((short)12,   "3-ply Red",   "3-ply Red", 25,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3Red)]
     [InlineData((short)2,    "3-ply",       "3-ply",     30,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3)]
     [InlineData((short)1000, "XG Roller",   "R",         35,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller)]
@@ -188,6 +189,24 @@ public class DepthResolutionTests
         RuledRigorOrder.Select(e => e.Level).Should().BeEquivalentTo(
             Enum.GetValues<AnalysisLevel>().Where(l => l != AnalysisLevel.Unknown),
             "every ranked AnalysisLevel member must hold a position in the ruled order");
+    }
+
+    /// <summary>
+    /// XG level code 11 is plain 2-ply: it resolves to code 1's <i>exact</i>
+    /// tuple — label, abbreviation, rank and pair alike — because XG's own
+    /// display, the designated authority, draws no distinction between them
+    /// (user-ruled 2026-08-28, halheinrich/backgammon#160). Pinning whole-tuple
+    /// equality rather than the individual values is the point: the two codes
+    /// share one switch arm, and this fails if they are ever split into arms
+    /// that could drift.
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_Level11_ResolvesIdenticallyToLevel1()
+    {
+        var eleven = XgDecisionIterator.ResolveDepthInfo(11, rolloutIndex: -1, rollouts: NoRollouts);
+        var one = XgDecisionIterator.ResolveDepthInfo(1, rolloutIndex: -1, rollouts: NoRollouts);
+
+        eleven.Should().Be(one, "XG displays level code 11 as plain 2-ply");
     }
 
     /// <summary>
@@ -686,13 +705,13 @@ public class DepthResolutionTests
     /// </para>
     ///
     /// <para>
-    /// Observed when the fixture was first read (2026-08-28): the decision's
-    /// two strongest candidates carry XG level 12, the tail carries level 0
-    /// (1-ply), and three middle candidates carry XG level code <b>11</b> —
-    /// a code this taxonomy does not map, which degrades to the documented
-    /// <see cref="AnalysisMode.Unknown"/> + <see cref="AnalysisLevel.Unknown"/>
-    /// floor. Code 11 appears nowhere in the 553-file local corpus; naming it
-    /// needs XG-menu authority and is outside this arc.
+    /// The fixture also covers the whole depth spread XG writes for a single
+    /// decision: its two strongest candidates carry XG level 12 (3-ply Red),
+    /// three more carry level code 11 — identified as plain 2-ply by XG's own
+    /// display over these very rows (halheinrich/backgammon#160) — and the
+    /// nine-candidate tail carries level 0 (1-ply). Three distinct levels in
+    /// one analysis, which is also why per-candidate depth is not redundant
+    /// with a decision-level depth.
     /// </para>
     /// </summary>
     [Fact]
@@ -711,14 +730,29 @@ public class DepthResolutionTests
             .Single(r => !r.Decision.IsCube)
             .Decision.Plays;
 
-        var red = plays.Where(p => p.AnalysisLevel == AnalysisLevel.Ply3Red).ToList();
+        plays.GroupBy(p => p.AnalysisLevel)
+             .ToDictionary(g => g.Key, g => g.Count())
+             .Should().BeEquivalentTo(new Dictionary<AnalysisLevel, int>
+             {
+                 [AnalysisLevel.Ply3Red] = 2,
+                 [AnalysisLevel.Ply2]    = 3,
+                 [AnalysisLevel.Ply1]    = 9,
+             },
+             "XG analysed the two strongest candidates at 3-ply Red, three more "
+             + "at 2-ply (level code 11), and filled the tail at 1-ply");
 
-        red.Should().NotBeEmpty("the fixture is a 3-ply Red analysis");
-        red.Should().OnlyContain(
+        plays.Where(p => p.AnalysisLevel == AnalysisLevel.Ply3Red).Should().OnlyContain(
             p => p.Depth == "3-ply Red"
               && p.DepthAbbreviation == "3-ply Red"
               && p.DepthRank == 25
               && p.AnalysisMode == AnalysisMode.Evaluation,
             "level 12 carries XG's own casing and the interleaved rank");
+
+        plays.Where(p => p.AnalysisLevel == AnalysisLevel.Ply2).Should().OnlyContain(
+            p => p.Depth == "2-ply"
+              && p.DepthAbbreviation == "2-ply"
+              && p.DepthRank == 20
+              && p.AnalysisMode == AnalysisMode.Evaluation,
+            "level code 11 is plain 2-ply — XG's display draws no distinction");
     }
 }

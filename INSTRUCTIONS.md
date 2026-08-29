@@ -459,7 +459,7 @@ everything below governs cube depth ordering identically:
 | XG code | Label | Level | Rank |
 |---|---|---|---|
 | `0` | 1-ply | `Ply1` | 10 |
-| `1` | 2-ply | `Ply2` | 20 |
+| `1`, `11` | 2-ply | `Ply2` | 20 |
 | `12` | 3-ply Red | `Ply3Red` | 25 |
 | `2` | 3-ply | `Ply3` | 30 |
 | `1000` | XG Roller | `XgRoller` | 35 |
@@ -475,7 +475,14 @@ everything below governs cube depth ordering identically:
 
 Every row above `999/998` is `Evaluation`; the book codes are
 `BookRollout`, the `100` sentinel `Rollout`, the fallback `Unknown`. Note
-the book order: 999 is the *older* V1 book, 998 the V2 one.
+the book order: 999 is the *older* V1 book, 998 the V2 one. Codes `1` and
+`11` share one switch arm — code 11 was identified as plain 2-ply by XG's
+own display over the three code-11 rows of the `3-ply Red` fixture
+(user-ruled 2026-08-28, halheinrich/backgammon#160; an earlier conditional
+3-ply-Red identification, inferred only from 11 sitting next to 12 in the
+code space, was superseded by that observation the same day). XG's display
+draws no distinction from plain 2-ply, so 11 takes code 1's exact tuple
+rather than an `AnalysisLevel` member of its own.
 
 **The evaluation order is XG's own menu order, and the two families
 interleave** — 3-ply Red below 3-ply, XG Roller between 3-ply and 4-ply,
