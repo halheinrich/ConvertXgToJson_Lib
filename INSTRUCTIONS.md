@@ -1045,6 +1045,23 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `Level == -100` (queued) but a non-zero `LevelRequest`. Using `||` between
   the two re-admits these phantom cubes and yields rows with empty equity /
   eval fields.
+* **On a cube record, `Level == 0` means *unanalysed*, not "1-ply."** The
+  gate above is `Analysis.Level > 0`, and the `> 0` is deliberate — not an
+  off-by-one. Code `0` is a legitimate level in the `LevelInfo` taxonomy
+  (1-ply), so `>= 0` looks like the more correct spelling; it is not. Ruled
+  2026-08-28 (halheinrich/backgammon#132): XG never runs a 1-ply cube
+  analysis, so on the cube side a zero `Level` is the default-valued,
+  never-analysed pane. Corpus-verified over 553 local files — **23,049** cube
+  records carry `Level == 0`, and of those **not one** carries any of the
+  three cubeful equities, **not one** carries a non-zero `LevelRequest`, and
+  **all 23,049** carry `IsBeaver == -100`, the documented never-analysed pane
+  sentinel. Every genuinely analysed cube in the same corpus ran at level 1
+  (2-ply, 9,487), 3 (4-ply, 73), 4 (5-ply, 5,537), 100 (rollout, 184), 1001
+  (34) or 1002 (932); level 0 never appears as real analysis. Tightening the
+  gate to `>= 0` would admit 23,049 empty cube rows. Note the asymmetry with
+  the checker side, where 1-ply *is* a real analysis level that files do
+  carry — which is why `IsAnalysed(MoveRecord)` gates structurally
+  (`MoveCount` / `Evals`) instead of on a level at all.
 * **`BuildMoveDiagramRequest` returns `null` on three conditions:**
   `analysis.MoveCount == 0`, `analysis.Evals.Length == 0`, or `dice == 0`.
   The iterator's call site gates emission on the non-null return; preserve
