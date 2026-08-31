@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using System.Linq;
@@ -10,7 +11,35 @@ namespace ConvertXgToJson_Lib.Json;
 /// </summary>
 internal static class XgJsonOptions
 {
+    /// <summary>
+    /// The source-generated metadata for everything this library puts on a
+    /// wire (halheinrich/backgammon#129 leg 2) — this repo's context first,
+    /// <see cref="BgDataTypesJsonContext"/> second, per the arc's
+    /// composition pattern (most derived first). Deliberately no
+    /// <c>DefaultJsonTypeInfoResolver</c> behind them: a type this library
+    /// is asked for but no context declares must fail loudly rather than
+    /// fall back to reflection a trimmed consumer would not have.
+    ///
+    /// <para>
+    /// Exposed separately from <see cref="Default"/> because it is the one
+    /// thing a <i>caller's</i> options also needs: <c>XgFileReader</c>'s
+    /// published <c>options</c> parameter lets a caller override formatting
+    /// and converters wholesale, but the metadata describing this library's
+    /// own document is this library's to supply. One chain, built once,
+    /// used by both.
+    /// </para>
+    /// </summary>
+    /// <remarks>
+    /// Declared before <see cref="_options"/>: static field initializers run
+    /// in textual order and <see cref="BuildOptions"/> reads this one.
+    /// </remarks>
+    private static readonly IJsonTypeInfoResolver _resolver =
+        JsonTypeInfoResolver.Combine(XgJsonContext.Default, BgDataTypesJsonContext.Default);
+
     private static readonly JsonSerializerOptions _options = BuildOptions();
+
+    /// <inheritdoc cref="_resolver"/>
+    public static IJsonTypeInfoResolver Resolver => _resolver;
 
     public static JsonSerializerOptions Default => _options;
 
@@ -18,6 +47,7 @@ internal static class XgJsonOptions
     {
         var opts = new JsonSerializerOptions
         {
+            TypeInfoResolver = _resolver,
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -75,7 +105,12 @@ internal sealed class PositionEngineConverter : JsonConverter<PositionEngine>
 {
     public override PositionEngine Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        var points = JsonSerializer.Deserialize<sbyte[]>(ref reader, options) ?? new sbyte[26];
+        // Resolved through the options rather than by reflection, so the
+        // read path is trim-safe and honours whatever resolver the caller
+        // configured (halheinrich/backgammon#129 leg 2). XgJsonContext
+        // declares sbyte[] for exactly this call.
+        var typeInfo = (JsonTypeInfo<sbyte[]>)options.GetTypeInfo(typeof(sbyte[]));
+        var points = JsonSerializer.Deserialize(ref reader, typeInfo) ?? new sbyte[26];
         return new PositionEngine { Points = points };
     }
 
@@ -114,12 +149,12 @@ internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
 
         return typeName switch
         {
-            "HeaderMatch" => JsonSerializer.Deserialize<MatchHeaderRecord>(json, innerOptions)!,
-            "HeaderGame" => JsonSerializer.Deserialize<GameHeaderRecord>(json, innerOptions)!,
-            "Move" => JsonSerializer.Deserialize<MoveRecord>(json, innerOptions)!,
-            "Cube" => JsonSerializer.Deserialize<CubeRecord>(json, innerOptions)!,
-            "FooterGame" => JsonSerializer.Deserialize<GameFooterRecord>(json, innerOptions)!,
-            "FooterMatch" => JsonSerializer.Deserialize<MatchFooterRecord>(json, innerOptions)!,
+            "HeaderMatch" => Deserialize<MatchHeaderRecord>(json, innerOptions),
+            "HeaderGame" => Deserialize<GameHeaderRecord>(json, innerOptions),
+            "Move" => Deserialize<MoveRecord>(json, innerOptions),
+            "Cube" => Deserialize<CubeRecord>(json, innerOptions),
+            "FooterGame" => Deserialize<GameFooterRecord>(json, innerOptions),
+            "FooterMatch" => Deserialize<MatchFooterRecord>(json, innerOptions),
             _ => throw new JsonException($"Unknown SaveRecord type: '{typeName}'")
         };
     }
@@ -132,7 +167,8 @@ internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
 
         var innerOptions = WithoutSelf(options);
 
-        using var doc = JsonSerializer.SerializeToDocument(value, value.GetType(), innerOptions);
+        using var doc = JsonSerializer.SerializeToDocument(
+            value, innerOptions.GetTypeInfo(value.GetType()));
         foreach (var prop in doc.RootElement.EnumerateObject())
         {
             if (prop.Name == "$type") continue;
@@ -141,6 +177,18 @@ internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
 
         writer.WriteEndObject();
     }
+
+    /// <summary>
+    /// Deserializes one concrete record variant through the options'
+    /// resolver rather than by reflection — the trim-safe form of
+    /// <c>Deserialize&lt;T&gt;(json, options)</c>
+    /// (halheinrich/backgammon#129 leg 2). Every variant named by the
+    /// <c>$type</c> switch is declared in <see cref="XgJsonContext"/>,
+    /// which is what makes the lookup resolve there.
+    /// </summary>
+    private static T Deserialize<T>(string json, JsonSerializerOptions options)
+        where T : SaveRecord
+        => (T)JsonSerializer.Deserialize(json, options.GetTypeInfo(typeof(T)))!;
 
     /// <summary>
     /// Clones <paramref name="options"/> without this converter, so the inner

@@ -1,9 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <LangVersion>14.0</LangVersion>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <RootNamespace>ConvertXgToJson_Lib</RootNamespace>
     <AssemblyName>ConvertXgToJson_Lib</AssemblyName>
+  </PropertyGroup>
+  <!-- This library's half of the trim gate (halheinrich/backgammon#129 leg
+       2), matching the BgDataTypes_Lib precedent: the assembly declares
+       itself trim-compatible and runs the trim analyzer in its own build, so
+       a reflection-serialization regression becomes a build error *here*
+       (TreatWarningsAsErrors) rather than a publish-time warning downstream.
+       Per-project deliberately — the test project is not a shipped surface. -->
+  <PropertyGroup>
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">

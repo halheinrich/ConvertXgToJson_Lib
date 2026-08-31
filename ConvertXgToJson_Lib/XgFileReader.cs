@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using ConvertXgToJson_Lib.Json;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
@@ -153,7 +154,7 @@ public static class XgFileReader
     /// built-in System.Text.Json serializer with XG-appropriate options.
     /// </summary>
     public static string ToJson(XgFile file, JsonSerializerOptions? options = null)
-        => JsonSerializer.Serialize(file, options ?? XgJsonOptions.Default);
+        => JsonSerializer.Serialize(file, TypeInfo(options));
 
     /// <summary>
     /// Writes the JSON representation of an <see cref="XgFile"/> to a file.
@@ -165,7 +166,7 @@ public static class XgFileReader
         CancellationToken cancellationToken = default)
     {
         await using var fs = File.Create(outputPath);
-        await JsonSerializer.SerializeAsync(fs, file, options ?? XgJsonOptions.Default, cancellationToken);
+        await JsonSerializer.SerializeAsync(fs, file, TypeInfo(options), cancellationToken);
     }
 
     /// <summary>
@@ -184,9 +185,37 @@ public static class XgFileReader
     public static XgFile ReadJson(string path)
     {
         string json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<XgFile>(json, XgJsonOptions.Default)
+        return JsonSerializer.Deserialize(json, TypeInfo(options: null))
                ?? throw new InvalidDataException($"Failed to deserialise XgFile from {path}");
     }
+
+    /// <summary>
+    /// Resolves <see cref="XgFile"/>'s metadata from the options that will
+    /// serialize it. Going through the resolver instead of the reflection
+    /// overloads is what makes this library's JSON surface trim-safe
+    /// (halheinrich/backgammon#129 leg 2), and it must hold for the
+    /// published <c>options</c> parameter too, not just for the default.
+    ///
+    /// <para>
+    /// A caller's options that carries no resolver of its own is given
+    /// this library's (<see cref="XgJsonOptions.Resolver"/>). That is the
+    /// like-for-like substitution, not a behaviour change: the reflection
+    /// overload this replaces installed <c>DefaultJsonTypeInfoResolver</c>
+    /// on the very same options object and froze it, and the two resolvers
+    /// describe the <see cref="XgFile"/> closure identically — the
+    /// invariant of the whole halheinrich/backgammon#129 arc. The caller's
+    /// options keeps deciding everything it decided before (indentation,
+    /// naming, converters); only the mechanism that supplies the metadata
+    /// changes. A caller who brings a resolver keeps it untouched.
+    /// </para>
+    /// </summary>
+    private static JsonTypeInfo<XgFile> TypeInfo(JsonSerializerOptions? options)
+    {
+        var effective = options ?? XgJsonOptions.Default;
+        effective.TypeInfoResolver ??= XgJsonOptions.Resolver;
+        return (JsonTypeInfo<XgFile>)effective.GetTypeInfo(typeof(XgFile));
+    }
+
     /// <summary>
     /// Reads only the match header from a .xg file without fully parsing
     /// the file. Use when only player names and match length are needed.
