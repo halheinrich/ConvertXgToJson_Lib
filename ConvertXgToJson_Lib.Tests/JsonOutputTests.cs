@@ -226,6 +226,13 @@ public class JsonOutputTests
         var compact = new JsonSerializerOptions
         {
             WriteIndented = false,
+            // A stand-in for a caller's own options over an XgFile, so it
+            // mirrors the XG-native half of XgJsonOptions' enum policy and
+            // stays integer-tolerant on purpose (halheinrich/backgammon#164):
+            // an XgFile carries SiteId, which is legitimately (SiteId)(-1) for
+            // a local save, and allowIntegerValues: false would throw on write
+            // rather than emit it. Kept rather than dropped: the XG model's
+            // enums carry no type-level converter, so it is load-bearing.
             Converters    = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
         };
         var file = BuildFile();

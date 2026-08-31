@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using System.Linq;
 namespace ConvertXgToJson_Lib.Json;
@@ -23,6 +24,40 @@ internal static class XgJsonOptions
             NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
             Converters =
     {
+        // Enum token policy (halheinrich/backgammon#164). Two populations, and
+        // the split is deliberate — order matters, because the first converter
+        // whose CanConvert matches wins, so the strict per-enum registrations
+        // must precede the blanket one.
+        //
+        // (1) The BgDataTypes_Lib wire enums are string-token-exact: they are
+        // this converter's own vocabulary, every writer emits a name, and a
+        // reader that also took ordinals would re-couple a stored document to
+        // member numbering. AnalysisLevel makes that concrete — its declaration
+        // order is contractual and its families interleave, so inserting a
+        // member renumbers every member above it (Ply3Red, 2026-08-28). These
+        // types carry strict type-level attributes of their own, but an
+        // options-level converter OUTRANKS a type attribute, so registering
+        // them here is what preserves that strictness rather than defeating it.
+        new JsonStringEnumConverter<AnalysisLevel>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+        new JsonStringEnumConverter<AnalysisMode>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+        new JsonStringEnumConverter<CubeAction>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+        new JsonStringEnumConverter<CubeOwner>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+
+        // (2) The XG-native enums stay integer-tolerant, and that is a
+        // documented safety rather than an oversight: they mirror fields of a
+        // third-party binary format whose value space is larger than the named
+        // members. SiteId is the proof — real XG and XgpExporter both write
+        // (SiteId)(-1) for a local save, so the tolerance is load-bearing on
+        // the WRITE side too; allowIntegerValues: false would throw rather than
+        // emit it. Every one of these is populated by an unchecked cast from
+        // file bytes (SaveRecordParser), so an unnamed value is expected input,
+        // not corruption, and round-tripping the number is the correct
+        // behaviour. Tightening these would need a per-enum decision about what
+        // an unknown code means — a different question from #164's.
+        //
+        // camelCase is this document's pinned token spelling for both groups
+        // and must not change: these tokens are what every existing reader of
+        // the emitted JSON already holds.
         new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
         new PositionEngineConverter(),
         new SaveRecordConverter(),

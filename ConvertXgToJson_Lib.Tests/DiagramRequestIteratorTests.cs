@@ -1265,7 +1265,15 @@ public class DiagramRequestIteratorTests
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+            // Mirrors the product contract in XgJsonOptions: camelCase tokens,
+            // names only (halheinrich/backgammon#164). Not a candidate to
+            // collapse onto XgJsonOptions.Default — this writes a different
+            // document (BgDecisionData, not XgFile) and deliberately omits that
+            // document's converters, so the shapes encode independent decisions.
+            Converters =
+            {
+                new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+            },
         };
 
         Directory.CreateDirectory(TestPaths.BgDecisionDataDir);
