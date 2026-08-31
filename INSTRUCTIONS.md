@@ -590,6 +590,113 @@ Supporting helpers:
 * `CubeValueActual` — internal static helper, called from `MatchContext`
   and `XgDecisionIterator`'s cube-row / cube-diagram builders.
 
+### Level semantics: `LevelRequest` vs `Level`
+
+The model behind every level field a cube record carries — written for
+halheinrich/backgammon#161 (ruled 2026-08-31), the third defect cluster
+on these fields. Corpus numbers were re-measured 2026-08-31 against the
+local gitignored corpus as it stood that day: 360 `TestData/xg` match
+files (39,103 cube records), 193 `TestData/xgp` positions (193 cube
+panes), and the 30 XG-format `TestData/FixtureFiles` (3,644 cube panes).
+The corpus churns by design, so these counts are dated evidence, not
+pins; nothing gating depends on them.
+
+**The two pane fields answer different questions.**
+`DoubleActionAnalysis.LevelRequest` is a *setting*: the analysis level
+the user asked XG to run. `DoubleActionAnalysis.Level` is *provenance*:
+the level whose evaluation actually produced the pane's stored numbers —
+the three cubeful `Equity*` scalars and the eval vectors. A depth label
+describes the emitted equities, so it must resolve from `Level` — the
+gate's question ("did anything run at all?") and the label's question
+("what ran?") are both provenance questions, and only `Level` answers
+them. Consumers today:
+
+* `Analysis.Level` → the `IsAnalysed(CubeRecord)` emission gate
+  (`Level > 0`) — its only reader.
+* `Analysis.LevelRequest` → the two cube depth-label sites
+  (`BuildCubeRows` / `BuildCubeDiagramRequests` pass
+  `evalLevel: analysis.LevelRequest` to `ResolveDepthInfo`). **This is
+  the defect halheinrich/backgammon#161 corrects**: the checker side
+  already labels from what ran (`BuildMoveRow` resolves
+  `analysis.EvalLevels[bestIdx].Level`, the per-candidate ran level),
+  so the move path is the intended convention and the two cube paths
+  are the outlier. (`BestMoveAnalysis.Level`, the move pane's own
+  header-level field, is read by nothing.)
+
+**The governor: XG deepens close decisions and cheapens lopsided ones,
+recording the request either way.** The `(LevelRequest, Level)` census
+over the 360-file `.xg` corpus:
+
+| req | lvl | count | reading |
+|----:|----:|------:|---------|
+| 0 | 0 | 23,036 | never-written pane — see below |
+| 4 | 1 | **9,348** | asked 5-ply, **ran 2-ply** (255 files) |
+| 4 | 4 | 5,540 | asked 5-ply, ran 5-ply |
+| 1002 | 1002 | 849 | XG Roller++ as asked |
+| 3 | 1 | **114** | asked 4-ply, **ran 2-ply** (10 files) |
+| 2 | 1002 | **80** | asked 3-ply, **ran XG Roller++** (20 files, e.g. `gobetzu_algo_18072026_42248634.xg`) |
+| 3 | 3 | 73 | asked 4-ply, ran 4-ply |
+| 1001 | 1001 | 34 | XG Roller+ as asked |
+| 100 | 100 | 29 | rollout as asked |
+
+9,542 of the 16,067 analysed panes (59%) diverge, in **both
+directions**: the dominant shape is cheapening (a 5-ply request served
+by a 2-ply evaluation), but `req=2 → lvl=1002` ran a level *more*
+rigorous than requested, so a "requested ≥ ran" mental model is wrong.
+The close-vs-lopsided reading has direct corpus support: among the
+14,888 `req=4` panes, every one of the 401 played doubles sits in the
+`lvl=4` group — the 9,348 cheapened panes contain not a single played
+double. Decisions near the doubling window kept the full request;
+lopsided no-double rolls were served at 2-ply.
+
+**`Level == 0` is a never-written pane, not 1-ply.** All 23,036
+`Level == 0` records in the `.xg` corpus are all-zero unwritten panes:
+every one has `LevelRequest == 0`, zero in all three cubeful equities,
+all-zero eval vectors in `EvalNoDouble` / `EvalDoubleTake`,
+`IsBeaver == -100` (the never-analysed sentinel), and `-1/-1` in the
+record-level pair — the `Doubled == -2` incidental pane XG writes
+beside every checker play (`gobetzu-XG Roller++ 2026-07-21.xg` cube #1
+is the type specimen). The `Level > 0` gate excludes exactly these;
+what it discards is structurally empty, not shallow analysis. (This
+re-measures and upholds the halheinrich/backgammon#132 ruling booked
+in Pitfalls.)
+
+**The −100 sentinel is real but marginal — and it is not the gate's
+justification.** The record model preserves XG's format claim that a
+queued-but-unfinished analysis carries `Level == -100` with a non-zero
+`LevelRequest`. Measured: **zero** `-100` panes in the 39,103-record
+`.xg` corpus and zero in the 193-file `.xgp` corpus; FixtureFiles holds
+five — four all-zero editor-save shapes (`NoAnalysis.xgp`,
+`PlayAnalysis.xgp`, `3-ply Red.xgp`, `CommentsAddedToXgp.xgp`, all
+`LevelRequest == 0`) and exactly one queued-with-request pane
+(`Opening 32 65 64 31 65.xgp`: `req=1002, lvl=-100` on a
+`Doubled == -2` incidental pane — notably carrying non-zero cubeful
+equities). So the queued shape is an `.xgp`-editor-save phenomenon
+observed once, never in a match file. The gate's justification is the
+measured `Level == 0` story above; the `-100` exclusion rides the same
+predicate as a fixture-backed extra.
+
+**The record-level pair is a play-time stamp, not a depth source.**
+`CubeRecord.AnalyzeLevel` / `AnalyzeLevelRequested` duplicate the pane
+pair as XG recorded it at play time. Measured: they equal the pane pair
+on all 15,075 ply-family analysed panes (divergence included —
+`pane=(4,1)` carries `rec=(4,1)`), hold `-1/-1` on all 23,036
+never-written panes, and disagree on precisely the 992 Roller/rollout
+panes, where they hold a stale ply-family value
+(`pane=(100,100) → rec=(4,4)`; `pane=(1001,1001) → rec=(3,3)`×28,
+`(4,4)`×6; `pane=(1002,1002) → rec=(4,4)`×838, `(4,1)`×11;
+`pane=(2,1002) → rec=(4,4)`×80) — consistent with a stamp a later,
+deeper interactive re-analysis does not update. The pane is the
+authority for what produced the stored equities. No depth consumer
+reads the record pair: its only traffic is the parser↔writer
+round-trip, the slice exporter's verbatim copy, and the builder's
+synthesis stamps.
+
+The `.xgp` side shows the same defect at smaller scale: 36 of the 193
+corpus cube problems carry `req=4 → lvl=1` (labelled 5-ply today,
+equities from 2-ply); the 155 rollout panes resolve through the rollout
+context (`RolloutIndex`), so their labels were already truthful.
+
 ### Opening book (OpeningBook / OpeningBookParser)
 
 Parser + position-keyed lookup for XG's opening-book database
@@ -1046,12 +1153,15 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   for `MoveError` / `ErrorCube`; anything `> -999.0` is a real error. Using
   `!= 0` or `.HasValue` checks on raw fields will silently treat unanalyzed
   positions as zero-error.
-* **Cube `IsAnalysed` must gate on `Analysis.Level`, not `LevelRequest`.** XG
-  writes `LevelRequest` when the user *asks* for an analysis and `Level` when
-  it *runs*. An `.xgp` saved before the requested rollout completes has
-  `Level == -100` (queued) but a non-zero `LevelRequest`. Using `||` between
-  the two re-admits these phantom cubes and yields rows with empty equity /
-  eval fields.
+* **Cube `IsAnalysed` must gate on `Analysis.Level`, not `LevelRequest`.**
+  `LevelRequest` is a setting (what the user asked XG to run), `Level` is
+  provenance (what produced the pane's stored equities) — the full model,
+  with the re-measured census, is "Level semantics: `LevelRequest` vs
+  `Level`" in Architecture. Widening the gate with `LevelRequest` (`||`
+  between the two) buys nothing — every analysed pane in the corpus
+  carries a positive request too — and re-admits the queued-never-ran
+  phantom (`Level == -100` with a non-zero request; observed once, in
+  `FixtureFiles/Opening 32 65 64 31 65.xgp`).
 * **On a cube record, `Level == 0` means *unanalysed*, not "1-ply."** The
   gate above is `Analysis.Level > 0`, and the `> 0` is deliberate — not an
   off-by-one. Code `0` is a legitimate level in the `LevelInfo` taxonomy
@@ -1065,7 +1175,10 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   sentinel. Every genuinely analysed cube in the same corpus ran at level 1
   (2-ply, 9,487), 3 (4-ply, 73), 4 (5-ply, 5,537), 100 (rollout, 184), 1001
   (34) or 1002 (932); level 0 never appears as real analysis. Tightening the
-  gate to `>= 0` would admit 23,049 empty cube rows. Note the asymmetry with
+  gate to `>= 0` would admit 23,049 empty cube rows. Re-measured 2026-08-31
+  over the then-360-file corpus (halheinrich/backgammon#161): 23,036
+  records, identical all-zero pattern — see "Level semantics" in
+  Architecture. Note the asymmetry with
   the checker side, where 1-ply *is* a real analysis level that files do
   carry — which is why `IsAnalysed(MoveRecord)` gates structurally
   (`MoveCount` / `Evals`) instead of on a level at all.
@@ -1357,20 +1470,15 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   single-arg form through `(directory, TopDirectoryOnly)` so the class
   carries one order contract. Deliberate behavior change, not a drive-by:
   it alters `IterateXgDirectory`'s file order — its own session.
-* **Probe the corpus for cube depth labels resolved from the wrong field.**
-  Cube depth labels resolve from `DoubleActionAnalysis.LevelRequest` (what the
-  user *asked* XG to run) while the emission gate checks `Level` (what
-  actually *ran*) — `BuildCubeRows` / `BuildCubeDiagramRequests` vs
-  `IsAnalysed(CubeRecord)`. The known divergence (phantom cube: requested
-  `1002`, ran `-100`) is gated out, but a cube where both are positive and
-  different would pass the gate with equities from the ran level and a label
-  naming the requested one. Unverified whether XG ever writes that state — and
-  the int `Level`'s cube-side encoding may not match the `LevelInfo` short
-  taxonomy, which may be *why* the code uses `LevelRequest`. Deferred work:
-  probe the corpus for gated-in cubes with `Level ≠ LevelRequest`; if they
-  exist, label from what ran. Surfaced (and deliberately not folded in) during
-  the `.xgp` play-over-cube arc, which removed depth from the emission policy
-  and made this harmless to that arc.
+* **Label cube depth from `Level`, not `LevelRequest`** — ruled
+  halheinrich/backgammon#161 (2026-08-31) after the corpus probe showed
+  divergence is the *majority* case: 9,542 of 16,067 analysed cube panes
+  (59%), in both directions. The model landed as "Level semantics:
+  `LevelRequest` vs `Level`" in Architecture; the fix — `BuildCubeRows` /
+  `BuildCubeDiagramRequests` pass `analysis.Level` — plus the golden
+  regeneration (59% of analysed cube rows change `AnalysisDepth` /
+  `AnalysisMode` / `AnalysisLevel` / `DepthRank`) and the divergence pins
+  are the arc's second commit, pending model ratification.
 * **Analysis carry-through landed as the slice exporter** (`XgpExporter`'s
   `XgFile` + coordinates surface) — the original "Option B"
   (reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from
