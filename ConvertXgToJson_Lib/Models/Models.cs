@@ -320,18 +320,25 @@ internal sealed class BestMoveAnalysis
 /// Cube-action analysis pane (132 bytes). The three <c>Equity*</c> scalars
 /// are <b>cubeful</b>; the <see cref="EvalResult.Equity"/> inside
 /// <see cref="EvalNoDouble"/> / <see cref="EvalDoubleTake"/> is cubeless.
-/// Gate "is analysed" on <see cref="Level"/>, never on
-/// <see cref="LevelRequest"/> — XG writes LevelRequest when the user
-/// <i>asks</i> and Level when the analysis <i>runs</i>, so a queued-but-
-/// unfinished rollout has Level == −100 with a non-zero LevelRequest.
+/// <see cref="LevelRequest"/> is a <i>setting</i> (what the user asked XG
+/// to run); <see cref="Level"/> is <i>provenance</i> (what actually
+/// produced the stored equities) — they diverge on 59% of analysed corpus
+/// cubes, in both directions, so anything describing the pane's numbers
+/// (the emission gate, depth labels) reads Level. Full model with the
+/// measured census: INSTRUCTIONS.md, "Level semantics: LevelRequest vs
+/// Level" (halheinrich/backgammon#161).
 /// </summary>
 internal sealed class DoubleActionAnalysis
 {
     /// <summary>Position the analysis evaluated (XG's stored snapshot).</summary>
     public PositionEngine Position     { get; init; } = new();
     /// <summary>
-    /// Analysis level that actually ran (see <see cref="EvalLevel"/> for
-    /// the taxonomy); −100 = never analysed. The IsAnalysed gate.
+    /// Analysis level that actually ran — the provenance of the stored
+    /// equities (see <see cref="EvalLevel"/> for the taxonomy). The
+    /// IsAnalysed gate and the depth label both read this. 0 = the
+    /// all-zero never-written pane (the corpus's entire unanalysed
+    /// population); −100 = XG's queued-never-ran <c>.xgp</c> editor
+    /// sentinel (format-real but marginal).
     /// </summary>
     public int            Level        { get; init; }
     /// <summary>Score snapshot XG stored with the pane: [0]=player 1, [1]=player 2.</summary>
@@ -357,9 +364,11 @@ internal sealed class DoubleActionAnalysis
     /// <summary>Cubeful equity of "double, drop".</summary>
     public float          EquityDoubleDrop { get; init; }
     /// <summary>
-    /// Analysis level the user <i>requested</i> — non-zero on a queued
-    /// analysis that never ran. Not the IsAnalysed gate; see the class
-    /// summary.
+    /// Analysis level the user <i>requested</i> — a setting, silent on
+    /// what the stored equities came from (XG's governor deepens close
+    /// decisions and cheapens lopsided ones, recording the request either
+    /// way). Feeds neither the IsAnalysed gate nor the depth label; see
+    /// the class summary.
     /// </summary>
     public short          LevelRequest    { get; init; }
     /// <summary>XG's stored cube choice at 3-ply.</summary>

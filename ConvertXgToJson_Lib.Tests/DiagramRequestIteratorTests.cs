@@ -707,7 +707,11 @@ public class DiagramRequestIteratorTests
     /// <summary>
     /// For every analysed cube decision across the .xg corpus, the emitted
     /// <c>Decision.CubeDepth</c> must equal <c>ResolveDepth</c> applied to
-    /// <c>analysis.LevelRequest</c> and the cube's rollout index. Also
+    /// <c>analysis.Level</c> — the level that ran, the provenance of the
+    /// emitted equities (halheinrich/backgammon#161; previously
+    /// <c>LevelRequest</c>, which mislabelled the 59% of analysed corpus
+    /// cubes where XG's governor served the request at a different level) —
+    /// and the cube's rollout index. Also
     /// asserts that cube requests carry no plays (cube decisions are
     /// play-free by contract). Pins the scalar <c>CubeDepth</c> migration
     /// (BgDataTypes <c>d86dab7</c>). Non-vacuousness: at least one cube
@@ -750,12 +754,12 @@ public class DiagramRequestIteratorTests
                         $"{sourceFile}: correlated request should be a cube");
 
                     string expected = XgDecisionIterator.ResolveDepth(
-                        evalLevel: cube.Analysis.LevelRequest,
+                        evalLevel: (short)cube.Analysis.Level,
                         rolloutIndex: cube.RolloutIndex,
                         rollouts: file.Rollouts);
 
                     req.Decision.CubeDepth.Should().Be(expected,
-                        $"{sourceFile}: CubeDepth must be ResolveDepth(analysis.LevelRequest, ...)");
+                        $"{sourceFile}: CubeDepth must be ResolveDepth(analysis.Level, ...)");
                     req.Decision.Plays.Should().BeEmpty(
                         $"{sourceFile}: cube request must carry no plays");
 

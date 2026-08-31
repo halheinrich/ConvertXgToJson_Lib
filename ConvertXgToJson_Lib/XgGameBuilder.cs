@@ -337,7 +337,19 @@ public sealed class XgGameBuilder
     /// <see cref="CubeAction.Pass"/>; null when none was recorded. Only
     /// valid after a <see cref="CubeAction.Double"/>.
     /// </param>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="ply"/> is outside 2–7.</exception>
+    /// <param name="requestedPly">
+    /// The analysis depth the user <i>asked</i> XG to run, 2–7 plies; null
+    /// (the default) means the request matches <paramref name="ply"/>. XG's
+    /// governor routinely serves a request at a different level — deepening
+    /// close decisions, cheapening lopsided ones — and records the request
+    /// either way, so requested ≠ ran is an ordinary corpus shape (59% of
+    /// analysed cubes; see INSTRUCTIONS.md, "Level semantics: LevelRequest
+    /// vs Level", halheinrich/backgammon#161). <paramref name="ply"/> is
+    /// what ran — the provenance of the equities and of the emitted depth
+    /// label; the request is a setting no downstream depth consumer reads.
+    /// </param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="ply"/>
+    /// or <paramref name="requestedPly"/> is outside 2–7.</exception>
     /// <exception cref="ArgumentException">
     /// An action is from the wrong half of the decision, or a reply is
     /// given without a double.
@@ -345,13 +357,18 @@ public sealed class XgGameBuilder
     /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
     public XgGameBuilder CubeDecision(
         XgPlayer doubler, XgCubeEquities equities, int ply = MinCubePly,
-        CubeAction? doublerAction = null, CubeAction? takerAction = null)
+        CubeAction? doublerAction = null, CubeAction? takerAction = null,
+        int? requestedPly = null)
     {
         if (ply is < MinCubePly or > XgPlayCandidate.MaxPly)
             throw new ArgumentOutOfRangeException(nameof(ply), ply,
                 $"A cube analysis depth must be {MinCubePly}–{XgPlayCandidate.MaxPly} plies " +
                 "(a 1-ply cube pane is indistinguishable from an unanalysed one downstream).");
+        if (requestedPly is < MinCubePly or > XgPlayCandidate.MaxPly)
+            throw new ArgumentOutOfRangeException(nameof(requestedPly), requestedPly,
+                $"A requested cube analysis depth must be {MinCubePly}–{XgPlayCandidate.MaxPly} plies.");
         int levelCode = ToLevelCode(ply);
+        int requestCode = ToLevelCode(requestedPly ?? ply);
         var (doubled, taken) = EncodeActions(doublerAction, takerAction);
         ThrowIfEnded();
 
@@ -397,16 +414,18 @@ public sealed class XgGameBuilder
                 EquityNoDouble = (float)equities.NoDouble,
                 EquityDoubleTake = (float)equities.DoubleTake,
                 EquityDoubleDrop = (float)equities.DoubleDrop,
-                LevelRequest = (short)levelCode,
+                LevelRequest = (short)requestCode,
             },
             ErrorCube = errorCube,
             DiceRolled = PreRollDiceDisplay,
             ErrorTake = errorTake,
             RolloutIndex = -1,
+            // The record-level pair mirrors the pane pair at play time —
+            // divergence included — matching the measured corpus shape.
             AnalyzeLevel = levelCode,
             ErrorBeaver = XgRecordFactory.UnanalysedError,
             ErrorRaccoon = XgRecordFactory.UnanalysedError,
-            AnalyzeLevelRequested = levelCode,
+            AnalyzeLevelRequested = requestCode,
             TutorCube = -1,
             TutorTake = -1,
             ErrorTutorCube = XgRecordFactory.UnanalysedError,

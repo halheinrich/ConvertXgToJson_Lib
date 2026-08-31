@@ -325,10 +325,15 @@ the returned `XgGameBuilder` records decisions in play order:
   ply). `UnanalysedPlay` advances the position but never emits.
   `Dance` / `IllegalPlay` record XG's two non-play sentinels as intents —
   the raw encodings stay the builder's business.
-* `CubeDecision(doubler, XgCubeEquities, ply, doublerAction, takerAction)` —
-  analysed cube; XG's stored errors are *derived* from the equities and the
-  played actions, and the played actions map onto the `Doubled`/`Taken`
-  pane state (the inverse of the iterator's UserDoublerAction mapping).
+* `CubeDecision(doubler, XgCubeEquities, ply, doublerAction, takerAction,
+  requestedPly)` — analysed cube; XG's stored errors are *derived* from the
+  equities and the played actions, and the played actions map onto the
+  `Doubled`/`Taken` pane state (the inverse of the iterator's
+  UserDoublerAction mapping). `ply` is what *ran* (the provenance of the
+  equities and the emitted depth label); the optional `requestedPly`
+  synthesizes XG's ordinary requested ≠ ran governor shape (see "Level
+  semantics" above), stamped on the pane pair and the record-level
+  play-time stamp alike; null means the request matches `ply`.
   `UnanalysedCube` is the incidental pane; its actions still move the cube.
 * State is tracked per game: plays advance the position (validated against
   the board through `BgDataTypes_Lib.BoardState` — from-point occupied, no
@@ -612,16 +617,17 @@ gate's question ("did anything run at all?") and the label's question
 them. Consumers today:
 
 * `Analysis.Level` → the `IsAnalysed(CubeRecord)` emission gate
-  (`Level > 0`) — its only reader.
-* `Analysis.LevelRequest` → the two cube depth-label sites
-  (`BuildCubeRows` / `BuildCubeDiagramRequests` pass
-  `evalLevel: analysis.LevelRequest` to `ResolveDepthInfo`). **This is
-  the defect halheinrich/backgammon#161 corrects**: the checker side
-  already labels from what ran (`BuildMoveRow` resolves
-  `analysis.EvalLevels[bestIdx].Level`, the per-candidate ran level),
-  so the move path is the intended convention and the two cube paths
-  are the outlier. (`BestMoveAnalysis.Level`, the move pane's own
-  header-level field, is read by nothing.)
+  (`Level > 0`) **and** the two cube depth-label sites (`BuildCubeRows` /
+  `BuildCubeDiagramRequests` pass `evalLevel: (short)analysis.Level` to
+  `ResolveDepthInfo`) — matching the checker side, which labels from what
+  ran (`BuildMoveRow` resolves `analysis.EvalLevels[bestIdx].Level`, the
+  per-candidate ran level).
+* `Analysis.LevelRequest` → **nothing**. Until the
+  halheinrich/backgammon#161 fix the two cube label sites read it, so
+  59% of analysed cube rows named a level that did not run; labelling
+  from `Level` was the ruling, and `CubeLevelSemanticsTests` pins both
+  divergence directions plus the gate. (`BestMoveAnalysis.Level`, the
+  move pane's own header-level field, is likewise read by nothing.)
 
 **The governor: XG deepens close decisions and cheapens lopsided ones,
 recording the request either way.** The `(LevelRequest, Level)` census
@@ -692,10 +698,10 @@ reads the record pair: its only traffic is the parser↔writer
 round-trip, the slice exporter's verbatim copy, and the builder's
 synthesis stamps.
 
-The `.xgp` side shows the same defect at smaller scale: 36 of the 193
-corpus cube problems carry `req=4 → lvl=1` (labelled 5-ply today,
-equities from 2-ply); the 155 rollout panes resolve through the rollout
-context (`RolloutIndex`), so their labels were already truthful.
+The `.xgp` side showed the same defect at smaller scale: 36 of the 193
+corpus cube problems carry `req=4 → lvl=1` (labelled 5-ply before the
+fix, equities from 2-ply); the 155 rollout panes resolve through the
+rollout context (`RolloutIndex`), so their labels were already truthful.
 
 ### Opening book (OpeningBook / OpeningBookParser)
 
@@ -967,7 +973,8 @@ public sealed class XgGameBuilder           // from AddGame; methods chain
     public XgGameBuilder CubeDecision(XgPlayer doubler, XgCubeEquities equities,
                                       int ply = 2,   // 2–7; 1-ply cube is unrepresentable
                                       CubeAction? doublerAction = null,
-                                      CubeAction? takerAction = null);
+                                      CubeAction? takerAction = null,
+                                      int? requestedPly = null); // 2–7; null = matches ply
     public XgGameBuilder UnanalysedCube(XgPlayer doubler,
                                         CubeAction? doublerAction = null,
                                         CubeAction? takerAction = null);
@@ -1470,15 +1477,6 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   single-arg form through `(directory, TopDirectoryOnly)` so the class
   carries one order contract. Deliberate behavior change, not a drive-by:
   it alters `IterateXgDirectory`'s file order — its own session.
-* **Label cube depth from `Level`, not `LevelRequest`** — ruled
-  halheinrich/backgammon#161 (2026-08-31) after the corpus probe showed
-  divergence is the *majority* case: 9,542 of 16,067 analysed cube panes
-  (59%), in both directions. The model landed as "Level semantics:
-  `LevelRequest` vs `Level`" in Architecture; the fix — `BuildCubeRows` /
-  `BuildCubeDiagramRequests` pass `analysis.Level` — plus the golden
-  regeneration (59% of analysed cube rows change `AnalysisDepth` /
-  `AnalysisMode` / `AnalysisLevel` / `DepthRank`) and the divergence pins
-  are the arc's second commit, pending model ratification.
 * **Analysis carry-through landed as the slice exporter** (`XgpExporter`'s
   `XgFile` + coordinates surface) — the original "Option B"
   (reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from

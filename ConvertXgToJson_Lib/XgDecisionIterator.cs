@@ -604,8 +604,11 @@ public static class XgDecisionIterator
         // No book entry: the cube-row keying convention against the opening
         // book is unproven (see LookupBookEntry), so a book-stamped cube
         // resolves to the degraded BookRollout + Unknown pair by design.
+        // Depth resolves from Level — the level that produced the emitted
+        // equities — not the LevelRequest setting; the two diverge on 59%
+        // of analysed corpus cubes (halheinrich/backgammon#161).
         var (depth, _, _, mode, level) = ResolveDepthInfo(
-            evalLevel: analysis.LevelRequest,
+            evalLevel: (short)analysis.Level,
             rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
 
@@ -653,9 +656,10 @@ public static class XgDecisionIterator
     {
         var analysis = cube.Analysis;
 
-        // No book entry — same degradation rationale as BuildCubeRows.
+        // No book entry — same degradation rationale as BuildCubeRows,
+        // and depth resolves from the ran Level for the same reason.
         var (depth, depthAbbrev, depthRank, mode, level) = ResolveDepthInfo(
-            evalLevel: analysis.LevelRequest,
+            evalLevel: (short)analysis.Level,
             rolloutIndex: cube.RolloutIndex,
             rollouts: rollouts);
 
@@ -1450,9 +1454,13 @@ public static class XgDecisionIterator
         return found;
     }
 
-    // LevelRequest reflects what the user asked XG to compute, not what XG ran:
-    // an .xgp closed before the analysis completed has Level == -100 (XG's
-    // "queued, never ran" sentinel) but a non-zero LevelRequest. Gate on Level.
+    // LevelRequest is a setting (what the user asked XG to run); Level is
+    // provenance (what produced the pane's stored equities). Gate on Level:
+    // what the > 0 predicate excludes is, corpus-measured, the all-zero
+    // never-written incidental pane (Level == 0), plus the format-real but
+    // marginal queued-never-ran -100 sentinel. Full model with the census:
+    // INSTRUCTIONS.md, "Level semantics: LevelRequest vs Level"
+    // (halheinrich/backgammon#161).
     private static bool IsAnalysed(CubeRecord cube) =>
         cube.Analysis.Level > 0;
 
