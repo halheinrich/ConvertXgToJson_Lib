@@ -6,8 +6,10 @@
 
   <ItemGroup>
     <!-- AwesomeAssertions is the Apache-2.0 community continuation of
-         pre-relicense FluentAssertions. It replaces the permanent 6.12.2 cap
-         we carried because FluentAssertions 7+ is Xceed-proprietary. -->
+         pre-relicense FluentAssertions. It replaces the 6.12.2 cap we carried
+         against the relicense; FluentAssertions 8+ is under Xceed's commercial
+         licence, 7.x remains Apache 2.0 (https://xceed.com/fluent-assertions-faq/,
+         read 2026-09-13). -->
     <PackageVersion Include="AwesomeAssertions" Version="9.5.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
