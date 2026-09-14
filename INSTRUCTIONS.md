@@ -160,6 +160,21 @@ Entry points:
   first yield. To stop early, the consumer breaks out of the foreach;
   disposing the enumerator stops further yields. There is no imperative
   skip flag.
+* `ToJson` / `WriteJsonAsync` / `ReadJson` — the JSON document, through
+  `XgJsonOptions.Default`. Each record in `records` is written with a
+  `$type` discriminator first (`"HeaderMatch"`, `"Cube"`, …, the
+  `RecordType` member name) and read back to its class by
+  `SaveRecordConverter`, whose one table maps every `RecordType` member to
+  the class that carries it — `Comment` and `Missing` both to
+  `UnknownRecord`, which is why the mapping is a converter rather than
+  `[JsonPolymorphic]` (one discriminator per derived type there; measured
+  under halheinrich/backgammon#177). Every member round-trips, and both
+  directions check the table: a write refuses a record whose runtime type
+  is not its tag's class or whose tag is unnamed, a read refuses an unknown
+  discriminator or one that disagrees with the record's `entryType`, all
+  as `JsonException`. The converter claims the abstract `SaveRecord` alone,
+  so the concrete record inside it resolves to the same options' object
+  contract — no derived options object exists (halheinrich/backgammon#178).
 
 ### Writing (XgFileWriter / XgpExporter)
 
@@ -1024,7 +1039,10 @@ public static class XgFileReader
 
     // JSON serialization round-trip. ReadJson is load-bearing: the
     // internal XgDecisionIterator.IterateJsonDirectory and XgFilter_Lib's
-    // FilteredDecisionIterator both parse each export through it.
+    // FilteredDecisionIterator both parse each export through it. Every
+    // record variant round-trips, UnknownRecord's two tags included: the
+    // $type mapping is SaveRecordConverter's one table (see XgFileReader
+    // under Architecture).
     public static string                ToJson(XgFile file, JsonSerializerOptions? options = null);
     public static Task                  WriteJsonAsync(XgFile file, string outputPath,
                                             JsonSerializerOptions? options = null,
@@ -1180,6 +1198,14 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   so a fixture's cube-record count is not its cube-decision count. Both
   surfaces drop them at the shared dispatch site (`AdmitsCubeDecision`),
   and the wire types would refuse the record anyway (halheinrich/backgammon#201).
+* **The `$type` discriminator has one home.** `SaveRecordConverter`'s
+  table maps every `RecordType` member to its class, and the strings on
+  the wire are the members' names. Adding a record variant means one table
+  row; a variant missing from it fails at write (unnamed or mismatched
+  tag) and at read (unknown discriminator), never silently. Do not reach
+  for `[JsonPolymorphic]`: `UnknownRecord` carries two tags, and the
+  built-in mechanism binds one discriminator per derived type
+  (halheinrich/backgammon#177).
 * **`.xgp` sentinel handling is easy to regress.** `-1000` means "unanalyzed"
   for `MoveError` / `ErrorCube`; anything `> -999.0` is a real error. Using
   `!= 0` or `.HasValue` checks on raw fields will silently treat unanalyzed

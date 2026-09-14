@@ -7,6 +7,7 @@ using ConvertXgToJson_Lib.Json;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
 using ConvertXgToJson_Lib.Tests.Helpers;
+using static ConvertXgToJson_Lib.Tests.Helpers.ResolverPaths;
 
 namespace ConvertXgToJson_Lib.Tests;
 
@@ -23,35 +24,9 @@ namespace ConvertXgToJson_Lib.Tests;
 [Collection("FileIO")]
 public class XgJsonContextTests
 {
-    // -----------------------------------------------------------------------
-    //  The three metadata mechanisms, over one options configuration.
-    //
-    //  Every path is built by copying XgJsonOptions.Default and swapping only
-    //  its resolver, so this suite never restates the document's policy —
-    //  indentation, camelCase naming, the null-ignore condition and the
-    //  halheinrich/backgammon#164 enum converters stay single-sourced in
-    //  XgJsonOptions. What varies between the paths is exactly one thing:
-    //  where the JsonTypeInfo comes from.
-    // -----------------------------------------------------------------------
-
-    /// <summary>The pre-change mechanism: runtime reflection.</summary>
-    private static readonly JsonSerializerOptions ReflectionOptions =
-        new(XgJsonOptions.Default) { TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
-
-    /// <summary>What this library ships: this repo's context chained ahead of
-    /// BgDataTypes_Lib's, the arc's composition pattern.</summary>
-    private static readonly JsonSerializerOptions ChainedOptions = XgJsonOptions.Default;
-
-    /// <summary>
-    /// This repo's context alone, unchained — the pin that the
-    /// <see cref="XgFile"/> closure is self-sufficient here and does not
-    /// silently lean on the link below it. (The chain is still load-bearing
-    /// for <see cref="XgJsonOptions"/> as a whole: the four BgDataTypes_Lib
-    /// wire enums resolve one link down, which is what
-    /// <c>EnumTokenStrictnessTests</c> exercises.)
-    /// </summary>
-    private static readonly JsonSerializerOptions ContextOnlyOptions =
-        new(XgJsonOptions.Default) { TypeInfoResolver = XgJsonContext.Default };
+    // The three metadata mechanisms over one options configuration —
+    // ReflectionOptions, ChainedOptions, ContextOnlyOptions — are
+    // Helpers/ResolverPaths, shared with SaveRecordConverterTests.
 
     // -----------------------------------------------------------------------
     //  Fixtures — real XG-authored files, so every collection and record

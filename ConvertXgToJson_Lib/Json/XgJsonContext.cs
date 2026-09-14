@@ -49,14 +49,14 @@ namespace ConvertXgToJson_Lib.Json;
 ///     <see cref="System.Text.Json.JsonSerializerOptions"/> at runtime —
 ///     these declarations are what that resolution finds. (Leg 1's
 ///     <c>Move</c> is the same situation: a converter emitting types the
-///     property walk never sees.) That is seven types, not the six the
-///     <c>$type</c> switch names: <see cref="UnknownRecord"/> is what
-///     <see cref="SaveRecordParser"/> yields for a record code it does not
-///     recognise, and XG's format has codes it does not
-///     (<see cref="RecordType.Comment"/>, <see cref="RecordType.Missing"/>),
-///     so it reaches the wire like any other variant. The completeness test
-///     derives this group from the assembly rather than from this list, and
-///     is what caught it.
+///     property walk never sees.) That is seven types for the eight
+///     <see cref="RecordType"/> members the converter's table maps:
+///     <see cref="UnknownRecord"/> is what <see cref="SaveRecordParser"/>
+///     yields for a record code it does not recognise, and XG's format has
+///     codes it does not (<see cref="RecordType.Comment"/>,
+///     <see cref="RecordType.Missing"/>), so it reaches the wire like any
+///     other variant. The completeness test derives this group from the
+///     assembly rather than from this list, and is what caught it.
 ///   </description></item>
 ///   <item><description>
 ///     <see cref="PositionEngine"/> and <see cref="GameHeaderRecord"/> are

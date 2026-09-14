@@ -1,9 +1,11 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
-using System.Linq;
+using ConvertXgToJson_Lib.Parsing;
+
 namespace ConvertXgToJson_Lib.Json;
 
 /// <summary>
@@ -124,81 +126,122 @@ internal sealed class PositionEngineConverter : JsonConverter<PositionEngine>
 }
 
 /// <summary>
-/// Polymorphic converter for SaveRecord: serialises a "$type" discriminator
-/// so that the JSON consumer can identify each record variant.
+/// Polymorphic converter for <see cref="SaveRecord"/>: writes a
+/// <c>$type</c> discriminator first so a consumer can tell the record
+/// variants apart, and reads it back to the concrete class.
+///
+/// <para>
+/// <b>The mapping lives in one table.</b> <see cref="Variants"/> pairs
+/// every <see cref="RecordType"/> member with the class that carries it;
+/// the discriminator string is the member's name, and the read-side lookup
+/// is derived from the same table, so <see cref="Write"/> and
+/// <see cref="Read"/> cannot disagree (halheinrich/backgammon#177). Two
+/// tags share one class: <see cref="RecordType.Comment"/> and
+/// <see cref="RecordType.Missing"/> are both <see cref="UnknownRecord"/> —
+/// XG declares the codes but never writes them, and
+/// <see cref="SaveRecordParser"/> tags whatever it does not recognise with
+/// the code it read — and each reads back as an <see cref="UnknownRecord"/>
+/// tagged as it was written. That is also why the mapping is a converter
+/// and not <c>[JsonPolymorphic]</c> / <c>[JsonDerivedType]</c>: the
+/// built-in mechanism binds one discriminator per derived type and rejects
+/// a second registration of the same type, so it cannot spell both
+/// <c>"Comment"</c> and <c>"Missing"</c> from one class (measured
+/// 2026-09-14 on .NET 10: <c>InvalidOperationException: The polymorphic
+/// type 'SaveRecord' has already specified derived type
+/// 'UnknownRecord'</c>).
+/// </para>
+///
+/// <para>
+/// <b>Both directions check the table, so the wire's two copies of the tag
+/// agree.</b> A document carries the tag twice — as <c>$type</c> and as
+/// the <c>entryType</c> member every record serializes — and a mapping is
+/// only a mapping if they cannot drift. A write refuses a record whose
+/// runtime type is not the table's class for its
+/// <see cref="SaveRecord.EntryType"/> (a <see cref="CubeRecord"/> tagged
+/// <c>Move</c>) or whose tag has no discriminator (an unnamed code the
+/// parser read from a file); a read refuses a discriminator the table does
+/// not name and one that disagrees with the record's own <c>entryType</c>.
+/// All four throw <see cref="JsonException"/>.
+/// </para>
+///
+/// <para>
+/// <b>Claims <see cref="SaveRecord"/> alone.</b> The converter matches the
+/// abstract declared type — the element type of <see cref="XgFile.Records"/>
+/// — and no derived type, so the concrete record it serializes or
+/// deserializes within resolves to the ordinary object contract of the
+/// same options rather than back into this converter. That is what
+/// removed the per-record options clone the earlier shape needed to keep
+/// from recursing (halheinrich/backgammon#178): there is no derived
+/// options object at all.
+/// </para>
 /// </summary>
 internal sealed class SaveRecordConverter : JsonConverter<SaveRecord>
 {
-    public override bool CanConvert(Type typeToConvert)
-        => typeof(SaveRecord).IsAssignableFrom(typeToConvert);
+    private const string Discriminator = "$type";
+
+    /// <summary>
+    /// The one table: every <see cref="RecordType"/> member and the class
+    /// that carries it. Everything else the converter knows — the
+    /// discriminator strings, the read-side lookup — derives from here.
+    /// </summary>
+    private static readonly FrozenDictionary<RecordType, Type> Variants =
+        new Dictionary<RecordType, Type>
+        {
+            [RecordType.HeaderMatch] = typeof(MatchHeaderRecord),
+            [RecordType.HeaderGame] = typeof(GameHeaderRecord),
+            [RecordType.Cube] = typeof(CubeRecord),
+            [RecordType.Move] = typeof(MoveRecord),
+            [RecordType.FooterGame] = typeof(GameFooterRecord),
+            [RecordType.FooterMatch] = typeof(MatchFooterRecord),
+            [RecordType.Comment] = typeof(UnknownRecord),
+            [RecordType.Missing] = typeof(UnknownRecord),
+        }.ToFrozenDictionary();
+
+    /// <summary>The read-side lookup, derived: a member's name is its discriminator.</summary>
+    private static readonly FrozenDictionary<string, RecordType> TagsByDiscriminator =
+        Variants.Keys.ToFrozenDictionary(DiscriminatorOf, tag => tag, StringComparer.Ordinal);
+
+    /// <summary>Callers pass a table key, which is named by construction.</summary>
+    private static string DiscriminatorOf(RecordType tag) =>
+        Enum.GetName(tag)
+        ?? throw new InvalidOperationException($"RecordType {(byte)tag} is unnamed and cannot be a variant.");
 
     public override SaveRecord Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        // Buffer the entire object so we can read $type then redeserialize
+        // Buffer the object: the discriminator is read first, then the whole
+        // object is deserialized as the class it names.
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
 
-        if (!root.TryGetProperty("$type", out var typeProp))
+        if (!root.TryGetProperty(Discriminator, out var typeProperty))
             throw new JsonException("SaveRecord missing '$type' discriminator.");
+        string discriminator = typeProperty.GetString() ?? "";
+        if (!TagsByDiscriminator.TryGetValue(discriminator, out var tag))
+            throw new JsonException($"Unknown SaveRecord type: '{discriminator}'");
 
-        string typeName = typeProp.GetString() ?? "";
-
-        var innerOptions = WithoutSelf(options);
-
-        string json = root.GetRawText();
-
-        return typeName switch
-        {
-            "HeaderMatch" => Deserialize<MatchHeaderRecord>(json, innerOptions),
-            "HeaderGame" => Deserialize<GameHeaderRecord>(json, innerOptions),
-            "Move" => Deserialize<MoveRecord>(json, innerOptions),
-            "Cube" => Deserialize<CubeRecord>(json, innerOptions),
-            "FooterGame" => Deserialize<GameFooterRecord>(json, innerOptions),
-            "FooterMatch" => Deserialize<MatchFooterRecord>(json, innerOptions),
-            _ => throw new JsonException($"Unknown SaveRecord type: '{typeName}'")
-        };
+        var record = (SaveRecord)root.Deserialize(options.GetTypeInfo(Variants[tag]))!;
+        if (record.EntryType != tag)
+            throw new JsonException(
+                $"SaveRecord '$type' {discriminator} disagrees with its entryType {record.EntryType}.");
+        return record;
     }
+
     public override void Write(Utf8JsonWriter writer, SaveRecord value, JsonSerializerOptions options)
     {
+        if (!Variants.TryGetValue(value.EntryType, out var variant))
+            throw new JsonException(
+                $"SaveRecord tagged {value.EntryType} has no '$type' discriminator: the tag is not a RecordType member.");
+        if (value.GetType() != variant)
+            throw new JsonException(
+                $"SaveRecord tagged {value.EntryType} must be a {variant.Name}, not a {value.GetType().Name}.");
+
         writer.WriteStartObject();
+        writer.WriteString(Discriminator, DiscriminatorOf(value.EntryType));
 
-        // Write discriminator first
-        writer.WriteString("$type", value.EntryType.ToString());
-
-        var innerOptions = WithoutSelf(options);
-
-        using var doc = JsonSerializer.SerializeToDocument(
-            value, innerOptions.GetTypeInfo(value.GetType()));
-        foreach (var prop in doc.RootElement.EnumerateObject())
-        {
-            if (prop.Name == "$type") continue;
-            prop.WriteTo(writer);
-        }
+        using var doc = JsonSerializer.SerializeToDocument(value, options.GetTypeInfo(variant));
+        foreach (var property in doc.RootElement.EnumerateObject())
+            property.WriteTo(writer);
 
         writer.WriteEndObject();
-    }
-
-    /// <summary>
-    /// Deserializes one concrete record variant through the options'
-    /// resolver rather than by reflection — the trim-safe form of
-    /// <c>Deserialize&lt;T&gt;(json, options)</c>
-    /// (halheinrich/backgammon#129 leg 2). Every variant named by the
-    /// <c>$type</c> switch is declared in <see cref="XgJsonContext"/>,
-    /// which is what makes the lookup resolve there.
-    /// </summary>
-    private static T Deserialize<T>(string json, JsonSerializerOptions options)
-        where T : SaveRecord
-        => (T)JsonSerializer.Deserialize(json, options.GetTypeInfo(typeof(T)))!;
-
-    /// <summary>
-    /// Clones <paramref name="options"/> without this converter, so the inner
-    /// (de)serialization of a concrete SaveRecord type does not recurse back
-    /// into SaveRecordConverter.
-    /// </summary>
-    private static JsonSerializerOptions WithoutSelf(JsonSerializerOptions options)
-    {
-        var inner = new JsonSerializerOptions(options);
-        inner.Converters.Remove(inner.Converters.First(c => c is SaveRecordConverter));
-        return inner;
     }
 }
