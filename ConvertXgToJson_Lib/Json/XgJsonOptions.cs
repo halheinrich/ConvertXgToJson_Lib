@@ -83,7 +83,7 @@ internal static class XgJsonOptions
         // file bytes (SaveRecordParser), so an unnamed value is expected input,
         // not corruption, and round-tripping the number is the correct
         // behaviour. Tightening these would need a per-enum decision about what
-        // an unknown code means — a different question from #164's.
+        // an unknown code means — a different question from halheinrich/backgammon#164's.
         //
         // camelCase is this document's pinned token spelling for both groups
         // and must not change: these tokens are what every existing reader of

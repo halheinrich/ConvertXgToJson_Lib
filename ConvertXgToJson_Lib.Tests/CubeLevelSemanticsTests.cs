@@ -243,7 +243,7 @@ public class CubeLevelSemanticsTests
     /// requested 5-ply, ran 2-ply) must label 2-ply after the
     /// halheinrich/backgammon#161 fix; its second (cube #3: dice 52, ran =
     /// requested = 5-ply) still labels 5-ply. Identity is anchored on the
-    /// cubeful equities, byte-verified in the #161 probe (cube #2:
+    /// cubeful equities, byte-verified in the halheinrich/backgammon#161 probe (cube #2:
     /// ND −0.1533 / DT −0.6208 / DP +1.0000).
     ///
     /// <para>

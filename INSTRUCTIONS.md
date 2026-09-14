@@ -928,7 +928,7 @@ match files:
 // writing, iterating, exporting, and synthesis all take or return the
 // handle whole. (Namespace ConvertXgToJson_Lib.Models — the model types
 // around it are internal; the namespace placement predates that and moves
-// with the #19 rename, not before.)
+// with the halheinrich/backgammon#19 rename, not before.)
 public sealed class XgFile { }
 
 // Intent-level synthesis — the one public way to make an in-memory XgFile.
