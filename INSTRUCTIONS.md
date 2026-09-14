@@ -781,12 +781,16 @@ data only.
 rollouts + XG's own Roller++ baseline). `TryGetEntry` (internal, like the
 whole keyed-lookup surface — the key needs the internal record position
 convention, so the public intent is `XgIteratorOptions.OpeningBook`
-enrichment, never direct lookup) returns the entry XG displays, per the empirically pinned policy: entry-level rank first
-(rollout > Roller++, via the `ResolveDepthInfo` rank taxonomy — the SSOT
-for level ordering), then rollout moves-level rank, cube-level rank,
-trials, analysis date, file position (import-append: later wins). XG
-demonstrably prefers a deeper-level rollout over one with more games.
-`GetEntries` returns all matches best-first.
+enrichment, never direct lookup) returns the most rigorous entry. The
+policy is this library's, not a prediction of XG's display: entry-level
+rank first (rollout > Roller++, via the `ResolveDepthInfo` rank taxonomy —
+the SSOT for level ordering), then rollout moves-level rank, cube-level
+rank, trials, analysis date, file position (import-append: later wins).
+XG's tooltip has been read on two keys where rollout depths compete and
+it went one way each — deeper on `ajhhBG0407.xg` g9 m1, shallower on
+`match26212229.xg` g3 m2 — so no parity claim is made; the class doc
+records both cases and the halheinrich/backgammon#203 ruling that the
+deeper entry stands. `GetEntries` returns all matches best-first.
 
 ### XgIteratorState
 
@@ -1486,11 +1490,16 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   before wiring cube enrichment — `ResolveDepthInfo` would also need to
   select `RolloutCubeLevel` rather than `RolloutMovesLevel` for that
   path.
-* **Book selection: deeper rollout levels beat more games.** One key
-  commonly holds several entries; XG demonstrably shows a 12,960-game
-  4-ply/4-ply rollout over a 20,736-game 3-ply/3-ply one, and any rollout
-  over its own Roller++ baseline — recency and file order are only final
-  tiebreaks. One residual ambiguity, documented on `OpeningBook`: moves
+* **Book selection: deeper rollout levels beat more games — by this
+  library's policy, which is not XG's display rule.** One key commonly
+  holds several entries (5,113 keys with more than one rollout, 2,099 of
+  them at differing moves levels), and the most rigorous wins: any rollout
+  over the Roller++ baseline, then the deeper level over more games, with
+  recency and file order only final tiebreaks. XG's tooltip agrees on one
+  observed key and disagrees on another; both cases and the ruling that
+  the policy stands are on `OpeningBook`'s class doc
+  (halheinrich/backgammon#203) — cite them from there rather than claiming
+  parity anywhere. One residual ambiguity, documented on `OpeningBook`: moves
   level is compared before cube level (lexicographic), a choice the
   shipped DB offers no discriminating case for. Also unverified: the cube
   *owner sign* convention (22 turned-cube entries, no tooltip oracle), so

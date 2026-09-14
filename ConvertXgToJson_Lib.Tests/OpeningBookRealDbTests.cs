@@ -9,8 +9,13 @@ namespace ConvertXgToJson_Lib.Tests;
 /// fail loudly when it is absent rather than silently skipping.
 ///
 /// <para>
-/// The ground truth is XG's own tooltip rendering of book entries on this
-/// machine (the display oracle): fixture (a) is <c>ajhhBG0407.xg</c> game 9
+/// The entries were read off XG's own tooltip rendering of book entries on
+/// this machine — the oracle for what the file's bytes mean, and on these
+/// two keys also the entry the selection policy picks. That agreement is a
+/// property of these keys, not a parity rule: the policy is this library's
+/// (the most rigorous entry wins), and the key where XG's tooltip shows a
+/// different entry is recorded on <see cref="OpeningBook"/>
+/// (halheinrich/backgammon#203). Fixture (a) is <c>ajhhBG0407.xg</c> game 9
 /// move 1 (roll 41, best candidate 13/9 6/5 — Neil Kazaross, 12,960 games,
 /// seed 83467239, 4-ply/4-ply, ±0.0050, 2011-06-18, equity +0.3770);
 /// fixture (b) is the 13/10 13/9 candidate at 9-away/9-away (Steven Carey,
@@ -52,7 +57,8 @@ public class OpeningBookRealDbTests
     /// Fixture (a) end-to-end through the producer's own data path: the
     /// <c>.xg</c> decision's away scores and candidate resulting position
     /// (<see cref="BestMoveAnalysis.PositionsPlayed"/>) build the key; the
-    /// book returns the exact entry XG's tooltip shows, and its stored eval
+    /// book returns the policy's entry — on this key, also the one XG's
+    /// tooltip shows — and its stored eval
     /// vector is bit-identical to the one XG copied into the <c>.xg</c>
     /// analysis pane (level 998 book stamp). This is the keying convention
     /// session 3's depth stamping will rely on.

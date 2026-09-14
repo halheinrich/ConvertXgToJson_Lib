@@ -26,22 +26,44 @@ namespace ConvertXgToJson_Lib;
 /// The book may hold several entries for one <see cref="OpeningBookKey"/>
 /// (independent rollouts by different contributors, plus XG's own
 /// Roller++ evaluation baseline). <see cref="TryGetEntry"/> returns the
-/// entry XG itself displays, per the selection policy below;
+/// most rigorous of them, per the selection policy below;
 /// <see cref="GetEntries"/> returns all of them, best first.
 /// </para>
 ///
 /// <para>
-/// <b>Selection policy</b> (empirical — verified against XG's tooltip
-/// choice on positions where the tiers compete): rollout entries outrank
-/// evaluation entries; deeper rollout levels outrank shallower ones
-/// (checker level first, then cube level, compared by the
-/// <see cref="XgDecisionIterator.ResolveDepthInfo"/> rank taxonomy — XG
-/// demonstrably prefers a deeper-level rollout over one with more games);
-/// then more trials; then the later analysis date; then the later file
-/// position (the book grows by import-append, so later wins). The relative
-/// order of the checker-level and cube-level comparisons is the one
-/// unverified choice: the shipped database offers no key where they
-/// disagree across competing entries.
+/// <b>Selection policy — this library's, not XG's: the most rigorous
+/// entry wins.</b> Rollout entries outrank evaluation entries; deeper
+/// rollout levels outrank shallower ones (checker level first, then cube
+/// level, compared by the <see cref="XgDecisionIterator.ResolveDepthInfo"/>
+/// rank taxonomy); then more trials; then the later analysis date; then
+/// the later file position (the book grows by import-append, so later
+/// wins). The relative order of the checker-level and cube-level
+/// comparisons is the one untested choice: the shipped database offers no
+/// key where they disagree across competing entries.
+/// </para>
+///
+/// <para>
+/// <b>XG's own display follows some other rule, and the whole observed
+/// sample says so.</b> XG's tooltip is the only oracle for which entry XG
+/// shows, and it has been read on two keys where rollouts of different
+/// depth compete; they pull opposite ways. On <c>ajhhBG0407.xg</c> game 9
+/// move 1 (13/9 6/5) XG shows the 12,960-game 4-ply/4-ply Kazaross
+/// rollout over a 20,736-game 3-ply/3-ply one — the deeper entry, which
+/// this policy also selects. On <c>match26212229.xg</c> game 3 move 2
+/// (13/11 13/7, 2-away/1-away Crawford) XG shows Rockwell's 20,736-game
+/// 3-ply rollout while the same key also holds Obukhov's 2,592-game 4-ply
+/// one; this policy selects the latter, and that is the ruling: both sit
+/// under one byte-identical key, so the deeper rollout is the more rigorous
+/// answer to the same question, and the selection stands
+/// (halheinrich/backgammon#203, ruled 2026-09-12). One case each way is
+/// not a rule for XG's display, so this library makes no parity claim: the
+/// policy is stated as its own, and a consumer comparing an enriched depth
+/// label against XG's tooltip should expect the two to differ on keys of
+/// the second shape. (A third pinned tooltip reading, a Steven Carey
+/// 9-away/9-away rollout, agrees with the policy's choice but its key's
+/// competitors were not surveyed, so it separates nothing.) Format
+/// decoding is a different matter, where the tooltip is the oracle —
+/// see <see cref="OpeningBookParser"/>.
 /// </para>
 ///
 /// <para>
@@ -137,9 +159,10 @@ public sealed class OpeningBook
     internal IReadOnlyList<OpeningBookEntry> Entries => _entries;
 
     /// <summary>
-    /// Looks up the book entry XG would display for the keyed candidate
-    /// play: the best matching entry under the selection policy documented
-    /// on the class. Returns false when the book holds no entry for the key.
+    /// Looks up the most rigorous book entry for the keyed candidate play:
+    /// the best matching entry under the selection policy documented on the
+    /// class — this library's policy, not a prediction of the entry XG
+    /// displays. Returns false when the book holds no entry for the key.
     /// </summary>
     internal bool TryGetEntry(in OpeningBookKey key, [NotNullWhen(true)] out OpeningBookEntry? entry)
     {
@@ -176,7 +199,7 @@ public sealed class OpeningBook
     /// <summary>
     /// The selection policy as a comparison over file indices: negative when
     /// <paramref name="a"/> is the better entry. See the class docs for the
-    /// policy and its empirical grounding.
+    /// policy and the observed cases it is measured against.
     /// </summary>
     private int CompareSelection(int a, int b)
     {
