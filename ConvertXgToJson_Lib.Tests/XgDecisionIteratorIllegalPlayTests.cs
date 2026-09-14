@@ -95,13 +95,7 @@ public class XgDecisionIteratorIllegalPlayTests
     }
 
     /// <summary>8/5 6/5 in the mover's numbering — legal from the opening for either side.</summary>
-    private static Play MakeFivePoint()
-    {
-        var play = new Play();
-        play.Add(new Move(8, 5));
-        play.Add(new Move(6, 5));
-        return play;
-    }
+    private static Play MakeFivePoint() => Play.Create(new Move(8, 5), new Move(6, 5));
 
     /// <summary>
     /// Minimal <see cref="ILogger"/> that captures the level and fully

@@ -82,8 +82,7 @@ public class XgDecisionIteratorSentinelTests
     public void Iterate_RealCandidate_RowEmitted()
     {
         // 24/23 — a benign single-checker move with no hits and no bear-offs.
-        var play = new Play();
-        play.Add(new Move(24, 23));
+        var play = Play.Create(new Move(24, 23));
         var builder = XgFileBuilder.ForMatch(7, "P1", "P2");
         builder.AddGame(initialPosition: OneCheckerOn24()).Play(XgPlayer.Player1, new DiceRoll(3, 1), play);
 

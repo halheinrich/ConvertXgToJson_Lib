@@ -20,20 +20,13 @@ public class XgFileBuilderTests
     // ------------------------------------------------------------------ //
 
     /// <summary>24/23 from the standard opening.</summary>
-    private static Play Play24To23 => Of(new Move(24, 23));
+    private static Play Play24To23 => Play.Create(new Move(24, 23));
 
     /// <summary>8/5 6/5 — the classic 3-1.</summary>
-    private static Play MakeFivePoint => Of(new Move(8, 5), new Move(6, 5));
+    private static Play MakeFivePoint => Play.Create(new Move(8, 5), new Move(6, 5));
 
     /// <summary>13/10 24/23 — the alternative 3-1.</summary>
-    private static Play Split31 => Of(new Move(13, 10), new Move(24, 23));
-
-    private static Play Of(params Move[] moves)
-    {
-        var play = new Play();
-        foreach (var m in moves) play.Add(m);
-        return play;
-    }
+    private static Play Split31 => Play.Create(new Move(13, 10), new Move(24, 23));
 
     private static readonly DiceRoll ThreeOne = new(3, 1);
 
@@ -400,10 +393,10 @@ public class XgFileBuilderTests
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         var game = builder.AddGame(initialPosition: blotOnFive);
 
-        var notAHit = () => game.Play(XgPlayer.Player1, ThreeOne, Of(new Move(8, 5)));
+        var notAHit = () => game.Play(XgPlayer.Player1, ThreeOne, Play.Create(new Move(8, 5)));
         notAHit.Should().Throw<ArgumentException>("landing on a blot must be encoded as a hit");
 
-        game.Play(XgPlayer.Player1, ThreeOne, Of(new Move(8, -5), new Move(6, 5)));
+        game.Play(XgPlayer.Player1, ThreeOne, Play.Create(new Move(8, -5), new Move(6, 5)));
         var request = Requests(builder.Build()).Single();
         request.Decision.Plays.Single().MoveNotation.Should().Be("8/5* 6/5");
         request.Outcome.AfterPlayerBoard[25].Should().Be(1, "the hit checker sits on the new on-roll player's bar");
@@ -424,7 +417,7 @@ public class XgFileBuilderTests
     public void Play_RejectsAPlayTheBoardCannotMake(string because, Move move)
     {
         var game = XgFileBuilder.ForMatch(7, "Alice", "Bob").AddGame();
-        var act = () => game.Play(XgPlayer.Player1, ThreeOne, Of(move));
+        var act = () => game.Play(XgPlayer.Player1, ThreeOne, Play.Create(move));
         act.Should().Throw<ArgumentException>(because).WithParameterName("played");
     }
 
@@ -436,10 +429,10 @@ public class XgFileBuilderTests
         onBar[13] = 4;                            // keeps player 1 at 15 checkers
         var game = XgFileBuilder.ForMatch(7, "Alice", "Bob").AddGame(initialPosition: onBar);
 
-        var ignoresBar = () => game.Play(XgPlayer.Player1, ThreeOne, Of(new Move(8, 5)));
+        var ignoresBar = () => game.Play(XgPlayer.Player1, ThreeOne, Play.Create(new Move(8, 5)));
         ignoresBar.Should().Throw<ArgumentException>();
 
-        var enters = () => game.Play(XgPlayer.Player1, ThreeOne, Of(new Move(25, 22), new Move(8, 7)));
+        var enters = () => game.Play(XgPlayer.Player1, ThreeOne, Play.Create(new Move(25, 22), new Move(8, 7)));
         enters.Should().NotThrow();
     }
 
@@ -448,7 +441,7 @@ public class XgFileBuilderTests
     {
         var game = XgFileBuilder.ForMatch(7, "Alice", "Bob").AddGame();
         var act = () => game.Play(XgPlayer.Player1, ThreeOne, MakeFivePoint,
-            [new XgPlayCandidate(Of(new Move(7, 4)), 0.0)]);
+            [new XgPlayCandidate(Play.Create(new Move(7, 4)), 0.0)]);
         act.Should().Throw<ArgumentException>().WithParameterName("candidates");
     }
 
@@ -661,7 +654,7 @@ public class XgFileBuilderTests
             .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint,
                 [new XgPlayCandidate(MakeFivePoint, 0.2, 3), new XgPlayCandidate(Split31, 0.1, 3)])
             .CubeDecision(XgPlayer.Player2, new XgCubeEquities(-0.1, -0.3, 1.0), 3, CubeAction.NoDouble)
-            .Play(XgPlayer.Player2, new DiceRoll(6, 1), Of(new Move(13, 7), new Move(8, 7)))
+            .Play(XgPlayer.Player2, new DiceRoll(6, 1), Play.Create(new Move(13, 7), new Move(8, 7)))
             .Dance(XgPlayer.Player1, new DiceRoll(5, 5));
         builder.AddGame(0, 1)
             .CubeDecision(XgPlayer.Player2, new XgCubeEquities(0.6, 0.7, 1.0), 2, CubeAction.Double, CubeAction.Take)
