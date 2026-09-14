@@ -25,81 +25,61 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 * **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`. The `Move` / `Play` value types also live here, so non-move-gen consumers can use them without dragging in the generator.
 * **BgMoveGen** — `MoveNotationFormatter` for rendering candidate plays as standard backgammon notation. `XgMoveTranslator` is the producer-side bridge between XG's raw `sbyte[]` move encoding and the shared `Play` primitive.
 
-## Directory tree
+## Layout
 
-```
-ConvertXgToJson_Lib.slnx
-ConvertXgToJson_Lib/
-  ConvertXgToJson_Lib.csproj
-  BackgammonConstants.cs
-  MatchContext.cs
-  OpeningBook.cs
-  OpeningBookEntry.cs
-  OpeningBookKey.cs
-  XgContainerLayout.cs
-  XgCubeEquities.cs
-  XgDecisionIterator.cs
-  XgFileBuilder.cs
-  XgFileReader.cs
-  XgFileWriter.cs
-  XgGameBuilder.cs
-  XgGameInfo.cs
-  XgidEncoder.cs
-  XgIteratorCallbacks.cs
-  XgIteratorOptions.cs
-  XgIteratorState.cs
-  XgMatchInfo.cs
-  XgMoveTranslator.cs
-  XgpExporter.cs
-  XgPlayCandidate.cs
-  XgPlayer.cs
-  XgRecordFactory.cs
-  XgpSliceOptions.cs
-  Json/
-    XgJsonOptions.cs
-  Models/
-    Models.cs
-  Parsing/
-    AfterBoardBuilder.cs
-    CommentParser.cs
-    OpeningBookParser.cs
-    PascalBinaryReader.cs
-    RichGameHeaderParser.cs
-    RolloutContextParser.cs
-    SaveRecordParser.cs
-    XgDecompressor.cs
-    XgMoveEncoding.cs
-  Writing/
-    CommentWriter.cs
-    PascalBinaryWriter.cs
-    RichGameHeaderWriter.cs
-    RolloutContextWriter.cs
-    SaveRecordWriter.cs
-    XgContainerWriter.cs
-ConvertXgToJson_Lib.Tests/
-  ConvertXgToJson_Lib.Tests.csproj
-  BoardTests.cs
-  DecisionCsvTests.cs
-  DiagramRequestIteratorTests.cs
-  FileIOCollection.cs
-  GlobalUsings.cs
-  Golden/            (embedded pre-change ToJson captures; JsonContractTests)
-  JsonContractTests.cs
-  PublicSurfaceTests.cs
-  ReadMatchInfoBenchmarkTests.cs
-  RealFileTests.cs
-  SaveRecordWriterTests.cs
-  TestPaths.cs
-  XgDecisionIteratorTests.cs
-  XgFileBuilderTests.cs
-  XgFileWriterTests.cs
-  XgpExporterTests.cs
-  XgpExportXgAgreementTests.cs
-  XgpSliceExportTests.cs
-```
+Two projects under `ConvertXgToJson_Lib.slnx`, governed by repo-root
+`Directory.Build.props` (TFM, `TreatWarningsAsErrors`, XML doc generation)
+and `Directory.Packages.props` (Central Package Management — no inline
+`Version=` anywhere).
 
-The test directory lists principal classes only; additional `*Tests.cs`
-files exist per parser, builder, and analysis surface.
+**`ConvertXgToJson_Lib/`** — the library. Seven areas:
+
+- **Reading** — `XgFileReader` (discovery, full parse, the fast match-info
+  and game-header paths, the JSON document) over `Parsing/`:
+  `XgDecompressor` (the zlib container), `PascalBinaryReader` (Delphi
+  record alignment), `RichGameHeaderParser`, `SaveRecordParser` (the six
+  record variants, and `UnknownRecord` for a code it does not know),
+  `RolloutContextParser`, `CommentParser`, `XgMoveEncoding` (the
+  candidate-move byte encoding and its non-play sentinels),
+  `AfterBoardBuilder` (resulting positions), and `OpeningBookParser`.
+- **The record model** — `Models/Models.cs`: `SaveRecord` and its
+  variants, `RolloutContext`, `RichGameHeader`, the analysis and eval
+  carriers and their enums, all internal (see "Record model is internal");
+  `XgFile` is the public document root. `XgContainerLayout` is the one
+  spelling of the container's directory layout, read by the decompressor
+  and written by the container writer.
+- **Writing** — `XgFileWriter` (the reader's mirror: a semantic
+  round-trip, not byte identity) and `XgpExporter` (single-decision
+  `.xgp` export, sliced per `XgpSliceOptions`) over `Writing/`:
+  `XgContainerWriter`, `PascalBinaryWriter`, `RichGameHeaderWriter`,
+  `SaveRecordWriter`, `RolloutContextWriter`, `CommentWriter`.
+- **Synthesis** — `XgFileBuilder` / `XgGameBuilder`, through which a
+  consumer says what a match *is* without seeing the record structure;
+  `XgRecordFactory`, the record construction the builders and the exporter
+  share; and the intent-level value types they take, `XgPlayer`,
+  `XgCubeEquities`, `XgPlayCandidate`.
+- **Decision iteration** — `XgDecisionIterator`: the two surfaces
+  (`DecisionRow` rows and `BgDecisionData` records) over one walk, the
+  depth taxonomy, the emission rules. With it `MatchContext` (score, cube
+  and Crawford state as the walk advances), `XgIteratorState` /
+  `XgIteratorCallbacks` / `XgIteratorOptions`, the public metadata DTOs
+  `XgMatchInfo` / `XgGameInfo`, `XgMoveTranslator` (XG move bytes to the
+  shared `Play`), `XgidEncoder`, and `BackgammonConstants`.
+- **Opening book** — `OpeningBook` (load, keyed lookup, the selection
+  policy), `OpeningBookEntry`, `OpeningBookKey`.
+- **JSON** — `Json/`: `XgJsonOptions` (the shipped options and the two
+  document converters, `PositionEngineConverter` and
+  `SaveRecordConverter`) and `XgJsonContext` (the source-generated
+  metadata).
+
+**`ConvertXgToJson_Lib.Tests/`** — xUnit, one class per surface or
+behaviour area (parsers, writers, builders, the iterator's facets, the
+opening book, JSON). `Golden/` holds the embedded pre-change `ToJson`
+captures that `JsonContractTests` pins as the document's byte contract;
+`Helpers/` the shared builders and mirrors (`BinaryBuilder`, the
+`ResolverPaths` options trio, `EmissionMirror`). Gating tests synthesize
+their files through the builders; corpus and fixture tests read the
+umbrella's `TestData/` through `TestPaths` — see "TestData" below.
 
 ## Architecture
 
