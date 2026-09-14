@@ -1,4 +1,4 @@
-﻿using BgDataTypes_Lib;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
 using Microsoft.Extensions.Logging;
@@ -259,7 +259,7 @@ public static class XgDecisionIterator
                         skipCurrentGame = true;
                 }
             }
-            else if (record is CubeRecord cube && IsAnalysed(cube))
+            else if (record is CubeRecord cube && IsCubeDecision(cube, context))
             {
                 foreach (var row in buildCube(cube, context, sourceFile, file.Rollouts))
                 {
@@ -1463,6 +1463,38 @@ public static class XgDecisionIterator
     // (halheinrich/backgammon#161).
     private static bool IsAnalysed(CubeRecord cube) =>
         cube.Analysis.Level > 0;
+
+    /// <summary>
+    /// Whether a cube pane in the current game can be a decision at all —
+    /// the emission rule both surfaces apply beside <see cref="IsAnalysed(CubeRecord)"/>
+    /// at the one dispatch site they share. In the Crawford game it cannot:
+    /// doubling is prohibited there, so the cube pane XG writes for it —
+    /// and does analyse; the corpus carries such panes, so this is a format
+    /// fact the converter drops, not an anomaly worth a log line — describes
+    /// no decision. The rule's owner is the wire type: both
+    /// <see cref="DecisionRow"/> and <see cref="BgDecisionData"/> refuse to
+    /// construct a Crawford cube (BgDataTypes_Lib's <c>CrawfordRule</c>,
+    /// halheinrich/backgammon#201), and this predicate is what keeps the walk
+    /// from reaching that guard; it does not restate the rule. Skipping
+    /// changes nothing else: a cube's id and <c>MoveNumber</c> read
+    /// <c>ctx.MoveNumber + 1</c> without incrementing the counter, so the
+    /// following plays number as they always did, and the stop callbacks see
+    /// only emitted rows.
+    /// </summary>
+    private static bool AdmitsCubeDecision(MatchContext ctx) =>
+        !ctx.IsCrawford;
+
+    /// <summary>
+    /// The cube emission gate both surfaces apply at their shared dispatch
+    /// site: the record is a decision when it is analysed and the game
+    /// admits one. Internal-not-private for the same reason as
+    /// <see cref="IsSentinelOnlyAnalysis"/>: test code that pairs raw
+    /// <c>CubeRecord</c>s with iterator output mirrors the emission filter
+    /// through this predicate, driving a <see cref="MatchContext"/> record
+    /// by record as the walk does, rather than re-implementing either half.
+    /// </summary>
+    internal static bool IsCubeDecision(CubeRecord cube, MatchContext ctx) =>
+        IsAnalysed(cube) && AdmitsCubeDecision(ctx);
 
     private static int DiceToInt(int[] dice) =>
         dice.Length >= 2 ? dice[0] * 10 + dice[1] : 0;

@@ -10,11 +10,15 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <c>CubeRecord.Doubled</c> / <c>Taken</c> pane state.
 ///
 /// <para>
-/// The named-fixture tests key off <c>match_41648777.xg</c>, which happens to
-/// carry all four record shapes the mapping distinguishes: an undoubled cube
+/// The named-fixture tests key off <c>match_41648777.xg</c> for three of the
+/// four record shapes the mapping distinguishes — an undoubled cube
 /// decision, a double that was passed, a double that was taken on a dead
-/// equity tie, and a resignation pane where no cube action was played at all.
-/// Corpus-wide assertions stay shape-level per the standing convention.
+/// equity tie — and off the Achim Mueller – Mario Sequeira match for the
+/// fourth, a resignation pane where no cube action was played at all: the
+/// only such pane in <c>match_41648777.xg</c> sits in its Crawford game,
+/// where a cube pane is not a decision and is no longer emitted
+/// (halheinrich/backgammon#201). Corpus-wide assertions stay shape-level
+/// per the standing convention.
 /// </para>
 /// </summary>
 [Collection("FileIO")]
@@ -24,22 +28,24 @@ public class XgDecisionIteratorCubeActionTests
 
     /// <summary>
     /// Returns the cube decision at (<paramref name="game"/>,
-    /// <paramref name="moveNumber"/>) from the named fixture. Cube decisions
+    /// <paramref name="moveNumber"/>) from the fixture at
+    /// <paramref name="path"/> (the named one by default). Cube decisions
     /// are stamped at <c>MoveNumber + 1</c>, matching the raw record's
     /// position in the game.
     /// </summary>
-    private static DecisionData CubeDecisionAt(int game, int moveNumber)
+    private static DecisionData CubeDecisionAt(int game, int moveNumber, string? path = null)
     {
-        string path = Path.Combine(TestPaths.FixtureFilesDir, FixtureName);
+        path ??= Path.Combine(TestPaths.FixtureFilesDir, FixtureName);
+        string sourceFile = Path.GetFileName(path);
         var decision = XgDecisionIterator
-            .IterateDiagramRequests(XgFileReader.ReadFile(path), FixtureName)
+            .IterateDiagramRequests(XgFileReader.ReadFile(path), sourceFile)
             .SingleOrDefault(d =>
                 d.Decision.IsCube &&
                 d.Descriptive.Game == game &&
                 d.Descriptive.MoveNumber == moveNumber);
 
         decision.Should().NotBeNull(
-            $"{FixtureName} should yield an analysed cube decision at g{game}:m{moveNumber}");
+            $"{sourceFile} should yield an analysed cube decision at g{game}:m{moveNumber}");
         return decision!.Decision;
     }
 
@@ -100,15 +106,19 @@ public class XgDecisionIteratorCubeActionTests
     }
 
     /// <summary>
-    /// g4:m46 is the pane XG writes where a game ended by resignation with no
-    /// cube action taken (<c>Doubled == -1</c>). The position is analysed —
-    /// so the decision is yielded — but nothing was played, and both halves
-    /// stay null rather than reporting a No Double the player never chose.
+    /// Achim Mueller – Mario Sequeira g2:m65 is the pane XG writes where a
+    /// game ended by resignation with no cube action taken
+    /// (<c>Doubled == -1</c>). The position is analysed — so the decision is
+    /// yielded — but nothing was played, and both halves stay null rather
+    /// than reporting a No Double the player never chose. (Until
+    /// halheinrich/backgammon#201 this pinned <c>match_41648777.xg</c>
+    /// g4:m46, a resignation pane in that match's Crawford game, which is
+    /// no longer a decision.)
     /// </summary>
     [Fact]
     public void ResignationPane_StampsNeitherHalf()
     {
-        var decision = CubeDecisionAt(game: 4, moveNumber: 46);
+        var decision = CubeDecisionAt(game: 2, moveNumber: 65, TestPaths.AchimMuellerSeqXg);
 
         decision.UserDoublerAction.Should().BeNull(
             "no cube action was played — the game ended by resignation");
@@ -124,7 +134,7 @@ public class XgDecisionIteratorCubeActionTests
     [Fact]
     public void ResignationPane_CarriesTheNotAnalysedErrorSentinel()
     {
-        var decision = CubeDecisionAt(game: 4, moveNumber: 46);
+        var decision = CubeDecisionAt(game: 2, moveNumber: 65, TestPaths.AchimMuellerSeqXg);
 
         decision.UserDoubleError.Should().BeNull();
         decision.UserTakeError.Should().BeNull();

@@ -203,9 +203,11 @@ public class XgDecisionIteratorRowRecordAgreementTests
         /// answer <c>Dice</c> at all on a pristine instance (a checker play
         /// with unstamped dice fails loud by design), whereas the row's
         /// defaults are all readable — and it is the row's default that a drop
-        /// would produce.
+        /// would produce. <c>Roll</c> is the one fact a drop can no longer
+        /// leave behind — the row requires it — so it is stated at its old
+        /// default, 0, and every other fact's baseline keeps its meaning.
         /// </summary>
-        public object? Default => FromRow(new DecisionRow { Id = PristineId });
+        public object? Default => FromRow(new DecisionRow { Id = PristineId, Roll = 0 });
     }
 
     /// <summary>

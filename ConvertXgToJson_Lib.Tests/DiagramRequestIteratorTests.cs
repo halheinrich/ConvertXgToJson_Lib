@@ -1,7 +1,8 @@
-﻿// DiagramRequestIteratorTests.cs
+// DiagramRequestIteratorTests.cs
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Tests.Helpers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -304,9 +305,7 @@ public class DiagramRequestIteratorTests
             var file = XgFileReader.ReadFile(path);
 
             // Pair raw CubeRecords with their diagram requests to check Doubled flag.
-            var cubeRecords = file.Records.OfType<CubeRecord>()
-                .Where(c => c.Analysis.Level > 0 || c.Analysis.LevelRequest > 0)
-                .ToList();
+            var cubeRecords = EmissionMirror.CubeDecisions(file, Path.GetFileName(path)).ToList();
 
             var cubeRequests = XgDecisionIterator.IterateDiagramRequests(file, Path.GetFileName(path))
                 .Where(r => r.Decision.IsCube)
@@ -730,9 +729,11 @@ public class DiagramRequestIteratorTests
 
             using var reqEnum = XgDecisionIterator
                 .IterateDiagramRequests(file, sourceFile).GetEnumerator();
+            var context = new MatchContext(file.Records, sourceFile, file.Comments);
 
             foreach (var rec in file.Records)
             {
+                context.Update(rec);
                 if (rec is MoveRecord move)
                 {
                     var analysis = move.Analysis;
@@ -744,7 +745,7 @@ public class DiagramRequestIteratorTests
                 }
                 else if (rec is CubeRecord cube)
                 {
-                    if (cube.Analysis.Level <= 0) continue;
+                    if (!XgDecisionIterator.IsCubeDecision(cube, context)) continue;
 
                     reqEnum.MoveNext().Should().BeTrue(
                         $"{sourceFile}: expected a diagram request for analysed cube");
@@ -1366,9 +1367,11 @@ public class DiagramRequestIteratorTests
 
             using var reqEnum = XgDecisionIterator
                 .IterateDiagramRequests(file, sourceFile).GetEnumerator();
+            var context = new MatchContext(file.Records, sourceFile, file.Comments);
 
             foreach (var rec in file.Records)
             {
+                context.Update(rec);
                 if (rec is MoveRecord move)
                 {
                     var analysis = move.Analysis;
@@ -1437,7 +1440,7 @@ public class DiagramRequestIteratorTests
                 }
                 else if (rec is CubeRecord cube)
                 {
-                    if (cube.Analysis.Level <= 0) continue;
+                    if (!XgDecisionIterator.IsCubeDecision(cube, context)) continue;
 
                     reqEnum.MoveNext().Should().BeTrue(
                         $"{sourceFile}: expected a diagram request for analysed cube");

@@ -370,6 +370,23 @@ Two iteration surfaces over the same underlying record stream:
   yield exactly **one** `BgDecisionData` per decision (see "Cube decisions"
   below for the producer-perspective contract).
 
+**A Crawford game's cube pane is not a decision and is not emitted**
+(halheinrich/backgammon#201). Doubling is prohibited in the Crawford game,
+so the cube pane XG writes there — and does analyse; the corpus carries
+such panes, so this is a format fact the converter drops, not an anomaly,
+and no log line marks it — describes no decision. The rule is stated once,
+at the one dispatch site both surfaces share: `AdmitsCubeDecision(ctx)`
+sits beside `IsAnalysed(cube)` in `IterateAnalysedDecisions`, and a cube
+record reaches `BuildCubeRows` / `BuildCubeDiagramRequests` only when both
+hold. The rule's owner is the wire type — `DecisionRow` and
+`BgDecisionData` both refuse to construct a Crawford cube (BgDataTypes_Lib's
+`CrawfordRule`) — and the predicate is what keeps the walk from reaching
+that guard; the builders' `IsCrawford = ctx.IsCrawford` stamps stay and are
+now always false on a built cube. Nothing else moves: a cube's id and
+`MoveNumber` read `ctx.MoveNumber + 1` without incrementing the counter, so
+the plays after a dropped pane number as before, and the stop callbacks see
+only emitted rows.
+
 **Rows and records are parallel enumerations of the same facts, kept
 agreeing by a pin.** The two surfaces share one walk (`IterateCore` →
 `IterateAnalysedDecisions`) but assemble their output at four separate
@@ -866,7 +883,9 @@ cube decision — a single `DecisionRow` or `BgDecisionData` carrying the
 doubler's board (no flip). Cube-side equity and error fields
 (`analysis.EquityNoDouble`, `analysis.EquityDoubleTake`, `cube.ErrorCube`,
 `cube.ErrorTake`) are written from the doubler's perspective; there is
-no second taker-perspective row.
+no second taker-perspective row. Which cube panes are decisions at all is
+decided upstream of both builders — an analysed pane in a non-Crawford
+game; see the emission rule under "XgDecisionIterator".
 
 `IterateDiagramRequests` also stamps the **played** cube action onto
 `DecisionData.UserDoublerAction` / `UserTakerAction`, mapped from the raw
@@ -1156,6 +1175,11 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `BgDecisionData` per analyzed decision. For cube decisions this is
   the doubler's board (no flip); there is no second taker-perspective
   row. Consumers may safely count one row per decision.
+* **A Crawford game's cube pane is not a decision and is not emitted.**
+  XG writes and analyses cube panes in the Crawford game like any other,
+  so a fixture's cube-record count is not its cube-decision count. Both
+  surfaces drop them at the shared dispatch site (`AdmitsCubeDecision`),
+  and the wire types would refuse the record anyway (halheinrich/backgammon#201).
 * **`.xgp` sentinel handling is easy to regress.** `-1000` means "unanalyzed"
   for `MoveError` / `ErrorCube`; anything `> -999.0` is a real error. Using
   `!= 0` or `.HasValue` checks on raw fields will silently treat unanalyzed

@@ -1,6 +1,7 @@
-﻿using BgDataTypes_Lib;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Tests.Helpers;
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
@@ -807,7 +808,7 @@ public class XgDecisionIteratorTests
                 .Where(d => d.Decision.IsCube)
                 .GetEnumerator();
 
-            foreach (var cube in file.Records.OfType<CubeRecord>().Where(c => c.Analysis.Level > 0))
+            foreach (var cube in EmissionMirror.CubeDecisions(file, sourceFile))
             {
                 cubeData.MoveNext().Should().BeTrue(
                     $"{sourceFile}: expected a cube BgDecisionData for each analysed cube record");
