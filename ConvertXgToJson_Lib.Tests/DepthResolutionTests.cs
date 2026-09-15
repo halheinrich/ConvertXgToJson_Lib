@@ -255,9 +255,9 @@ public class DepthResolutionTests
     {
         using var scope = new AssertionScope();
 
-        DepthAbbreviationFormat.Rollout(innerPly: 3, trials: 1296).Should().Be("3p1296");
-        DepthAbbreviationFormat.Book(levelToken: "4", trials: 12960).Should().Be("B4p12960");
-        DepthAbbreviationFormat.Book(levelToken: "R", trials: 20736).Should().Be("BRp20736");
+        DepthAbbreviationFormat.Rollout(innerPly: 3, trials: 1296).Should().Be("3_1296");
+        DepthAbbreviationFormat.Book(levelToken: "4", trials: 12960).Should().Be("B4_12960");
+        DepthAbbreviationFormat.Book(levelToken: "R", trials: 20736).Should().Be("BR_20736");
     }
 
     // -----------------------------------------------------------------------

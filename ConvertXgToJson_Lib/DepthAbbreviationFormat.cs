@@ -32,7 +32,7 @@ namespace ConvertXgToJson_Lib;
 internal static class DepthAbbreviationFormat
 {
     /// <summary>Joins the level token to the trial count, in both forms.</summary>
-    private const string Separator = "p";
+    private const string Separator = "_";
 
     /// <summary>Marks the book form, distinguishing a cached book rollout
     /// from an explicit rollout the file carries.</summary>
