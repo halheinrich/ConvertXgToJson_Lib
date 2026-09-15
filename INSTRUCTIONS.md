@@ -53,7 +53,8 @@ and `Directory.Packages.props` (Central Package Management — no inline
   `.xgp` export, sliced per `XgpSliceOptions`) over `Writing/`:
   `XgContainerWriter`, `PascalBinaryWriter`, `RichGameHeaderWriter`,
   `SaveRecordWriter`, `RolloutContextWriter`, `CommentWriter`. A value the
-  format cannot represent is refused as `XgUnrepresentableValueException`.
+  format cannot represent is refused as `XgUnrepresentableValueException`,
+  its constraint typed as `XgUnrepresentableValueReason`.
 - **Synthesis** — `XgFileBuilder` / `XgGameBuilder`, through which a
   consumer says what a match *is* without seeing the record structure;
   `XgRecordFactory`, the record construction the builders and the exporter
@@ -1077,11 +1078,18 @@ public static class XgFileWriter
 // A value valid in memory and in JSON that the XG format cannot represent
 // — a limit of the wire, not a bad argument; the read side's mirror is
 // InvalidDataException. Thrown at write (today: a comment the comment
-// table cannot carry). Sealed; the three standard constructors.
+// table cannot carry). Sealed; the three standard constructors. The data
+// is typed and set only by the library; the message is composed from it.
 public sealed class XgUnrepresentableValueException : Exception
 {
+    public XgUnrepresentableValueReason Reason { get; }   // Unspecified only via a standard ctor
     public int?  CommentIndex { get; }   // the comment's index in the written table; null = not a comment
-    public Rune? Character    { get; }   // the unencodable character; null = none is one
+    public Rune? Character    { get; }   // set exactly when Reason is UnencodableCharacter
+}
+
+public enum XgUnrepresentableValueReason
+{
+    Unspecified = 0, UnencodableCharacter = 1, UnpairedSurrogate = 2, ReservedCrlfEscape = 3,
 }
 
 public static class XgpExporter

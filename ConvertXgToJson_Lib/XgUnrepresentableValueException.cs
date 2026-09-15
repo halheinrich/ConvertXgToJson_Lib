@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 
 namespace ConvertXgToJson_Lib;
@@ -16,10 +17,11 @@ namespace ConvertXgToJson_Lib;
 /// there is an <see cref="InvalidDataException"/>.
 /// </para>
 /// <para>
-/// When the value is a comment, <see cref="CommentIndex"/> names it; when
-/// the failure is one character the format's encoding cannot represent,
-/// <see cref="Character"/> is that character. The message restates both
-/// for a reader and gives the reason.
+/// <see cref="Reason"/> names the constraint; when the value is a comment,
+/// <see cref="CommentIndex"/> names it; when the failure is one character
+/// the format's encoding cannot represent, <see cref="Character"/> is that
+/// character. The message is composed from these for a reader — a
+/// consumer reads the properties, never the message.
 /// </para>
 /// </remarks>
 public sealed class XgUnrepresentableValueException : Exception
@@ -48,12 +50,23 @@ public sealed class XgUnrepresentableValueException : Exception
     }
 
     internal XgUnrepresentableValueException(
-        string message, int? commentIndex, Rune? character, Exception? innerException = null)
+        string message, XgUnrepresentableValueReason reason, int? commentIndex, Rune? character,
+        Exception? innerException = null)
         : base(message, innerException)
     {
+        Debug.Assert(reason != XgUnrepresentableValueReason.Unspecified, "The library always names the reason.");
+        Debug.Assert(character.HasValue == (reason == XgUnrepresentableValueReason.UnencodableCharacter),
+            "Character is set exactly when the reason is an unencodable character.");
+        Reason = reason;
         CommentIndex = commentIndex;
         Character = character;
     }
+
+    /// <summary>
+    /// The constraint the value breaks; <see cref="XgUnrepresentableValueReason.Unspecified"/>
+    /// only for an instance created through a standard constructor.
+    /// </summary>
+    public XgUnrepresentableValueReason Reason { get; }
 
     /// <summary>
     /// The index, in the comment table of the file being written, of the
@@ -63,9 +76,10 @@ public sealed class XgUnrepresentableValueException : Exception
     public int? CommentIndex { get; }
 
     /// <summary>
-    /// The character the format's encoding cannot represent; null when the
-    /// failure is not a single Unicode character — a sequence the format
-    /// reserves, or an unpaired surrogate, which is not a character.
+    /// The character the format's encoding cannot represent — set exactly
+    /// when <see cref="Reason"/> is
+    /// <see cref="XgUnrepresentableValueReason.UnencodableCharacter"/>, and
+    /// null otherwise.
     /// </summary>
     public Rune? Character { get; }
 }

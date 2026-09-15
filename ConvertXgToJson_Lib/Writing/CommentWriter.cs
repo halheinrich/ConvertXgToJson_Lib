@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 
 namespace ConvertXgToJson_Lib.Writing;
@@ -31,8 +32,9 @@ internal static class CommentWriter
         Encoding.Latin1.CodePage, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
 
     /// <exception cref="XgUnrepresentableValueException">
-    /// A comment cannot be carried faithfully; the exception carries its
-    /// index, and the offending character when there is one.
+    /// A comment cannot be carried faithfully; the exception carries the
+    /// reason, the comment's index, and the offending character when there
+    /// is one.
     /// </exception>
     internal static byte[] WriteAll(IReadOnlyList<string> comments)
     {
@@ -41,10 +43,7 @@ internal static class CommentWriter
         {
             string comment = comments[i];
             if (comment.Contains(CrlfEscape, StringComparison.Ordinal))
-                throw new XgUnrepresentableValueException(
-                    $"Comment {i} contains the character pair U+0001 U+0002, the comment table's escape for an " +
-                    "embedded CRLF; it would read back as a CRLF.",
-                    commentIndex: i, character: null);
+                throw Refusal(i, XgUnrepresentableValueReason.ReservedCrlfEscape, CodeUnits(CrlfEscape));
 
             try
             {
@@ -52,25 +51,54 @@ internal static class CommentWriter
             }
             catch (EncoderFallbackException ex)
             {
-                Rune? character = Unencodable(ex);
-                string what = character is { } c
-                    ? $"U+{c.Value:X4}"
-                    : $"the unpaired surrogate U+{(int)ex.CharUnknown:X4}";
-                throw new XgUnrepresentableValueException(
-                    $"Comment {i} contains {what}, which the comment table's encoding ({Wire.WebName}) " +
-                    "cannot represent; it would be written as '?'.",
-                    commentIndex: i, character: character, innerException: ex);
+                throw Unencodable(i, ex);
             }
         }
         return output.ToArray();
     }
 
     /// <summary>
-    /// The character the fallback refused, or null for an unpaired
-    /// surrogate — a lone UTF-16 code unit, which no <see cref="Rune"/> holds.
+    /// The refusal for what the strict encoding would not encode: a
+    /// character (a surrogate pair, or a lone code unit that is one), or an
+    /// unpaired surrogate — a lone UTF-16 code unit no <see cref="Rune"/>
+    /// holds, because it is not a character.
     /// </summary>
-    private static Rune? Unencodable(EncoderFallbackException ex) =>
-        ex.IsUnknownSurrogate()
+    private static XgUnrepresentableValueException Unencodable(int index, EncoderFallbackException ex)
+    {
+        Rune? character = ex.IsUnknownSurrogate()
             ? new Rune(ex.CharUnknownHigh, ex.CharUnknownLow)
             : Rune.TryCreate(ex.CharUnknown, out Rune rune) ? rune : null;
+        return character is { } c
+            ? Refusal(index, XgUnrepresentableValueReason.UnencodableCharacter, $"U+{c.Value:X4}", c, ex)
+            : Refusal(index, XgUnrepresentableValueReason.UnpairedSurrogate, CodeUnits(ex.CharUnknown.ToString()),
+                cause: ex);
+    }
+
+    /// <summary>
+    /// The refusal of comment <paramref name="index"/>, its message composed
+    /// from <paramref name="reason"/>; <paramref name="offender"/> spells
+    /// what the comment holds.
+    /// </summary>
+    private static XgUnrepresentableValueException Refusal(
+        int index, XgUnrepresentableValueReason reason, string offender,
+        Rune? character = null, Exception? cause = null)
+    {
+        string holds = reason switch
+        {
+            XgUnrepresentableValueReason.UnencodableCharacter =>
+                $"{offender}, which the comment table's encoding ({Wire.WebName}) cannot represent; " +
+                "it would be written as '?'",
+            XgUnrepresentableValueReason.UnpairedSurrogate =>
+                $"the unpaired surrogate {offender}, which is not a character; the comment table's " +
+                $"encoding ({Wire.WebName}) would write it as '?'",
+            XgUnrepresentableValueReason.ReservedCrlfEscape =>
+                $"the character pair {offender}, the comment table's escape for an embedded CRLF; " +
+                "it would read back as a CRLF",
+            _ => throw new UnreachableException($"No refusal is composed for {reason}."),
+        };
+        return new XgUnrepresentableValueException($"Comment {index} contains {holds}.", reason, index, character, cause);
+    }
+
+    /// <summary>Each UTF-16 code unit of <paramref name="text"/> as <c>U+XXXX</c>, space-separated.</summary>
+    private static string CodeUnits(string text) => string.Join(' ', text.Select(unit => $"U+{(int)unit:X4}"));
 }

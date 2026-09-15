@@ -722,8 +722,9 @@ public class XgFileBuilderTests
 
     // The builder accepts any text; the comment table's wire does not
     // (halheinrich/backgammon#234). What it cannot carry is rejected at
-    // write rather than written lossily, with the comment's index — and
-    // the offending character, when there is one — typed on the exception.
+    // write rather than written lossily, with the reason, the comment's
+    // index and — when there is one — the offending character typed on the
+    // exception.
 
     /// <summary>A match whose comment table is "Fine." then <paramref name="second"/>.</summary>
     private static XgFile WithSecondComment(string second)
@@ -760,6 +761,7 @@ public class XgFileBuilderTests
 
         var ex = act.Should().Throw<XgUnrepresentableValueException>()
             .WithMessage($"Comment 1 contains U+{codePoint:X4}, *").Which;
+        ex.Reason.Should().Be(XgUnrepresentableValueReason.UnencodableCharacter);
         ex.CommentIndex.Should().Be(1);
         ex.Character.Should().Be(new Rune(codePoint));
     }
@@ -775,6 +777,7 @@ public class XgFileBuilderTests
 
         var ex = act.Should().Throw<XgUnrepresentableValueException>()
             .WithMessage("Comment 1 contains the unpaired surrogate U+D800, *").Which;
+        ex.Reason.Should().Be(XgUnrepresentableValueReason.UnpairedSurrogate);
         ex.CommentIndex.Should().Be(1);
         ex.Character.Should().BeNull();
     }
@@ -792,6 +795,7 @@ public class XgFileBuilderTests
 
         var ex = act.Should().Throw<XgUnrepresentableValueException>()
             .WithMessage("Comment 1 contains the character pair U+0001 U+0002, *").Which;
+        ex.Reason.Should().Be(XgUnrepresentableValueReason.ReservedCrlfEscape);
         ex.CommentIndex.Should().Be(1);
         ex.Character.Should().BeNull("the pair is a sequence the format reserves, not one unencodable character");
     }
