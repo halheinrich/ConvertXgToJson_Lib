@@ -1051,10 +1051,12 @@ public static class XgDecisionIterator
     /// index into <paramref name="rollouts"/>, the rollout's inner ply
     /// level (<c>Level2</c>, falling back to <c>Level1</c>, then
     /// <c>LevelTrunc</c>) combines with <c>GamesRolled</c> to produce:
-    /// <c>Label = "Rollout: {trials} trials. {inner ply label}"</c>,
-    /// <c>Abbreviation = "{innerPly}p{trials}"</c> (e.g. "3p1296"),
-    /// <c>Rank = 100 + innerPly</c>. The ply-label switch encodes ply as
-    /// <c>short - 1</c>, so <c>Level*</c> value 2 is a 3-ply rollout.
+    /// <c>Label = "Rollout: {trials} trials. {inner ply label}"</c>, an
+    /// <c>Abbreviation</c> in the grammar's rollout form over the inner ply
+    /// and the trial count (<see cref="DepthAbbreviationFormat.Rollout"/> —
+    /// the grammar's one spelling), <c>Rank = 100 + innerPly</c>. The
+    /// ply-label switch encodes ply as <c>short - 1</c>, so <c>Level*</c>
+    /// value 2 is a 3-ply rollout.
     /// The pair is <see cref="AnalysisMode.Rollout"/> plus the inner ply as
     /// its <see cref="AnalysisLevel"/>: <c>innerPly</c> 1–7 maps to
     /// <see cref="AnalysisLevel.Ply1"/>–<see cref="AnalysisLevel.Ply7"/>;
@@ -1070,9 +1072,11 @@ public static class XgDecisionIterator
     /// <see cref="OpeningBook"/> (see <see cref="LookupBookEntry"/>) — and
     /// the entry is a rollout entry (<c>Level == 100</c>), the entry's
     /// stored rollout parameters enrich the projection:
-    /// <c>Label = "Book V2: {trials} trials. {moves-level label}"</c>,
-    /// <c>Abbreviation = "B{moves-level token}p{trials}"</c> (e.g.
-    /// "B4p12960"), following the rollout sibling forms above. The pair is
+    /// <c>Label = "Book V2: {trials} trials. {moves-level label}"</c> and an
+    /// <c>Abbreviation</c> in the grammar's book form over the moves-level
+    /// token (<see cref="BookInnerToken"/>) and the trial count
+    /// (<see cref="DepthAbbreviationFormat.Book"/>), following the rollout
+    /// sibling forms above. The pair is
     /// <see cref="AnalysisMode.BookRollout"/> plus the entry's
     /// <c>RolloutMovesLevel</c> mapped through <see cref="LevelInfo"/> —
     /// the moves level, because only checker-play candidates are enriched
@@ -1127,7 +1131,7 @@ public static class XgDecisionIterator
                          : ctx.LevelTrunc;
             int innerPly = plyLevel + 1;
             string label = $"Rollout: {ctx.GamesRolled} trials. {LevelInfo((short)plyLevel).Label}";
-            string abbrev = $"{innerPly}p{ctx.GamesRolled}";
+            string abbrev = DepthAbbreviationFormat.Rollout(innerPly, ctx.GamesRolled);
             int rank = 100 + innerPly;
             return (label, abbrev, rank, AnalysisMode.Rollout, LevelForInnerPly(innerPly));
         }
@@ -1136,7 +1140,7 @@ public static class XgDecisionIterator
         {
             var inner = LevelInfo((short)bookEntry.RolloutMovesLevel);
             string label = $"Book V2: {bookEntry.Trials} trials. {inner.Label}";
-            string abbrev = $"B{BookInnerToken(inner)}p{bookEntry.Trials}";
+            string abbrev = DepthAbbreviationFormat.Book(BookInnerToken(inner), bookEntry.Trials);
             return (label, abbrev, LevelInfo(evalLevel).Rank, AnalysisMode.BookRollout, inner.Level);
         }
 
@@ -1172,13 +1176,15 @@ public static class XgDecisionIterator
     };
 
     /// <summary>
-    /// Compact moves-level token for the enriched book abbreviation
-    /// ("B{token}p{trials}"), parallel to the rollout sibling's inner-ply
-    /// digit ("{innerPly}p{trials}"): a ply level contributes its ply number
-    /// ("B4p12960" for a 4-ply-moves entry), any other level its
-    /// <see cref="LevelInfo"/> abbreviation — unreachable for moves levels in
-    /// the shipped database (all ply codes) but the book format allows Roller
-    /// codes, and the cube level demonstrably uses them.
+    /// Compact moves-level token for the enriched book abbreviation — the
+    /// token slot of <see cref="DepthAbbreviationFormat.Book"/>, parallel to
+    /// the inner-ply digit its rollout sibling
+    /// <see cref="DepthAbbreviationFormat.Rollout"/> writes. This method owns
+    /// what the token is; the format owns how it is written. A ply level
+    /// contributes its ply number (token "4" for a 4-ply-moves entry), any
+    /// other level its <see cref="LevelInfo"/> abbreviation — unreachable for
+    /// moves levels in the shipped database (all ply codes) but the book
+    /// format allows Roller codes, and the cube level demonstrably uses them.
     ///
     /// <para>
     /// The ply number comes from the <see cref="AnalysisLevel"/> member, not

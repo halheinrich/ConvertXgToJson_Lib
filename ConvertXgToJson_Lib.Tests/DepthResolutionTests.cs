@@ -1,3 +1,4 @@
+using AwesomeAssertions.Execution;
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
@@ -234,24 +235,54 @@ public class DepthResolutionTests
     }
 
     // -----------------------------------------------------------------------
+    //  Abbreviation grammar — the one pin
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The depth-abbreviation grammar's one pin. <see cref="DepthAbbreviationFormat"/>
+    /// owns the spelling of both trial-bearing forms, and this is the only
+    /// test that writes them out: every other abbreviation assertion in the
+    /// suite composes its expectation through the owner. The division is the
+    /// point — the rollout and book rows pin what
+    /// <see cref="XgDecisionIterator.ResolveDepthInfo"/> feeds the grammar
+    /// (inner ply, moves-level token, trial count), this pins how the grammar
+    /// writes it, so a grammar change edits the owner and this test alone.
+    /// The book cases cover both token kinds <c>BookInnerToken</c> yields: a
+    /// ply digit and a Roller abbreviation.
+    /// </summary>
+    [Fact]
+    public void DepthAbbreviationFormat_SpellsBothTrialBearingForms()
+    {
+        using var scope = new AssertionScope();
+
+        DepthAbbreviationFormat.Rollout(innerPly: 3, trials: 1296).Should().Be("3p1296");
+        DepthAbbreviationFormat.Book(levelToken: "4", trials: 12960).Should().Be("B4p12960");
+        DepthAbbreviationFormat.Book(levelToken: "R", trials: 20736).Should().Be("BRp20736");
+    }
+
+    // -----------------------------------------------------------------------
     //  Rollout branch — synthesized RolloutContext
     // -----------------------------------------------------------------------
 
     /// <summary>
     /// With a valid rollout index and Level2 set, ResolveDepthInfo takes
     /// the rollout branch: inner ply is Level2+1 (because the short
-    /// encoding shifts by 1 — Level2=2 → 3-ply), abbreviation is
-    /// "{innerPly}p{trials}", rank is 100+innerPly, and the pair is
+    /// encoding shifts by 1 — Level2=2 → 3-ply), abbreviation is the
+    /// grammar's rollout form over that inner ply and the trial count
+    /// (composed through <see cref="DepthAbbreviationFormat.Rollout"/>; the
+    /// spelling itself is pinned once, in
+    /// <see cref="DepthAbbreviationFormat_SpellsBothTrialBearingForms"/>),
+    /// rank is 100+innerPly, and the pair is
     /// <see cref="AnalysisMode.Rollout"/> + Ply{innerPly}. evalLevel is
     /// ignored in this branch.
     /// </summary>
     [Theory]
-    [InlineData(2, 1296, "Rollout: 1296 trials. 3-ply", "3p1296", 103, AnalysisLevel.Ply3)]
-    [InlineData(3,  648, "Rollout: 648 trials. 4-ply",  "4p648",  104, AnalysisLevel.Ply4)]
-    [InlineData(0,  500, "Rollout: 500 trials. 1-ply",  "1p500",  101, AnalysisLevel.Ply1)]
-    [InlineData(6,  100, "Rollout: 100 trials. 7-ply",  "7p100",  107, AnalysisLevel.Ply7)]
+    [InlineData(2, 1296, "Rollout: 1296 trials. 3-ply", 3, 103, AnalysisLevel.Ply3)]
+    [InlineData(3,  648, "Rollout: 648 trials. 4-ply",  4, 104, AnalysisLevel.Ply4)]
+    [InlineData(0,  500, "Rollout: 500 trials. 1-ply",  1, 101, AnalysisLevel.Ply1)]
+    [InlineData(6,  100, "Rollout: 100 trials. 7-ply",  7, 107, AnalysisLevel.Ply7)]
     public void ResolveDepthInfo_Rollout_Level2_PopulatesQuintuple(
-        int level2, int trials, string expectedLabel, string expectedAbbrev, int expectedRank,
+        int level2, int trials, string expectedLabel, int expectedInnerPly, int expectedRank,
         AnalysisLevel expectedLevel)
     {
         var rollouts = new List<RolloutContext>
@@ -266,7 +297,7 @@ public class DepthResolutionTests
             rollouts: rollouts);
 
         label.Should().Be(expectedLabel);
-        abbrev.Should().Be(expectedAbbrev);
+        abbrev.Should().Be(DepthAbbreviationFormat.Rollout(expectedInnerPly, trials));
         rank.Should().Be(expectedRank);
         mode.Should().Be(AnalysisMode.Rollout);
         level.Should().Be(expectedLevel);
@@ -278,7 +309,7 @@ public class DepthResolutionTests
     /// "level not recorded" stamp — rather than producing an out-of-taxonomy
     /// value. Defensive: a rolled-out candidate always carries an in-range
     /// inner ply in practice. Rank and abbreviation still reflect the raw
-    /// inner ply (rank 108, "8p…"); the mode stays
+    /// inner ply (rank 108, the rollout form over inner ply 8); the mode stays
     /// <see cref="AnalysisMode.Rollout"/> — only the level degrades.
     /// </summary>
     [Fact]
@@ -295,7 +326,7 @@ public class DepthResolutionTests
             rolloutIndex: 0,
             rollouts: rollouts);
 
-        abbrev.Should().Be("8p200");
+        abbrev.Should().Be(DepthAbbreviationFormat.Rollout(8, 200));
         rank.Should().Be(108);
         mode.Should().Be(AnalysisMode.Rollout);
         level.Should().Be(AnalysisLevel.Unknown,
@@ -358,12 +389,12 @@ public class DepthResolutionTests
         };
 
         var c0 = XgDecisionIterator.ResolveDepthInfo(0, 0, rollouts);
-        c0.Abbreviation.Should().Be("3p1296");
+        c0.Abbreviation.Should().Be(DepthAbbreviationFormat.Rollout(3, 1296));
         c0.Rank.Should().Be(103);
         c0.Level.Should().Be(AnalysisLevel.Ply3);
 
         var c1 = XgDecisionIterator.ResolveDepthInfo(0, 1, rollouts);
-        c1.Abbreviation.Should().Be("4p5000");
+        c1.Abbreviation.Should().Be(DepthAbbreviationFormat.Rollout(4, 5000));
         c1.Rank.Should().Be(104);
         c1.Level.Should().Be(AnalysisLevel.Ply4);
     }
@@ -373,21 +404,25 @@ public class DepthResolutionTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// A rollout book entry enriches a V2 book stamp: label
-    /// "Book V2: {trials} trials. {moves-level label}" and abbreviation
-    /// "B{moves-level token}p{trials}" follow the rollout sibling forms; the
+    /// A rollout book entry enriches a V2 book stamp, following the rollout
+    /// sibling forms: label "Book V2: {trials} trials. {moves-level label}",
+    /// and an abbreviation in the grammar's book form over the moves-level
+    /// token and the trial count — composed through
+    /// <see cref="DepthAbbreviationFormat.Book"/>, so each row pins the token
+    /// its moves level yields, while the spelling is pinned once, in
+    /// <see cref="DepthAbbreviationFormat_SpellsBothTrialBearingForms"/>. The
     /// pair is <see cref="AnalysisMode.BookRollout"/> plus the entry's moves
     /// level mapped through the level taxonomy; and the rank deliberately
     /// stays at the unenriched book rank 99 — enrichment recovers the cached
     /// rollout's parameters, but <c>DepthRank</c> semantics hold stable.
     /// </summary>
     [Theory]
-    [InlineData(3,    12960, "Book V2: 12960 trials. 4-ply",     "B4p12960",   AnalysisLevel.Ply4)]
-    [InlineData(2,    20736, "Book V2: 20736 trials. 3-ply",     "B3p20736",   AnalysisLevel.Ply3)]
-    [InlineData(12,     648, "Book V2: 648 trials. 3-ply Red",   "B3p648",     AnalysisLevel.Ply3Red)]
-    [InlineData(1000, 20736, "Book V2: 20736 trials. XG Roller", "BRp20736",   AnalysisLevel.XgRoller)]
+    [InlineData(3,    12960, "Book V2: 12960 trials. 4-ply",     "4", AnalysisLevel.Ply4)]
+    [InlineData(2,    20736, "Book V2: 20736 trials. 3-ply",     "3", AnalysisLevel.Ply3)]
+    [InlineData(12,     648, "Book V2: 648 trials. 3-ply Red",   "3", AnalysisLevel.Ply3Red)]
+    [InlineData(1000, 20736, "Book V2: 20736 trials. XG Roller", "R", AnalysisLevel.XgRoller)]
     public void ResolveDepthInfo_BookEntry_Rollout_EnrichesLabelAbbreviationAndLevel(
-        int movesLevel, int trials, string expectedLabel, string expectedAbbrev,
+        int movesLevel, int trials, string expectedLabel, string expectedToken,
         AnalysisLevel expectedLevel)
     {
         var entry = new OpeningBookEntry
@@ -404,7 +439,7 @@ public class DepthResolutionTests
             bookEntry: entry);
 
         label.Should().Be(expectedLabel);
-        abbrev.Should().Be(expectedAbbrev);
+        abbrev.Should().Be(DepthAbbreviationFormat.Book(expectedToken, trials));
         rank.Should().Be(99, "enrichment must not move the book rank");
         mode.Should().Be(AnalysisMode.BookRollout);
         level.Should().Be(expectedLevel);
@@ -565,7 +600,7 @@ public class DepthResolutionTests
 
         var best = req.Decision.Plays[0];
         best.Depth.Should().Be("Book V2: 12960 trials. 4-ply");
-        best.DepthAbbreviation.Should().Be("B4p12960");
+        best.DepthAbbreviation.Should().Be(DepthAbbreviationFormat.Book("4", 12960));
         best.DepthRank.Should().Be(99, "enrichment must not move the book rank");
         best.AnalysisMode.Should().Be(AnalysisMode.BookRollout);
         best.AnalysisLevel.Should().Be(AnalysisLevel.Ply4, "the entry's rollout used 4-ply checker play");

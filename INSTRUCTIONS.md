@@ -60,8 +60,10 @@ and `Directory.Packages.props` (Central Package Management — no inline
   `XgCubeEquities`, `XgPlayCandidate`.
 - **Decision iteration** — `XgDecisionIterator`: the two surfaces
   (`DecisionRow` rows and `BgDecisionData` records) over one walk, the
-  depth taxonomy, the emission rules. With it `MatchContext` (score, cube
-  and Crawford state as the walk advances), `XgIteratorState` /
+  depth taxonomy, the emission rules. With it `DepthAbbreviationFormat`
+  (the one spelling of the trial-bearing depth abbreviations),
+  `MatchContext` (score, cube and Crawford state as the walk advances),
+  `XgIteratorState` /
   `XgIteratorCallbacks` / `XgIteratorOptions`, the public metadata DTOs
   `XgMatchInfo` / `XgGameInfo`, `XgMoveTranslator` (XG move bytes to the
   shared `Play`), `XgidEncoder`, and `BackgammonConstants`.
@@ -525,16 +527,23 @@ branch (valid `rolloutIndex`) computes `innerPly = plyLevel + 1` and stamps
 degrades the *level* to `Unknown` while rank/abbreviation still reflect
 the raw value (defensive — real rollouts always carry an in-range inner
 ply). Trial count lives only in `Label`/`Abbreviation`, never the pair —
-it is not a taxonomy axis. Rank and pair are projections of the *same*
-resolution; the corpus invariant
+it is not a taxonomy axis. The two trial-bearing abbreviations — this
+rollout form and the book form below — are one grammar with one owner,
+`DepthAbbreviationFormat`: the separator and the book prefix are spelled
+there and nowhere else, and
+`DepthResolutionTests.DepthAbbreviationFormat_SpellsBothTrialBearingForms`
+is the one test that writes the forms out (every other abbreviation
+assertion composes through the owner). Rank and pair are projections of
+the *same* resolution; the corpus invariant
 `IterateDiagramRequests_DepthPairAndRank_AgreeTierWiseForEveryCandidate`
 pins that they never land in different tiers.
 
 The book branch (see "Book enrichment" below) fires when the caller
 resolved a V2-book-stamped candidate to a *rollout* entry: label
-`"Book V2: {trials} trials. {moves-level label}"`, abbreviation
-`"B{moves-level token}p{trials}"` (e.g. `B4p12960` — the token is the ply
-digit, or the Roller abbreviation for a Roller-family level), pair
+`"Book V2: {trials} trials. {moves-level label}"`, abbreviation in the
+book form of the depth-abbreviation grammar over the moves-level token and
+the trial count (the token, from `BookInnerToken`, is the ply digit, or the
+Roller abbreviation for a Roller-family level), pair
 `BookRollout` + the entry's `RolloutMovesLevel` mapped through the same
 `LevelInfo` switch (the book's stored levels use the same PLAYERLEVEL code
 space — one decoding site). **Rank stays 99 under enrichment, ruled
