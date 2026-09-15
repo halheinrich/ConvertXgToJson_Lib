@@ -44,7 +44,9 @@ public static class XgFileWriter
     /// Thrown when <paramref name="file"/> has no records, or its first
     /// record is not a <see cref="MatchHeaderRecord"/> — XG (and this
     /// library's own iterator) require the match header at index 0, so
-    /// emitting such a file would produce unreadable output.
+    /// emitting such a file would produce unreadable output. Also thrown
+    /// when a comment is text the comment table cannot carry faithfully;
+    /// the message names the comment's index and the reason.
     /// </exception>
     public static void Write(XgFile file, Stream output)
     {

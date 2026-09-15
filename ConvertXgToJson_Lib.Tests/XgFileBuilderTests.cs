@@ -719,6 +719,59 @@ public class XgFileBuilderTests
             .Should().Equal((1, "first game"), (2, "second game"));
     }
 
+    // The builder accepts any text; the comment table's wire does not
+    // (halheinrich/backgammon#234). What it cannot carry is rejected at
+    // write rather than written lossily.
+
+    [Fact]
+    public void Comment_WithLatin1HighCharacters_RoundTripsByteForByte()
+    {
+        const string accented = "Déjà vu: ÿ is Latin-1's last character.";   // é U+00E9, à U+00E0, ÿ U+00FF
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: accented);
+        byte[] written = XgFileWriter.ToBytes(builder.Build());
+
+        var reread = XgFileReader.ReadStream(new MemoryStream(written));
+        Requests(reread).Single().Descriptive.Comment.Should().Be(accented);
+        XgFileWriter.ToBytes(reread).Should().Equal(written,
+            "a comment the table can carry reads back as the text that was written");
+    }
+
+    [Theory]
+    [InlineData(0x0100)]    // one past Latin-1
+    [InlineData(0x1F3B2)]   // beyond the BMP: a surrogate pair in the string
+    public void Comment_WithACharacterBeyondLatin1_IsRejectedAtWrite_NamingTheComment(int codePoint)
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: "Fine.")
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint,
+                comment: $"Holds {char.ConvertFromUtf32(codePoint)}, which Latin-1 lacks.");
+        var file = builder.Build();
+
+        var act = () => XgFileWriter.ToBytes(file);
+
+        act.Should().Throw<ArgumentException>().WithMessage($"Comment 1 contains U+{codePoint:X4}, *");
+    }
+
+    [Fact]
+    public void Comment_ContainingTheCrlfEscapePair_IsRejectedAtWrite_NamingTheComment()
+    {
+        // 0x01 0x02 is how the table stores an embedded CRLF, so a comment
+        // that literally holds the pair would read back with a CRLF in its
+        // place. The embedded-CRLF test above is the control: a real CRLF
+        // is escaped and restored.
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: "Fine.")
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint, comment: "Holds \x01\x02 literally.");
+        var file = builder.Build();
+
+        var act = () => XgFileWriter.ToBytes(file);
+
+        act.Should().Throw<ArgumentException>().WithMessage("Comment 1 contains the character pair U+0001 U+0002, *");
+    }
+
     // ------------------------------------------------------------------ //
     //  The result is a real XgFile: every consumer path agrees
     // ------------------------------------------------------------------ //

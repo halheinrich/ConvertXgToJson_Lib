@@ -166,7 +166,9 @@ The reader's mirror. Layered exactly like the read path:
   `PascalBinaryWriter` (alignment-mirroring primitive writes; padding is
   explicit zeros), `SaveRecordWriter` (all six TSaveRec variants → complete
   zero-padded 2560-byte records), `RolloutContextWriter` (2184-byte records),
-  `CommentWriter` (CRLF lines, `#1#2` escape), `RichGameHeaderWriter`
+  `CommentWriter` (CRLF lines, `#1#2` escape; it rejects a comment the
+  table cannot carry faithfully, and its doc comment is the one statement
+  of what that is — halheinrich/backgammon#234), `RichGameHeaderWriter`
   (8232-byte packed outer header, thumbnail always omitted — the model does
   not carry its bytes), `XgContainerWriter` (concatenated zlib streams plus
   the trailing manifest).

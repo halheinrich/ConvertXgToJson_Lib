@@ -31,9 +31,12 @@ namespace ConvertXgToJson_Lib;
 /// emitted decision's <see cref="DescriptiveData.Comment"/>. The match
 /// owns the comment table: a caller passes the text, never an index. The
 /// text is stored verbatim; the builder neither wraps nor converts it
-/// (XG's own comments are RTF documents). The skipped shapes — unanalysed
-/// plays and cubes, dances, illegal plays — take no comment: the iterator
-/// never emits them, so nothing would surface it.
+/// (XG's own comments are RTF documents), nor constrains it — what the
+/// file's comment table can carry is the writer's to decide, and
+/// <see cref="XgFileWriter.Write"/> rejects a comment it cannot carry
+/// faithfully. The skipped shapes — unanalysed plays and cubes, dances,
+/// illegal plays — take no comment: the iterator never emits them, so
+/// nothing would surface it.
 /// </para>
 /// </remarks>
 public sealed class XgGameBuilder
