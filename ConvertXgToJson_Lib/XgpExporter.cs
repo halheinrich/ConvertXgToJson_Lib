@@ -132,6 +132,11 @@ public static class XgpExporter
     /// <see cref="MatchHeaderRecord"/>, or no decision exists at the given
     /// coordinates.
     /// </exception>
+    /// <exception cref="XgUnrepresentableValueException">
+    /// Thrown when a comment carried from <paramref name="source"/> is text
+    /// the XG comment table cannot carry (see <see cref="XgFileWriter.Write"/>);
+    /// its index is in the exported file's table, not the source's.
+    /// </exception>
     public static void Write(XgFile source, int game, int moveNumber, bool isCube, Stream output)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -212,6 +217,11 @@ public static class XgpExporter
     /// Thrown when <paramref name="source"/> does not begin with a
     /// <see cref="MatchHeaderRecord"/>, or no decision exists at the Id's
     /// coordinates.
+    /// </exception>
+    /// <exception cref="XgUnrepresentableValueException">
+    /// Thrown when a comment carried from <paramref name="source"/> is text
+    /// the XG comment table cannot carry (see <see cref="XgFileWriter.Write"/>);
+    /// its index is in the exported file's table, not the source's.
     /// </exception>
     public static byte[] ToBytes(XgFile source, XgDecisionId id)
     {
@@ -298,6 +308,10 @@ public static class XgpExporter
     /// <exception cref="NotSupportedException">
     /// Thrown when <paramref name="options"/> sets a role-based name with
     /// no slot-based fallback and the source's roles are not determinable.
+    /// </exception>
+    /// <exception cref="XgUnrepresentableValueException">
+    /// Thrown when a comment of <paramref name="source"/> is text the XG
+    /// comment table cannot carry (see <see cref="XgFileWriter.Write"/>).
     /// </exception>
     public static void Write(XgFile source, XgpSliceOptions options, Stream output)
     {

@@ -30,9 +30,9 @@ internal static class CommentWriter
     private static readonly Encoding Wire = Encoding.GetEncoding(
         Encoding.Latin1.CodePage, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
 
-    /// <exception cref="ArgumentException">
-    /// A comment cannot be carried faithfully; the message names its index
-    /// and the reason.
+    /// <exception cref="XgUnrepresentableValueException">
+    /// A comment cannot be carried faithfully; the exception carries its
+    /// index, and the offending character when there is one.
     /// </exception>
     internal static byte[] WriteAll(IReadOnlyList<string> comments)
     {
@@ -41,10 +41,10 @@ internal static class CommentWriter
         {
             string comment = comments[i];
             if (comment.Contains(CrlfEscape, StringComparison.Ordinal))
-                throw new ArgumentException(
+                throw new XgUnrepresentableValueException(
                     $"Comment {i} contains the character pair U+0001 U+0002, the comment table's escape for an " +
                     "embedded CRLF; it would read back as a CRLF.",
-                    nameof(comments));
+                    commentIndex: i, character: null);
 
             try
             {
@@ -52,17 +52,25 @@ internal static class CommentWriter
             }
             catch (EncoderFallbackException ex)
             {
-                throw new ArgumentException(
-                    $"Comment {i} contains {Describe(ex)}, which the comment table's encoding " +
-                    $"({Wire.WebName}) cannot represent; it would be written as '?'.",
-                    nameof(comments), ex);
+                Rune? character = Unencodable(ex);
+                string what = character is { } c
+                    ? $"U+{c.Value:X4}"
+                    : $"the unpaired surrogate U+{(int)ex.CharUnknown:X4}";
+                throw new XgUnrepresentableValueException(
+                    $"Comment {i} contains {what}, which the comment table's encoding ({Wire.WebName}) " +
+                    "cannot represent; it would be written as '?'.",
+                    commentIndex: i, character: character, innerException: ex);
             }
         }
         return output.ToArray();
     }
 
-    private static string Describe(EncoderFallbackException ex) =>
+    /// <summary>
+    /// The character the fallback refused, or null for an unpaired
+    /// surrogate — a lone UTF-16 code unit, which no <see cref="Rune"/> holds.
+    /// </summary>
+    private static Rune? Unencodable(EncoderFallbackException ex) =>
         ex.IsUnknownSurrogate()
-            ? $"U+{char.ConvertToUtf32(ex.CharUnknownHigh, ex.CharUnknownLow):X4}"
-            : $"U+{(int)ex.CharUnknown:X4}";
+            ? new Rune(ex.CharUnknownHigh, ex.CharUnknownLow)
+            : Rune.TryCreate(ex.CharUnknown, out Rune rune) ? rune : null;
 }

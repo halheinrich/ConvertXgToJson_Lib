@@ -44,9 +44,11 @@ public static class XgFileWriter
     /// Thrown when <paramref name="file"/> has no records, or its first
     /// record is not a <see cref="MatchHeaderRecord"/> — XG (and this
     /// library's own iterator) require the match header at index 0, so
-    /// emitting such a file would produce unreadable output. Also thrown
-    /// when a comment is text the comment table cannot carry faithfully;
-    /// the message names the comment's index and the reason.
+    /// emitting such a file would produce unreadable output.
+    /// </exception>
+    /// <exception cref="XgUnrepresentableValueException">
+    /// Thrown when a comment is text the XG comment table cannot carry
+    /// faithfully; the exception carries the comment's index.
     /// </exception>
     public static void Write(XgFile file, Stream output)
     {
@@ -82,6 +84,7 @@ public static class XgFileWriter
     /// Serializes <paramref name="file"/> to a byte array. Preferred entry
     /// point for browser-hosted (WASM) consumers with no filesystem.
     /// </summary>
+    /// <inheritdoc cref="Write(XgFile, Stream)"/>
     public static byte[] ToBytes(XgFile file)
     {
         using var ms = new MemoryStream();

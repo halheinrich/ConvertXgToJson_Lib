@@ -52,7 +52,8 @@ and `Directory.Packages.props` (Central Package Management — no inline
   round-trip, not byte identity) and `XgpExporter` (single-decision
   `.xgp` export, sliced per `XgpSliceOptions`) over `Writing/`:
   `XgContainerWriter`, `PascalBinaryWriter`, `RichGameHeaderWriter`,
-  `SaveRecordWriter`, `RolloutContextWriter`, `CommentWriter`.
+  `SaveRecordWriter`, `RolloutContextWriter`, `CommentWriter`. A value the
+  format cannot represent is refused as `XgUnrepresentableValueException`.
 - **Synthesis** — `XgFileBuilder` / `XgGameBuilder`, through which a
   consumer says what a match *is* without seeing the record structure;
   `XgRecordFactory`, the record construction the builders and the exporter
@@ -167,8 +168,9 @@ The reader's mirror. Layered exactly like the read path:
   explicit zeros), `SaveRecordWriter` (all six TSaveRec variants → complete
   zero-padded 2560-byte records), `RolloutContextWriter` (2184-byte records),
   `CommentWriter` (CRLF lines, `#1#2` escape; it rejects a comment the
-  table cannot carry faithfully, and its doc comment is the one statement
-  of what that is — halheinrich/backgammon#234), `RichGameHeaderWriter`
+  table cannot carry faithfully with `XgUnrepresentableValueException`, and
+  its doc comment is the one statement of what that is —
+  halheinrich/backgammon#234), `RichGameHeaderWriter`
   (8232-byte packed outer header, thumbnail always omitted — the model does
   not carry its bytes), `XgContainerWriter` (concatenated zlib streams plus
   the trailing manifest).
@@ -1070,6 +1072,16 @@ public static class XgFileWriter
     // byte identity: ReadStream(Write(f)) parses to an equal model.
     public static void   Write(XgFile file, Stream output);
     public static byte[] ToBytes(XgFile file);
+}
+
+// A value valid in memory and in JSON that the XG format cannot represent
+// — a limit of the wire, not a bad argument; the read side's mirror is
+// InvalidDataException. Thrown at write (today: a comment the comment
+// table cannot carry). Sealed; the three standard constructors.
+public sealed class XgUnrepresentableValueException : Exception
+{
+    public int?  CommentIndex { get; }   // the comment's index in the written table; null = not a comment
+    public Rune? Character    { get; }   // the unencodable character; null = none is one
 }
 
 public static class XgpExporter

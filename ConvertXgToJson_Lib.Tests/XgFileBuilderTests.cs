@@ -1,3 +1,4 @@
+using System.Text;
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
@@ -721,7 +722,18 @@ public class XgFileBuilderTests
 
     // The builder accepts any text; the comment table's wire does not
     // (halheinrich/backgammon#234). What it cannot carry is rejected at
-    // write rather than written lossily.
+    // write rather than written lossily, with the comment's index — and
+    // the offending character, when there is one — typed on the exception.
+
+    /// <summary>A match whose comment table is "Fine." then <paramref name="second"/>.</summary>
+    private static XgFile WithSecondComment(string second)
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: "Fine.")
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint, comment: second);
+        return builder.Build();
+    }
 
     [Fact]
     public void Comment_WithLatin1HighCharacters_RoundTripsByteForByte()
@@ -740,36 +752,48 @@ public class XgFileBuilderTests
     [Theory]
     [InlineData(0x0100)]    // one past Latin-1
     [InlineData(0x1F3B2)]   // beyond the BMP: a surrogate pair in the string
-    public void Comment_WithACharacterBeyondLatin1_IsRejectedAtWrite_NamingTheComment(int codePoint)
+    public void Comment_WithACharacterBeyondLatin1_IsRejectedAtWrite_WithIndexAndCharacter(int codePoint)
     {
-        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
-        builder.AddGame()
-            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: "Fine.")
-            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint,
-                comment: $"Holds {char.ConvertFromUtf32(codePoint)}, which Latin-1 lacks.");
-        var file = builder.Build();
+        var file = WithSecondComment($"Holds {char.ConvertFromUtf32(codePoint)}, which Latin-1 lacks.");
 
         var act = () => XgFileWriter.ToBytes(file);
 
-        act.Should().Throw<ArgumentException>().WithMessage($"Comment 1 contains U+{codePoint:X4}, *");
+        var ex = act.Should().Throw<XgUnrepresentableValueException>()
+            .WithMessage($"Comment 1 contains U+{codePoint:X4}, *").Which;
+        ex.CommentIndex.Should().Be(1);
+        ex.Character.Should().Be(new Rune(codePoint));
     }
 
     [Fact]
-    public void Comment_ContainingTheCrlfEscapePair_IsRejectedAtWrite_NamingTheComment()
+    public void Comment_WithAnUnpairedSurrogate_IsRejectedAtWrite_WithIndexAndNoCharacter()
+    {
+        // A lone UTF-16 code unit is not a character, so no Rune can name
+        // it; the index still does.
+        var file = WithSecondComment($"Holds {(char)0xD800} alone.");
+
+        var act = () => XgFileWriter.ToBytes(file);
+
+        var ex = act.Should().Throw<XgUnrepresentableValueException>()
+            .WithMessage("Comment 1 contains the unpaired surrogate U+D800, *").Which;
+        ex.CommentIndex.Should().Be(1);
+        ex.Character.Should().BeNull();
+    }
+
+    [Fact]
+    public void Comment_ContainingTheCrlfEscapePair_IsRejectedAtWrite_WithIndexAndNoCharacter()
     {
         // 0x01 0x02 is how the table stores an embedded CRLF, so a comment
         // that literally holds the pair would read back with a CRLF in its
         // place. The embedded-CRLF test above is the control: a real CRLF
         // is escaped and restored.
-        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
-        builder.AddGame()
-            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: "Fine.")
-            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint, comment: "Holds \x01\x02 literally.");
-        var file = builder.Build();
+        var file = WithSecondComment("Holds \x01\x02 literally.");
 
         var act = () => XgFileWriter.ToBytes(file);
 
-        act.Should().Throw<ArgumentException>().WithMessage("Comment 1 contains the character pair U+0001 U+0002, *");
+        var ex = act.Should().Throw<XgUnrepresentableValueException>()
+            .WithMessage("Comment 1 contains the character pair U+0001 U+0002, *").Which;
+        ex.CommentIndex.Should().Be(1);
+        ex.Character.Should().BeNull("the pair is a sequence the format reserves, not one unencodable character");
     }
 
     // ------------------------------------------------------------------ //
