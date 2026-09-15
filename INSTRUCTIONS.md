@@ -332,6 +332,17 @@ the returned `XgGameBuilder` records decisions in play order:
   semantics" above), stamped on the pane pair and the record-level
   play-time stamp alike; null means the request matches `ply`.
   `UnanalysedCube` is the incidental pane; its actions still move the cube.
+* `Play` (both overloads) and `CubeDecision` take an optional `comment` —
+  the decision's comment, surfaced as the emitted decision's
+  `DescriptiveData.Comment` (halheinrich/backgammon#31). The builder owns
+  the file-level comment table: `XgFileBuilder` appends the text and the
+  record stamps the index, so a caller never sees one; `Build()` snapshots
+  the table as it does the records. The text is stored verbatim (XG's own
+  comments are RTF; the builder neither wraps nor converts); null or empty
+  means none and adds no entry. The skipped shapes (`UnanalysedPlay`,
+  `UnanalysedCube`, `Dance`, `IllegalPlay`) take no comment — the iterator
+  never emits them, and the corpus is no guide either way (590 files, one
+  referenced comment, on an analysed play; measured 2026-09-15).
 * State is tracked per game: plays advance the position (validated against
   the board through `BgDataTypes_Lib.BoardState` — from-point occupied, no
   blocked destination, hit flag agreeing with a blot; dice legality is
@@ -990,9 +1001,12 @@ public sealed class XgGameBuilder           // from AddGame; methods chain
 
     public XgGameBuilder AtPosition(IReadOnlyList<int> position);
 
-    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, Play played);
+    // comment: the decision's comment, verbatim; null or empty = none
     public XgGameBuilder Play(XgPlayer player, DiceRoll dice, Play played,
-                              IReadOnlyList<XgPlayCandidate> candidates);
+                              string? comment = null);
+    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, Play played,
+                              IReadOnlyList<XgPlayCandidate> candidates,
+                              string? comment = null);
     public XgGameBuilder UnanalysedPlay(XgPlayer player, DiceRoll dice, Play played);
     public XgGameBuilder Dance(XgPlayer player, DiceRoll dice);
     public XgGameBuilder IllegalPlay(XgPlayer player, DiceRoll dice);
@@ -1001,7 +1015,8 @@ public sealed class XgGameBuilder           // from AddGame; methods chain
                                       int ply = 2,   // 2–7; 1-ply cube is unrepresentable
                                       CubeAction? doublerAction = null,
                                       CubeAction? takerAction = null,
-                                      int? requestedPly = null); // 2–7; null = matches ply
+                                      int? requestedPly = null,  // 2–7; null = matches ply
+                                      string? comment = null);
     public XgGameBuilder UnanalysedCube(XgPlayer doubler,
                                         CubeAction? doublerAction = null,
                                         CubeAction? takerAction = null);

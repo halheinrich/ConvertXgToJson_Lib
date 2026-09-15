@@ -643,6 +643,83 @@ public class XgFileBuilderTests
     }
 
     // ------------------------------------------------------------------ //
+    //  Decision comments — the text BgQuiz's solution review displays
+    //  (halheinrich/backgammon#31), asserted over the real wire
+    // ------------------------------------------------------------------ //
+
+    private static XgFile ThroughTheWire(XgFile file) =>
+        XgFileReader.ReadStream(new MemoryStream(XgFileWriter.ToBytes(file)));
+
+    [Fact]
+    public void Comment_OnAPlayAndACube_SurvivesTheWire_AndAnUncommentedDecisionReadsEmpty()
+    {
+        const string cubeComment = "No double: the race is too close.";
+        const string playComment = "8/5 6/5 makes the best point.";
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .CubeDecision(XgPlayer.Player1, new XgCubeEquities(0.2, 0.3, 1.0),
+                doublerAction: CubeAction.NoDouble, comment: cubeComment)
+            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: playComment)
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint);
+
+        var requests = Requests(ThroughTheWire(builder.Build()));
+
+        requests.Should().HaveCount(3);
+        requests.Single(r => r.Decision.IsCube).Descriptive.Comment.Should().Be(cubeComment);
+        var plays = requests.Where(r => !r.Decision.IsCube).ToList();
+        plays.Single(r => r.Descriptive.OnRollName == "Alice").Descriptive.Comment.Should().Be(playComment);
+        plays.Single(r => r.Descriptive.OnRollName == "Bob").Descriptive.Comment.Should().BeEmpty(
+            "a decision recorded without a comment has none, however many its neighbours carry");
+    }
+
+    [Fact]
+    public void Comment_WithAnEmbeddedCrlf_RoundTripsVerbatim_AndLeavesLaterIndicesAligned()
+    {
+        // temp.xgc is one comment per CRLF-terminated line, so an embedded
+        // CRLF must be escaped on write and restored on read. Were either
+        // half missing, this entry would split in two and the next decision
+        // would read its tail instead of its own comment.
+        const string multiLine = "Close.\r\nWith one more checker on the 13 it is a clear double.";
+        const string after = "Forced.";
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: multiLine)
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint, comment: after);
+
+        Requests(ThroughTheWire(builder.Build())).Select(r => r.Descriptive.Comment)
+            .Should().Equal(multiLine, after);
+    }
+
+    [Fact]
+    public void Comment_Empty_IsNoComment_AndWritesTheSameBytesAsNone()
+    {
+        var withEmpty = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        withEmpty.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: "");
+        var withNone = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        withNone.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
+
+        XgFileWriter.ToBytes(withEmpty.Build()).Should().Equal(XgFileWriter.ToBytes(withNone.Build()),
+            "an empty comment adds no table entry — the file carries no comment stream at all");
+        Requests(withEmpty.Build()).Single().Descriptive.Comment.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Comment_TableIsPerMatch_AndABuildIsASnapshot()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: "first game");
+        var earlier = builder.Build();
+        byte[] earlierBytes = XgFileWriter.ToBytes(earlier);
+
+        builder.AddGame(1, 0).Play(XgPlayer.Player2, ThreeOne, MakeFivePoint, comment: "second game");
+
+        XgFileWriter.ToBytes(earlier).Should().Equal(earlierBytes,
+            "a comment recorded after a build must not reach the file that build returned");
+        Requests(builder.Build()).Select(r => (r.Descriptive.Game, r.Descriptive.Comment))
+            .Should().Equal((1, "first game"), (2, "second game"));
+    }
+
+    // ------------------------------------------------------------------ //
     //  The result is a real XgFile: every consumer path agrees
     // ------------------------------------------------------------------ //
 

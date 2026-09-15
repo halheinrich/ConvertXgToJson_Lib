@@ -993,8 +993,9 @@ public sealed class XgFile
     [JsonInclude]
     internal List<RolloutContext> Rollouts    { get; init; } = [];
     /// <summary>
-    /// Raw comment lines from temp.xgc (RTF, one entry per record), joined
-    /// by the records' comment indices. May carry unreferenced leftovers —
+    /// The comment table (temp.xgc on the wire), joined by the records'
+    /// comment indices: RTF in XG-authored files, the caller's text verbatim
+    /// in <see cref="XgFileBuilder"/> output. May carry unreferenced leftovers —
     /// XG bundles its working temp files wholesale, so orphaned entries are
     /// format reality, not a parse failure. An interior empty entry is a
     /// real (empty) comment; skipping it desyncs every later index.

@@ -53,6 +53,7 @@ namespace ConvertXgToJson_Lib;
 public sealed class XgFileBuilder
 {
     private readonly List<XgGameBuilder> _games = [];
+    private readonly List<string> _comments = [];
 
     private XgFileBuilder(int matchLength, string player1, string player2, bool jacoby, bool beaver)
     {
@@ -193,7 +194,26 @@ public sealed class XgFileBuilder
         {
             Header = XgRecordFactory.FileHeader(SaveName()),
             Records = records,
+            // A snapshot, like the record list: a comment added after this
+            // build must not reach the file it returned.
+            Comments = [.. _comments],
         };
+    }
+
+    /// <summary>
+    /// Appends a decision comment to the match's comment table and returns
+    /// the index the decision's record stamps. The table is file-level —
+    /// one per match, shared by every game — so it lives here rather than
+    /// on the game builder, and callers of the public surface pass text,
+    /// never an index. Null or empty means the decision has no comment:
+    /// nothing is appended and XG's no-comment sentinel, −1, is returned.
+    /// </summary>
+    internal int AddComment(string? comment)
+    {
+        if (string.IsNullOrEmpty(comment))
+            return -1;
+        _comments.Add(comment);
+        return _comments.Count - 1;
     }
 
     /// <summary>

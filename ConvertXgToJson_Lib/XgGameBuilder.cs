@@ -11,18 +11,30 @@ namespace ConvertXgToJson_Lib;
 /// a mistake surfaces at the call that made it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The game tracks its position and cube through the decisions recorded:
 /// a play advances the position (<see cref="AtPosition"/> overrides it),
 /// and a taken double raises the cube to the taker. Checker-play
 /// decisions come in four shapes — an analysed play
-/// (<see cref="Play(XgPlayer, DiceRoll, BgDataTypes_Lib.Play)"/> and its
-/// explicit-candidates overload), an unanalysed play
+/// (<see cref="Play(XgPlayer, DiceRoll, BgDataTypes_Lib.Play, string)"/>
+/// and its explicit-candidates overload), an unanalysed play
 /// (<see cref="UnanalysedPlay"/>; the iterator skips it), a dance
 /// (<see cref="Dance"/>) and XG's illegal-play marker
 /// (<see cref="IllegalPlay"/>) — and cube decisions in two
 /// (<see cref="CubeDecision"/>, <see cref="UnanalysedCube"/>). See
 /// <see cref="XgFileBuilder"/> for the position frame and the validation
 /// contract.
+/// </para>
+/// <para>
+/// An analysed play or cube decision may carry the decision's comment —
+/// the note XG keeps beside a decision, which the iterator surfaces as the
+/// emitted decision's <see cref="DescriptiveData.Comment"/>. The match
+/// owns the comment table: a caller passes the text, never an index. The
+/// text is stored verbatim; the builder neither wraps nor converts it
+/// (XG's own comments are RTF documents). The skipped shapes — unanalysed
+/// plays and cubes, dances, illegal plays — take no comment: the iterator
+/// never emits them, so nothing would surface it.
+/// </para>
 /// </remarks>
 public sealed class XgGameBuilder
 {
@@ -109,10 +121,14 @@ public sealed class XgGameBuilder
     /// <param name="player">Who rolled.</param>
     /// <param name="dice">The roll.</param>
     /// <param name="played">The play made, in the mover's numbering.</param>
+    /// <param name="comment">
+    /// The decision's comment, stored verbatim; null or empty for none
+    /// (see <see cref="XgGameBuilder"/>).
+    /// </param>
     /// <exception cref="ArgumentException">The play cannot be made from the current position.</exception>
     /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
-    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, BgDataTypes_Lib.Play played) =>
-        Play(player, dice, played, [new XgPlayCandidate(played, equity: 0.0)]);
+    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, BgDataTypes_Lib.Play played, string? comment = null) =>
+        Play(player, dice, played, [new XgPlayCandidate(played, equity: 0.0)], comment);
 
     /// <summary>
     /// Records an analysed checker play with an explicit candidate list.
@@ -124,12 +140,18 @@ public sealed class XgGameBuilder
     /// <param name="dice">The roll.</param>
     /// <param name="played">The play made, in the mover's numbering.</param>
     /// <param name="candidates">The analysed candidates; at least one.</param>
+    /// <param name="comment">
+    /// The decision's comment, stored verbatim; null or empty for none
+    /// (see <see cref="XgGameBuilder"/>).
+    /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="candidates"/> is empty, or a play cannot be made
     /// from the current position.
     /// </exception>
     /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
-    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, BgDataTypes_Lib.Play played, IReadOnlyList<XgPlayCandidate> candidates)
+    public XgGameBuilder Play(
+        XgPlayer player, DiceRoll dice, BgDataTypes_Lib.Play played, IReadOnlyList<XgPlayCandidate> candidates,
+        string? comment = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -204,7 +226,7 @@ public sealed class XgGameBuilder
             AnalyzeLevelLuck = -1,
             TutorMoveIndex = -1,
             ErrorTutorMove = XgRecordFactory.UnanalysedError,
-            CommentIndex = -1,
+            CommentIndex = _match.AddComment(comment),
         });
         _position = applied.After;
         return this;
@@ -348,6 +370,10 @@ public sealed class XgGameBuilder
     /// what ran — the provenance of the equities and of the emitted depth
     /// label; the request is a setting no downstream depth consumer reads.
     /// </param>
+    /// <param name="comment">
+    /// The decision's comment, stored verbatim; null or empty for none
+    /// (see <see cref="XgGameBuilder"/>).
+    /// </param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="ply"/>
     /// or <paramref name="requestedPly"/> is outside 2–7.</exception>
     /// <exception cref="ArgumentException">
@@ -358,7 +384,7 @@ public sealed class XgGameBuilder
     public XgGameBuilder CubeDecision(
         XgPlayer doubler, XgCubeEquities equities, int ply = MinCubePly,
         CubeAction? doublerAction = null, CubeAction? takerAction = null,
-        int? requestedPly = null)
+        int? requestedPly = null, string? comment = null)
     {
         if (ply is < MinCubePly or > XgPlayCandidate.MaxPly)
             throw new ArgumentOutOfRangeException(nameof(ply), ply,
@@ -430,7 +456,7 @@ public sealed class XgGameBuilder
             TutorTake = -1,
             ErrorTutorCube = XgRecordFactory.UnanalysedError,
             ErrorTutorTake = XgRecordFactory.UnanalysedError,
-            CommentIndex = -1,
+            CommentIndex = _match.AddComment(comment),
         });
         AdvanceCube(doubler, doublerAction, takerAction);
         return this;

@@ -4,7 +4,7 @@ namespace ConvertXgToJson_Lib;
 
 /// <summary>
 /// One analysed candidate of a checker-play decision, as supplied to
-/// <see cref="XgGameBuilder.Play(XgPlayer, DiceRoll, Play, IReadOnlyList{XgPlayCandidate})"/>:
+/// <see cref="XgGameBuilder.Play(XgPlayer, DiceRoll, Play, IReadOnlyList{XgPlayCandidate}, string)"/>:
 /// the play, its equity from the mover's perspective, and the evaluation
 /// depth it was analysed at. Immutable; an invalid depth is unrepresentable.
 /// </summary>
