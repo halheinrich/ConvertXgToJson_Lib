@@ -6,11 +6,18 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// stored as the two-byte sequence #1#2 (bytes 0x01 0x02), which must be
 /// replaced with real CRLF (0x0D 0x0A) after reading.
 /// </summary>
+/// <remarks>
+/// The table is decoded as Latin-1 unconditionally. It carries no byte-order
+/// mark, so leading bytes that look like one (FF FE, FE FF, EF BB BF) are the
+/// first comment's text; sniffing them would decode the whole table as
+/// UTF-16 or UTF-8.
+/// </remarks>
 internal static class CommentParser
 {
     public static List<string> ReadAll(Stream stream)
     {
-        using var reader = new StreamReader(stream, System.Text.Encoding.Latin1, leaveOpen: true);
+        using var reader = new StreamReader(
+            stream, System.Text.Encoding.Latin1, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
         string raw = reader.ReadToEnd();
 
         // Split on CRLF line separators

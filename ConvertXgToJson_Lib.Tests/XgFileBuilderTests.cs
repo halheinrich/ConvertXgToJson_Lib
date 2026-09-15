@@ -800,6 +800,28 @@ public class XgFileBuilderTests
         ex.Character.Should().BeNull("the pair is a sequence the format reserves, not one unencodable character");
     }
 
+    [Theory]
+    [InlineData("ÿþ opens like a UTF-16 LE mark.")]   // FF FE
+    [InlineData("þÿ opens like a UTF-16 BE mark.")]   // FE FF
+    [InlineData("ï»¿ opens like a UTF-8 mark.")]      // EF BB BF
+    [InlineData("xÿþ is no mark at all.")]            // control: the pair, but not leading
+    public void Comment_FirstInTheTable_OpeningLikeAByteOrderMark_RoundTripsVerbatim(string first)
+    {
+        // The table carries no byte-order mark, so bytes shaped like one are
+        // the first comment's Latin-1 text (halheinrich/backgammon#235).
+        // Were the reader to sniff them, the whole table would decode as
+        // UTF-16 or UTF-8: one garbage entry, or later Latin-1 characters
+        // lost to U+FFFD — which the second comment's é would expose.
+        const string second = "Then é, still Latin-1.";
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint, comment: first)
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint, comment: second);
+
+        Requests(ThroughTheWire(builder.Build())).Select(r => r.Descriptive.Comment)
+            .Should().Equal(first, second);
+    }
+
     // ------------------------------------------------------------------ //
     //  The result is a real XgFile: every consumer path agrees
     // ------------------------------------------------------------------ //
