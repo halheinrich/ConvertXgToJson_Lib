@@ -247,15 +247,19 @@ public class DepthResolutionTests
     /// <see cref="XgDecisionIterator.ResolveDepthInfo"/> feeds the grammar
     /// (inner ply, moves-level token, trial count), this pins how the grammar
     /// writes it, so a grammar change edits the owner and this test alone.
-    /// The book cases cover both token kinds <c>BookInnerToken</c> yields: a
-    /// ply digit and a Roller abbreviation.
+    /// The two forms carry different separators — only the book form takes
+    /// the underscore, the user's ruling of 2026-09-16
+    /// (halheinrich/backgammon#240) — so the rows below pin three spellings,
+    /// not one pattern applied three times. The book cases cover both token
+    /// kinds <c>BookInnerToken</c> yields: a ply digit and a Roller
+    /// abbreviation.
     /// </summary>
     [Fact]
     public void DepthAbbreviationFormat_SpellsBothTrialBearingForms()
     {
         using var scope = new AssertionScope();
 
-        DepthAbbreviationFormat.Rollout(innerPly: 3, trials: 1296).Should().Be("3_1296");
+        DepthAbbreviationFormat.Rollout(innerPly: 3, trials: 1296).Should().Be("3p1296");
         DepthAbbreviationFormat.Book(levelToken: "4", trials: 12960).Should().Be("B4_12960");
         DepthAbbreviationFormat.Book(levelToken: "R", trials: 20736).Should().Be("BR_20736");
     }

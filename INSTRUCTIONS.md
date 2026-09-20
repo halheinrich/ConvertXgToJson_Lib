@@ -544,9 +544,15 @@ degrades the *level* to `Unknown` while rank/abbreviation still reflect
 the raw value (defensive — real rollouts always carry an in-range inner
 ply). Trial count lives only in `Label`/`Abbreviation`, never the pair —
 it is not a taxonomy axis. The two trial-bearing abbreviations — this
-rollout form and the book form below — are one grammar with one owner,
-`DepthAbbreviationFormat`: the separator and the book prefix are spelled
-there and nowhere else, and
+rollout form and the book form below — share one owner,
+`DepthAbbreviationFormat`, and a shape (level token, separator, trial
+count), but **not a separator**: the rollout form joins with `p`
+(`3p1296`), the book form with `_` behind its `B` prefix (`B4_12960`).
+They differ by the user's ruling of 2026-09-16 on the scope of
+halheinrich/backgammon#232 (halheinrich/backgammon#240) — the underscore
+was asked for on the *book* labels, and the rollout form keeps the
+ply-marked spelling it always had. Both separators and the prefix are
+spelled in the owner and nowhere else, and
 `DepthResolutionTests.DepthAbbreviationFormat_SpellsBothTrialBearingForms`
 is the one test that writes the forms out (every other abbreviation
 assertion composes through the owner). Rank and pair are projections of
