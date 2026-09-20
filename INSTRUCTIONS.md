@@ -64,8 +64,9 @@ and `Directory.Packages.props` (Central Package Management — no inline
   (`DecisionRow` rows and `BgDecisionData` records) over one walk, the
   depth taxonomy, the emission rules. With it `DepthAbbreviationFormat`
   (the one spelling of the trial-bearing depth abbreviations),
-  `MatchContext` (score, cube and Crawford state as the walk advances),
-  `XgIteratorState` /
+  `MatchContext` (score, cube and Crawford state as the walk advances, and
+  the one comment-conversion site), `RtfPlainText` (the one reduction of
+  XG's RTF comment to the text a reader sees), `XgIteratorState` /
   `XgIteratorCallbacks` / `XgIteratorOptions`, the public metadata DTOs
   `XgMatchInfo` / `XgGameInfo`, `XgMoveTranslator` (XG move bytes to the
   shared `Play`), `XgidEncoder`, and `BackgammonConstants`.
@@ -343,7 +344,8 @@ the returned `XgGameBuilder` records decisions in play order:
   the file-level comment table: `XgFileBuilder` appends the text and the
   record stamps the index, so a caller never sees one; `Build()` snapshots
   the table as it does the records. The text is stored verbatim (XG's own
-  comments are RTF; the builder neither wraps nor converts); null or empty
+  comments are RTF; the builder neither wraps nor converts — see "Comment
+  text" below for where the conversion does happen); null or empty
   means none and adds no entry. The skipped shapes (`UnanalysedPlay`,
   `UnanalysedCube`, `Dance`, `IllegalPlay`) take no comment — the iterator
   never emits them, and the corpus is no guide either way (590 files, one
@@ -874,8 +876,38 @@ upstream — see Pitfalls.
 
 Internal class tracking match and game state during iteration. Exposes
 match-length / score / cube state, plus `NeedsFor(activePlayer)`,
-`PlayerName(activePlayer)`, and the `XgidCrawfordJacobyField` wire-format
-helper consumed by `XgidEncoder`.
+`PlayerName(activePlayer)`, `CommentAt(commentIndex)` (see "Comment text"),
+and the `XgidCrawfordJacobyField` wire-format helper consumed by
+`XgidEncoder`.
+
+### Comment text
+
+XG stores a decision's comment as an **RTF document**, and this library is
+the one member that knows that: it stamps `DescriptiveData.Comment` with
+the text a reader would see, never the document. BgQuiz shows the comment
+verbatim and must never inspect its format (SPEC-quiz-view.md §4, the
+2026-09-15 amendment), which is why the whole RTF source reached the screen
+before this existed (halheinrich/backgammon#233).
+
+The conversion happens in **one place**: `MatchContext.CommentAt`, which
+both `DescriptiveData.Comment` stamp sites in `XgDecisionIterator` (the play
+and the cube) already go through. `RtfPlainText` owns the conversion itself
+— a pure string-to-string mapping with no dependency on the walk — and
+**its XML doc is the one statement of the contract**, not restated here.
+The shape of it: a comment that does not open with `{\rtf` is plain text and
+passes through byte for byte; otherwise textless destinations (the font
+table, `\*` groups) contribute nothing, `\par` and `\line` give a CRLF —
+the same break form `CommentParser` restores for a plain comment — `\tab` a
+tab, every other control word nothing, `\'hh` decodes in the document's ANSI
+code page (Latin-1 plus a Windows-1252 table for `0x80`–`0x9F`, the stated
+limit), `\uN` emits its code unit and skips its fallback, trailing breaks and
+whitespace are trimmed while interior ones are kept, and malformed RTF
+degrades to the text extracted so far rather than throwing.
+
+The comment **table** is untouched by all of this: `XgFile.Comments`,
+`CommentParser`, `CommentWriter` and the `.xgp` slice export all still copy
+XG's bytes verbatim, so a round trip reproduces them. Only the stamp path
+converts.
 
 ### BackgammonConstants
 

@@ -1,4 +1,4 @@
-﻿using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
 
@@ -137,15 +137,30 @@ internal sealed class MatchContext
         activePlayer >= 0 ? _player1 : _player2;
 
     /// <summary>
-    /// Resolves a record's <c>CommentIndex</c> against the file's comment table.
-    /// XG's "no comment" sentinel is <c>-1</c> (the same convention the match
-    /// header's comment indices use); that, and any out-of-range index, map to
+    /// Resolves a record's <c>CommentIndex</c> against the file's comment table
+    /// and returns the decision's comment <b>as plain text</b>. XG's "no
+    /// comment" sentinel is <c>-1</c> (the same convention the match header's
+    /// comment indices use); that, and any out-of-range index, map to
     /// <see cref="string.Empty"/> rather than indexing the table — so a missing
     /// comment never aliases <c>Comments[0]</c>.
     /// </summary>
+    /// <remarks>
+    /// XG stores its comments as RTF documents, and the stamp path is where
+    /// that stops being the consumer's problem: this is the one conversion
+    /// site in the library (halheinrich/backgammon#233). It is here rather
+    /// than at the two <c>DescriptiveData.Comment</c> stamps in
+    /// <see cref="XgDecisionIterator"/> because those are two sites and this
+    /// is one, and because every caller of this method is such a stamp — the
+    /// resolution and the rendering answer the same question, "what note does
+    /// this decision carry?". The conversion itself belongs to
+    /// <see cref="RtfPlainText"/>, whose doc is the one statement of the
+    /// contract. The comment <i>table</i> is untouched: <c>XgFile.Comments</c>,
+    /// the reader, the writer and the <c>.xgp</c> slice export all still carry
+    /// XG's bytes verbatim, so a round trip reproduces them.
+    /// </remarks>
     public string CommentAt(int commentIndex) =>
         commentIndex >= 0 && commentIndex < _comments.Count
-            ? _comments[commentIndex]
+            ? RtfPlainText.Extract(_comments[commentIndex])
             : string.Empty;
 
     /// <summary>
