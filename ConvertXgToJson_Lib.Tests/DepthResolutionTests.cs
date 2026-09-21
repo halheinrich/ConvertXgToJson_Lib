@@ -245,21 +245,21 @@ public class DepthResolutionTests
     /// suite composes its expectation through the owner. The division is the
     /// point — the rollout and book rows pin what
     /// <see cref="XgDecisionIterator.ResolveDepthInfo"/> feeds the grammar
-    /// (inner ply, moves-level token, trial count), this pins how the grammar
+    /// (inner-level token, trial count), this pins how the grammar
     /// writes it, so a grammar change edits the owner and this test alone.
     /// The two forms carry different separators — only the book form takes
     /// the underscore, the user's ruling of 2026-09-16
-    /// (halheinrich/backgammon#240) — so the rows below pin three spellings,
-    /// not one pattern applied three times. The book cases cover both token
-    /// kinds <c>BookInnerToken</c> yields: a ply digit and a Roller
-    /// abbreviation.
+    /// (halheinrich/backgammon#240) — so the rows below pin four spellings,
+    /// not one pattern applied four times. Each form covers both token kinds
+    /// <c>InnerLevelToken</c> yields: a ply digit and a Roller abbreviation.
     /// </summary>
     [Fact]
     public void DepthAbbreviationFormat_SpellsBothTrialBearingForms()
     {
         using var scope = new AssertionScope();
 
-        DepthAbbreviationFormat.Rollout(innerPly: 3, trials: 1296).Should().Be("3p1296");
+        DepthAbbreviationFormat.Rollout(levelToken: "3", trials: 1296).Should().Be("3p1296");
+        DepthAbbreviationFormat.Rollout(levelToken: "R", trials: 1296).Should().Be("Rp1296");
         DepthAbbreviationFormat.Book(levelToken: "4", trials: 12960).Should().Be("B4_12960");
         DepthAbbreviationFormat.Book(levelToken: "R", trials: 20736).Should().Be("BR_20736");
     }
@@ -269,29 +269,32 @@ public class DepthResolutionTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// With a valid rollout index and Level2 set, ResolveDepthInfo takes
-    /// the rollout branch: inner ply is Level2+1 (because the short
-    /// encoding shifts by 1 — Level2=2 → 3-ply), abbreviation is the
-    /// grammar's rollout form over that inner ply and the trial count
-    /// (composed through <see cref="DepthAbbreviationFormat.Rollout"/>; the
-    /// spelling itself is pinned once, in
+    /// With a valid rollout index, ResolveDepthInfo takes the rollout branch
+    /// and names the rollout by its inner evaluation level, decoded through
+    /// the same level table as an evaluation (a ply code stores ply − 1:
+    /// 2 → 3-ply). The label carries the inner level's label, the
+    /// abbreviation is the grammar's rollout form over the inner level's
+    /// token and the trial count (composed through
+    /// <see cref="DepthAbbreviationFormat.Rollout"/>; the spelling itself is
+    /// pinned once, in
     /// <see cref="DepthAbbreviationFormat_SpellsBothTrialBearingForms"/>),
-    /// rank is 100+innerPly, and the pair is
-    /// <see cref="AnalysisMode.Rollout"/> + Ply{innerPly}. evalLevel is
-    /// ignored in this branch.
+    /// the rank is 100 plus the inner level's evaluation rank, and the pair
+    /// is <see cref="AnalysisMode.Rollout"/> + the inner level's member.
+    /// Both phases carry the same level (a single-level rollout); the phase
+    /// precedence is pinned separately. evalLevel is ignored in this branch.
     /// </summary>
     [Theory]
-    [InlineData(2, 1296, "Rollout: 1296 trials. 3-ply", 3, 103, AnalysisLevel.Ply3)]
-    [InlineData(3,  648, "Rollout: 648 trials. 4-ply",  4, 104, AnalysisLevel.Ply4)]
-    [InlineData(0,  500, "Rollout: 500 trials. 1-ply",  1, 101, AnalysisLevel.Ply1)]
-    [InlineData(6,  100, "Rollout: 100 trials. 7-ply",  7, 107, AnalysisLevel.Ply7)]
-    public void ResolveDepthInfo_Rollout_Level2_PopulatesQuintuple(
-        int level2, int trials, string expectedLabel, int expectedInnerPly, int expectedRank,
+    [InlineData(2, 1296, "Rollout: 1296 trials. 3-ply", "3", 130, AnalysisLevel.Ply3)]
+    [InlineData(3,  648, "Rollout: 648 trials. 4-ply",  "4", 140, AnalysisLevel.Ply4)]
+    [InlineData(0,  500, "Rollout: 500 trials. 1-ply",  "1", 110, AnalysisLevel.Ply1)]
+    [InlineData(6,  100, "Rollout: 100 trials. 7-ply",  "7", 170, AnalysisLevel.Ply7)]
+    public void ResolveDepthInfo_Rollout_PlyInnerLevel_PopulatesQuintuple(
+        int innerLevel, int trials, string expectedLabel, string expectedToken, int expectedRank,
         AnalysisLevel expectedLevel)
     {
         var rollouts = new List<RolloutContext>
         {
-            new() { Level2 = level2, GamesRolled = trials },
+            new() { Level1 = innerLevel, Level2 = innerLevel, GamesRolled = trials },
         };
 
         // evalLevel here is 7777 (unknown non-rollout) to prove it's ignored.
@@ -301,85 +304,246 @@ public class DepthResolutionTests
             rollouts: rollouts);
 
         label.Should().Be(expectedLabel);
-        abbrev.Should().Be(DepthAbbreviationFormat.Rollout(expectedInnerPly, trials));
+        abbrev.Should().Be(DepthAbbreviationFormat.Rollout(expectedToken, trials));
         rank.Should().Be(expectedRank);
         mode.Should().Be(AnalysisMode.Rollout);
         level.Should().Be(expectedLevel);
     }
 
     /// <summary>
-    /// An inner ply outside 1–7 degrades the level to
-    /// <see cref="AnalysisLevel.Unknown"/> — the taxonomy's documented
-    /// "level not recorded" stamp — rather than producing an out-of-taxonomy
-    /// value. Defensive: a rolled-out candidate always carries an in-range
-    /// inner ply in practice. Rank and abbreviation still reflect the raw
-    /// inner ply (rank 108, the rollout form over inner ply 8); the mode stays
-    /// <see cref="AnalysisMode.Rollout"/> — only the level degrades.
+    /// A rollout whose inner level is an XG Roller family code (1000 / 1001 /
+    /// 1002) is named as that Roller level in every form: the Roller token
+    /// ("R" / "R+" / "R++"), never the number that ply arithmetic over the
+    /// code produced (it read <c>1001p1296</c>, halheinrich/backgammon#251);
+    /// the Roller member, not <see cref="AnalysisLevel.Unknown"/>; and a rank
+    /// that rides the interleaved grid (135 / 145 / 175), not 1101.
     /// </summary>
-    [Fact]
-    public void ResolveDepthInfo_Rollout_InnerPlyOutOfRange_DegradesLevelToUnknown()
+    [Theory]
+    [InlineData(1000, "Rollout: 1296 trials. XG Roller",   "R",   135, AnalysisLevel.XgRoller)]
+    [InlineData(1001, "Rollout: 1296 trials. XG Roller+",  "R+",  145, AnalysisLevel.XgRollerPlus)]
+    [InlineData(1002, "Rollout: 1296 trials. XG Roller++", "R++", 175, AnalysisLevel.XgRollerPlusPlus)]
+    public void ResolveDepthInfo_Rollout_RollerInnerLevel_NamedAsRollerNeverANumber(
+        int rollerCode, string expectedLabel, string expectedToken, int expectedRank,
+        AnalysisLevel expectedLevel)
     {
-        // Level2 = 7 → innerPly = 8, past the Ply7 ceiling.
         var rollouts = new List<RolloutContext>
         {
-            new() { Level2 = 7, GamesRolled = 200 },
+            new() { Level1 = rollerCode, Level2 = rollerCode, GamesRolled = 1296 },
         };
 
-        var (_, abbrev, rank, mode, level) = XgDecisionIterator.ResolveDepthInfo(
+        var (label, abbrev, rank, mode, level) = XgDecisionIterator.ResolveDepthInfo(
             evalLevel: 0,
             rolloutIndex: 0,
             rollouts: rollouts);
 
-        abbrev.Should().Be(DepthAbbreviationFormat.Rollout(8, 200));
-        rank.Should().Be(108);
+        label.Should().Be(expectedLabel);
+        abbrev.Should().Be(DepthAbbreviationFormat.Rollout(expectedToken, 1296));
+        rank.Should().Be(expectedRank);
         mode.Should().Be(AnalysisMode.Rollout);
-        level.Should().Be(AnalysisLevel.Unknown,
-            "innerPly 8 is outside the Ply1–7 range and degrades to Unknown");
+        level.Should().Be(expectedLevel);
     }
 
     /// <summary>
-    /// ResolveDepthInfo prefers Level2, then Level1, then LevelTrunc
-    /// when computing the inner ply level. This test pins the fallback
-    /// order so a refactor of the selection logic can't silently change
-    /// which field wins — asserting on both the rank and the pair.
+    /// The user's shape (halheinrich/backgammon#251): XG's "First 2 moves:
+    /// 4-ply … Remaining moves: XG Roller" — first phase 4-ply (code 3),
+    /// second phase XG Roller (code 1000). The first phase names the rollout,
+    /// the user's ruling: it is a 4-ply rollout in label, abbreviation, rank,
+    /// mode and level.
     /// </summary>
     [Fact]
-    public void ResolveDepthInfo_Rollout_LevelFallback_PrefersLevel2ThenLevel1ThenTrunc()
+    public void ResolveDepthInfo_Rollout_FourPlyThenRoller_ClassifiedAsFourPly()
     {
-        // Level2 dominates.
+        var rollouts = new List<RolloutContext>
+        {
+            new() { Level1 = 3, Level2 = 1000, GamesRolled = 1296 },
+        };
+
+        var (label, abbrev, rank, mode, level) = XgDecisionIterator.ResolveDepthInfo(
+            evalLevel: 100,
+            rolloutIndex: 0,
+            rollouts: rollouts);
+
+        using var scope = new AssertionScope();
+        label.Should().Be("Rollout: 1296 trials. 4-ply");
+        abbrev.Should().Be(DepthAbbreviationFormat.Rollout("4", 1296));
+        rank.Should().Be(140);
+        mode.Should().Be(AnalysisMode.Rollout);
+        level.Should().Be(AnalysisLevel.Ply4);
+    }
+
+    /// <summary>
+    /// The mirror of the user's shape: first phase XG Roller, second phase
+    /// 4-ply. The first phase still names the rollout — an XG Roller rollout
+    /// in every form — so the precedence is by phase, not by whichever level
+    /// is deeper.
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_Rollout_RollerThenFourPly_ClassifiedAsRoller()
+    {
+        var rollouts = new List<RolloutContext>
+        {
+            new() { Level1 = 1000, Level2 = 3, GamesRolled = 1296 },
+        };
+
+        var (label, abbrev, rank, mode, level) = XgDecisionIterator.ResolveDepthInfo(
+            evalLevel: 100,
+            rolloutIndex: 0,
+            rollouts: rollouts);
+
+        using var scope = new AssertionScope();
+        label.Should().Be("Rollout: 1296 trials. XG Roller");
+        abbrev.Should().Be(DepthAbbreviationFormat.Rollout("R", 1296));
+        rank.Should().Be(135);
+        mode.Should().Be(AnalysisMode.Rollout);
+        level.Should().Be(AnalysisLevel.XgRoller);
+    }
+
+    /// <summary>
+    /// The two trial-bearing forms spell the same inner level with the same
+    /// token: a rollout whose first phase is level <c>code</c> and a book
+    /// entry whose moves level is <c>code</c> compose their abbreviations
+    /// over one token — one rule for naming an inner level, one owner
+    /// (<c>InnerLevelToken</c>). The forms may differ only in prefix and
+    /// separator, which <see cref="DepthAbbreviationFormat"/> owns.
+    /// </summary>
+    [Theory]
+    [InlineData(0,    "1")]
+    [InlineData(1,    "2")]
+    [InlineData(12,   "3")]
+    [InlineData(2,    "3")]
+    [InlineData(1000, "R")]
+    [InlineData(3,    "4")]
+    [InlineData(1001, "R+")]
+    [InlineData(6,    "7")]
+    [InlineData(1002, "R++")]
+    public void ResolveDepthInfo_RolloutAndBookForms_SpellTheSameInnerLevelWithTheSameToken(
+        int code, string expectedToken)
+    {
+        const int trials = 1296;
+        var rollouts = new List<RolloutContext>
+        {
+            new() { Level1 = code, Level2 = code, GamesRolled = trials },
+        };
+        var entry = new OpeningBookEntry { Level = 100, Trials = trials, RolloutMovesLevel = code };
+
+        var rollout = XgDecisionIterator.ResolveDepthInfo(
+            evalLevel: 100, rolloutIndex: 0, rollouts: rollouts);
+        var book = XgDecisionIterator.ResolveDepthInfo(
+            evalLevel: 998, rolloutIndex: -1, rollouts: NoRollouts, bookEntry: entry);
+
+        using var scope = new AssertionScope();
+        rollout.Abbreviation.Should().Be(DepthAbbreviationFormat.Rollout(expectedToken, trials));
+        book.Abbreviation.Should().Be(DepthAbbreviationFormat.Book(expectedToken, trials));
+        rollout.Level.Should().Be(book.Level, "both forms decode the inner level through one table");
+    }
+
+    /// <summary>
+    /// Rollout ranks ride the evaluation grid: a rollout whose inner level is
+    /// deeper in XG's ruled rigor order outranks one whose inner level is
+    /// shallower, interleave included (an XG Roller rollout sits between the
+    /// 3-ply and 4-ply rollouts), and the shallowest rollout still outranks
+    /// Book (99).
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_RolloutRank_FollowsRuledRigorOrderAboveBook()
+    {
+        static int RolloutRankOf(short code) => XgDecisionIterator.ResolveDepthInfo(
+            evalLevel: 100,
+            rolloutIndex: 0,
+            rollouts: [new() { Level1 = code, Level2 = code, GamesRolled = 100 }]).Rank;
+
+        for (int i = 1; i < RuledRigorOrder.Length; i++)
+        {
+            var lower = RuledRigorOrder[i - 1];
+            var higher = RuledRigorOrder[i];
+
+            RolloutRankOf(higher.Code).Should().BeGreaterThan(RolloutRankOf(lower.Code),
+                $"a {higher.Level} rollout outranks a {lower.Level} rollout");
+        }
+
+        RolloutRankOf(RuledRigorOrder[0].Code).Should().BeGreaterThan(RankOf(998),
+            "every rollout outranks a book hit");
+    }
+
+    /// <summary>
+    /// An unrecognised inner level code degrades exactly as it does anywhere
+    /// else in the level table — <see cref="AnalysisLevel.Unknown"/>, inner
+    /// rank 0 and the raw <c>level-{code}</c> spelling — rather than
+    /// producing an out-of-taxonomy value. Lifted into the rollout branch
+    /// that is rank 100, the rollout floor (the rank of a rollout sentinel
+    /// with no context), and the mode stays
+    /// <see cref="AnalysisMode.Rollout"/> — only the level degrades.
+    /// Defensive: a rolled-out candidate always carries a recognised inner
+    /// level in practice.
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_Rollout_UnrecognisedInnerLevel_DegradesLevelToUnknown()
+    {
+        // Code 7 is not in the level table (7-ply is code 6).
+        var rollouts = new List<RolloutContext>
+        {
+            new() { Level1 = 7, Level2 = 7, GamesRolled = 200 },
+        };
+
+        var (label, abbrev, rank, mode, level) = XgDecisionIterator.ResolveDepthInfo(
+            evalLevel: 0,
+            rolloutIndex: 0,
+            rollouts: rollouts);
+
+        label.Should().Be("Rollout: 200 trials. level-7");
+        abbrev.Should().Be(DepthAbbreviationFormat.Rollout("level-7", 200));
+        rank.Should().Be(100);
+        mode.Should().Be(AnalysisMode.Rollout);
+        level.Should().Be(AnalysisLevel.Unknown,
+            "code 7 is outside the level table and degrades to Unknown");
+    }
+
+    /// <summary>
+    /// ResolveDepthInfo prefers Level1 (the first leg phase), then Level2,
+    /// then LevelTrunc when choosing the rollout's inner level — the user's
+    /// ruling on halheinrich/backgammon#251. This test pins the fallback
+    /// order so a refactor of the selection logic can't silently change
+    /// which field wins; each step sets every lower-precedence field to a
+    /// different level, so the field that wins is the one the assertion
+    /// names — asserting on the rank and the pair.
+    /// </summary>
+    [Fact]
+    public void ResolveDepthInfo_Rollout_LevelFallback_PrefersLevel1ThenLevel2ThenTrunc()
+    {
+        // Level1 dominates.
         var r1 = new List<RolloutContext>
         {
-            new() { Level2 = 3, Level1 = 2, LevelTrunc = 1, GamesRolled = 100 },
+            new() { Level1 = 3, Level2 = 2, LevelTrunc = 1, GamesRolled = 100 },
         };
         var c1 = XgDecisionIterator.ResolveDepthInfo(0, 0, r1);
-        c1.Rank.Should().Be(104, "Level2=3 → innerPly=4 → rank 104");
+        c1.Rank.Should().Be(140, "Level1=3 → 4-ply (40) → rank 140");
         c1.Mode.Should().Be(AnalysisMode.Rollout);
         c1.Level.Should().Be(AnalysisLevel.Ply4);
 
-        // Level2 absent → Level1 wins.
+        // Level1 absent → Level2 wins.
         var r2 = new List<RolloutContext>
         {
-            new() { Level2 = 0, Level1 = 2, LevelTrunc = 1, GamesRolled = 100 },
+            new() { Level1 = 0, Level2 = 2, LevelTrunc = 1, GamesRolled = 100 },
         };
         var c2 = XgDecisionIterator.ResolveDepthInfo(0, 0, r2);
-        c2.Rank.Should().Be(103, "Level1=2 → innerPly=3 → rank 103");
+        c2.Rank.Should().Be(130, "Level2=2 → 3-ply (30) → rank 130");
         c2.Mode.Should().Be(AnalysisMode.Rollout);
         c2.Level.Should().Be(AnalysisLevel.Ply3);
 
         // Both absent → LevelTrunc wins.
         var r3 = new List<RolloutContext>
         {
-            new() { Level2 = 0, Level1 = 0, LevelTrunc = 1, GamesRolled = 100 },
+            new() { Level1 = 0, Level2 = 0, LevelTrunc = 1, GamesRolled = 100 },
         };
         var c3 = XgDecisionIterator.ResolveDepthInfo(0, 0, r3);
-        c3.Rank.Should().Be(102, "LevelTrunc=1 → innerPly=2 → rank 102");
+        c3.Rank.Should().Be(120, "LevelTrunc=1 → 2-ply (20) → rank 120");
         c3.Mode.Should().Be(AnalysisMode.Rollout);
         c3.Level.Should().Be(AnalysisLevel.Ply2);
     }
 
     /// <summary>
     /// Two candidates pointing into the same rollouts list each resolve
-    /// independently to their own rollout's inner ply / trial count.
+    /// independently to their own rollout's inner level / trial count.
     /// Pins the per-candidate scalar contract — a regression to "first
     /// valid hit wins across all candidates" would surface here.
     /// </summary>
@@ -388,18 +552,18 @@ public class DepthResolutionTests
     {
         var rollouts = new List<RolloutContext>
         {
-            new() { Level2 = 2, GamesRolled = 1296 }, // idx 0
-            new() { Level2 = 3, GamesRolled = 5000 }, // idx 1
+            new() { Level1 = 2, GamesRolled = 1296 }, // idx 0
+            new() { Level1 = 3, GamesRolled = 5000 }, // idx 1
         };
 
         var c0 = XgDecisionIterator.ResolveDepthInfo(0, 0, rollouts);
-        c0.Abbreviation.Should().Be(DepthAbbreviationFormat.Rollout(3, 1296));
-        c0.Rank.Should().Be(103);
+        c0.Abbreviation.Should().Be(DepthAbbreviationFormat.Rollout("3", 1296));
+        c0.Rank.Should().Be(130);
         c0.Level.Should().Be(AnalysisLevel.Ply3);
 
         var c1 = XgDecisionIterator.ResolveDepthInfo(0, 1, rollouts);
-        c1.Abbreviation.Should().Be(DepthAbbreviationFormat.Rollout(4, 5000));
-        c1.Rank.Should().Be(104);
+        c1.Abbreviation.Should().Be(DepthAbbreviationFormat.Rollout("4", 5000));
+        c1.Rank.Should().Be(140);
         c1.Level.Should().Be(AnalysisLevel.Ply4);
     }
 
@@ -489,7 +653,7 @@ public class DepthResolutionTests
     {
         var rollouts = new List<RolloutContext>
         {
-            new() { Level2 = 2, GamesRolled = 1296 },
+            new() { Level1 = 2, GamesRolled = 1296 },
         };
         var entry = new OpeningBookEntry { Level = 100, Trials = 12960, RolloutMovesLevel = 3 };
 
@@ -500,7 +664,7 @@ public class DepthResolutionTests
             bookEntry: entry);
 
         label.Should().Be("Rollout: 1296 trials. 3-ply");
-        rank.Should().Be(103);
+        rank.Should().Be(130);
         mode.Should().Be(AnalysisMode.Rollout);
     }
 

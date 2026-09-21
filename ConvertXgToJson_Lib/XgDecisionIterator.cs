@@ -1048,22 +1048,28 @@ public static class XgDecisionIterator
     ///
     /// <para>
     /// Rollout branch: when <paramref name="rolloutIndex"/> is a valid
-    /// index into <paramref name="rollouts"/>, the rollout's inner ply
-    /// level (<c>Level2</c>, falling back to <c>Level1</c>, then
-    /// <c>LevelTrunc</c>) combines with <c>GamesRolled</c> to produce:
-    /// <c>Label = "Rollout: {trials} trials. {inner ply label}"</c>, an
-    /// <c>Abbreviation</c> in the grammar's rollout form over the inner ply
-    /// and the trial count (<see cref="DepthAbbreviationFormat.Rollout"/> —
-    /// the grammar's one spelling), <c>Rank = 100 + innerPly</c>. The
-    /// ply-label switch encodes ply as <c>short - 1</c>, so <c>Level*</c>
-    /// value 2 is a 3-ply rollout.
-    /// The pair is <see cref="AnalysisMode.Rollout"/> plus the inner ply as
-    /// its <see cref="AnalysisLevel"/>: <c>innerPly</c> 1–7 maps to
-    /// <see cref="AnalysisLevel.Ply1"/>–<see cref="AnalysisLevel.Ply7"/>;
-    /// an <c>innerPly</c> outside that range degrades the level to
-    /// <see cref="AnalysisLevel.Unknown"/> while rank / abbreviation still
-    /// reflect the raw value (defensive — a rolled-out candidate always
-    /// carries an in-range inner ply in practice).
+    /// index into <paramref name="rollouts"/>, the rollout is named by its
+    /// inner evaluation level — the first leg phase (<c>Level1</c>), falling
+    /// back to the second (<c>Level2</c>), then <c>LevelTrunc</c>. First phase
+    /// first: it is what the user set as the rollout's strength, and a later,
+    /// cheaper phase is an economy, not the rollout's name — XG's "First 2
+    /// moves: 4-ply … Remaining moves: XG Roller" is a 4-ply rollout (the
+    /// user's ruling on halheinrich/backgammon#251). The inner level is
+    /// decoded once, through <see cref="LevelInfo"/> — the PLAYERLEVEL code
+    /// space, where <c>Level*</c> value 2 is 3-ply and 1000–1002 the XG
+    /// Roller family — and every output derives from that one projection,
+    /// combined with <c>GamesRolled</c>:
+    /// <c>Label = "Rollout: {trials} trials. {inner label}"</c>, an
+    /// <c>Abbreviation</c> in the grammar's rollout form over the inner
+    /// level's token (<see cref="InnerLevelToken"/>, shared with the book
+    /// branch) and the trial count (<see cref="DepthAbbreviationFormat.Rollout"/>
+    /// — the grammar's one spelling), <c>Rank = 100 + inner rank</c>, and the
+    /// pair <see cref="AnalysisMode.Rollout"/> plus the inner level's
+    /// <see cref="AnalysisLevel"/>. An unrecognised inner code degrades as it
+    /// does anywhere — <see cref="AnalysisLevel.Unknown"/>, inner rank 0 (so
+    /// the rollout floor, 100), and its raw <c>level-{code}</c> spelling in
+    /// label and abbreviation (defensive — a rolled-out candidate always
+    /// carries a recognised inner level in practice).
     /// </para>
     ///
     /// <para>
@@ -1074,9 +1080,9 @@ public static class XgDecisionIterator
     /// stored rollout parameters enrich the projection:
     /// <c>Label = "Book V2: {trials} trials. {moves-level label}"</c> and an
     /// <c>Abbreviation</c> in the grammar's book form over the moves-level
-    /// token (<see cref="BookInnerToken"/>) and the trial count
-    /// (<see cref="DepthAbbreviationFormat.Book"/>), following the rollout
-    /// sibling forms above. The pair is
+    /// token (<see cref="InnerLevelToken"/>, the rollout branch's token
+    /// owner) and the trial count (<see cref="DepthAbbreviationFormat.Book"/>),
+    /// following the rollout sibling forms above. The pair is
     /// <see cref="AnalysisMode.BookRollout"/> plus the entry's
     /// <c>RolloutMovesLevel</c> mapped through <see cref="LevelInfo"/> —
     /// the moves level, because only checker-play candidates are enriched
@@ -1100,11 +1106,14 @@ public static class XgDecisionIterator
     /// XG Roller 35, 4-ply 40, XG Roller+ 45, 5-ply 50, 6-ply 60, 7-ply 70,
     /// XG Roller++ 75 — then Book V1/V2 → 99 (rollout-derived opening book:
     /// above every evaluation, below the explicit-rollout floor (100)), and
-    /// any unrecognised level → 0. The edge case is a "Rollout"
-    /// sentinel (<c>short 100</c>) without a matching rollout context, which
-    /// ranks 100 as <see cref="AnalysisMode.Rollout"/> +
-    /// <see cref="AnalysisLevel.Unknown"/> — the same degradation as a
-    /// no-inner-ply rollout (e.g. truncated at level 0).
+    /// any unrecognised level → 0. An explicit rollout (the rollout branch
+    /// above) ranks 100 plus its inner level's rank on this same grid — a
+    /// 3-ply rollout 130, an XG Roller rollout 135, a 4-ply rollout 140 — so
+    /// rollouts order among themselves by the interleaved grid and every one
+    /// outranks Book. The edge case is a "Rollout" sentinel (<c>short 100</c>)
+    /// without a matching rollout context, which ranks 100 as
+    /// <see cref="AnalysisMode.Rollout"/> + <see cref="AnalysisLevel.Unknown"/>
+    /// — the same degradation as a rollout whose inner level is unrecognised.
     /// </para>
     ///
     /// <para>
@@ -1126,21 +1135,20 @@ public static class XgDecisionIterator
         if (rolloutIndex >= 0 && rolloutIndex < rollouts.Count)
         {
             var ctx = rollouts[rolloutIndex];
-            int plyLevel = ctx.Level2 > 0 ? ctx.Level2
-                         : ctx.Level1 > 0 ? ctx.Level1
-                         : ctx.LevelTrunc;
-            int innerPly = plyLevel + 1;
-            string label = $"Rollout: {ctx.GamesRolled} trials. {LevelInfo((short)plyLevel).Label}";
-            string abbrev = DepthAbbreviationFormat.Rollout(innerPly, ctx.GamesRolled);
-            int rank = 100 + innerPly;
-            return (label, abbrev, rank, AnalysisMode.Rollout, LevelForInnerPly(innerPly));
+            int innerLevel = ctx.Level1 > 0 ? ctx.Level1
+                           : ctx.Level2 > 0 ? ctx.Level2
+                           : ctx.LevelTrunc;
+            var inner = LevelInfo((short)innerLevel);
+            string label = $"Rollout: {ctx.GamesRolled} trials. {inner.Label}";
+            string abbrev = DepthAbbreviationFormat.Rollout(InnerLevelToken(inner), ctx.GamesRolled);
+            return (label, abbrev, 100 + inner.Rank, AnalysisMode.Rollout, inner.Level);
         }
 
         if (bookEntry is { IsRollout: true })
         {
             var inner = LevelInfo((short)bookEntry.RolloutMovesLevel);
             string label = $"Book V2: {bookEntry.Trials} trials. {inner.Label}";
-            string abbrev = DepthAbbreviationFormat.Book(BookInnerToken(inner), bookEntry.Trials);
+            string abbrev = DepthAbbreviationFormat.Book(InnerLevelToken(inner), bookEntry.Trials);
             return (label, abbrev, LevelInfo(evalLevel).Rank, AnalysisMode.BookRollout, inner.Level);
         }
 
@@ -1148,43 +1156,19 @@ public static class XgDecisionIterator
     }
 
     /// <summary>
-    /// Maps a rollout's inner evaluation ply to the <see cref="AnalysisLevel"/>
-    /// member stamped alongside <see cref="AnalysisMode.Rollout"/>. Inner ply
-    /// 1–7 stamp the matching
-    /// <see cref="AnalysisLevel.Ply1"/>–<see cref="AnalysisLevel.Ply7"/>;
-    /// anything outside that range degrades to
-    /// <see cref="AnalysisLevel.Unknown"/> ("level not recorded" — the
-    /// taxonomy's documented graceful-degradation stamp). The switch is
-    /// explicit because no arithmetic offset can express the mapping: the
-    /// ply members are not contiguous in <see cref="AnalysisLevel"/> —
-    /// <see cref="AnalysisLevel.Ply3Red"/> and the XG Roller family
-    /// interleave among them — so <c>Ply1 + (innerPly - 1)</c> would land on
-    /// the wrong member from inner ply 3 upward. A rollout's inner evaluation
-    /// is always a full N-ply search, never the reduced-variance
-    /// <see cref="AnalysisLevel.Ply3Red"/>.
-    /// </summary>
-    private static AnalysisLevel LevelForInnerPly(int innerPly) => innerPly switch
-    {
-        1 => AnalysisLevel.Ply1,
-        2 => AnalysisLevel.Ply2,
-        3 => AnalysisLevel.Ply3,
-        4 => AnalysisLevel.Ply4,
-        5 => AnalysisLevel.Ply5,
-        6 => AnalysisLevel.Ply6,
-        7 => AnalysisLevel.Ply7,
-        _ => AnalysisLevel.Unknown,
-    };
-
-    /// <summary>
-    /// Compact moves-level token for the enriched book abbreviation — the
-    /// token slot of <see cref="DepthAbbreviationFormat.Book"/>, parallel to
-    /// the inner-ply digit its rollout sibling
-    /// <see cref="DepthAbbreviationFormat.Rollout"/> writes. This method owns
-    /// what the token is; the format owns how it is written. A ply level
-    /// contributes its ply number (token "4" for a 4-ply-moves entry), any
-    /// other level its <see cref="LevelInfo"/> abbreviation — unreachable for
-    /// moves levels in the shipped database (all ply codes) but the book
-    /// format allows Roller codes, and the cube level demonstrably uses them.
+    /// Compact inner-level token for both trial-bearing abbreviations — the
+    /// token slot of <see cref="DepthAbbreviationFormat.Rollout"/> (the
+    /// rollout's inner evaluation level) and of
+    /// <see cref="DepthAbbreviationFormat.Book"/> (the book entry's moves
+    /// level). One rule names an inner level in an abbreviation, so it has
+    /// one owner: the two forms differ only in prefix and separator, never in
+    /// how the level is spelt. This method owns what the token is; the format
+    /// owns how it is written. A ply level contributes its ply number (token
+    /// "4" for a 4-ply level), any other level its <see cref="LevelInfo"/>
+    /// abbreviation — "R" / "R+" / "R++" for the XG Roller family, which a
+    /// rollout's phase can be set to (halheinrich/backgammon#251) and the book
+    /// format allows (unreachable for moves levels in the shipped database,
+    /// all ply codes, but the cube level demonstrably uses them).
     ///
     /// <para>
     /// The ply number comes from the <see cref="AnalysisLevel"/> member, not
@@ -1198,12 +1182,12 @@ public static class XgDecisionIterator
     /// <see cref="AnalysisLevel.Ply3Red"/> contributes "3", the same token as
     /// a full <see cref="AnalysisLevel.Ply3"/>: it is a 3-ply search, and the
     /// abbreviation is the deliberately lossy form. The Red distinction
-    /// survives in the enriched <c>Label</c> ("Book V2: 648 trials.
-    /// 3-ply Red"), exactly as the Book V1/V2 distinction survives there
-    /// while both abbreviate to "Book".
+    /// survives in the <c>Label</c> ("Book V2: 648 trials. 3-ply Red"),
+    /// exactly as the Book V1/V2 distinction survives there while both
+    /// abbreviate to "Book".
     /// </para>
     /// </summary>
-    private static string BookInnerToken(
+    private static string InnerLevelToken(
         (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) inner) =>
         inner.Level switch
         {
@@ -1554,7 +1538,7 @@ public static class XgDecisionIterator
     /// <para>
     /// Above the evaluations: Book V1/V2 rank 99 — XG's opening book is
     /// rollout-derived, so it sits above every evaluation (XG Roller++, 75)
-    /// yet below the explicit-rollout floor (100 + inner-ply, see
+    /// yet below the explicit-rollout floor (100 + the inner level's rank, see
     /// <see cref="ResolveDepthInfo"/>): a cached rollout whose parameters the
     /// file no longer records ranks under a rollout the file actually
     /// carries. Any unrecognised level ranks 0 — the floor, below everything
@@ -1587,7 +1571,7 @@ public static class XgDecisionIterator
     /// the file does not record one (both book codes here — enrichment in
     /// <see cref="ResolveDepthInfo"/> supplies the level when a book database
     /// is available; and the no-context rollout sentinel, whose known inner
-    /// plies are stamped in <see cref="ResolveDepthInfo"/>'s rollout branch).
+    /// levels are stamped in <see cref="ResolveDepthInfo"/>'s rollout branch).
     /// XG level 12 ("3-ply Red") levels as its own
     /// <see cref="AnalysisLevel.Ply3Red"/>: XG's menu ranks its
     /// reduced-variance 3-ply search <i>below</i> a full 3-ply, so it is a

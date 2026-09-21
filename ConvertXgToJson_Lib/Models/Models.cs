@@ -817,7 +817,7 @@ internal sealed class MatchFooterRecord : SaveRecord
 /// accumulated results of one rollout leg, referenced by index from
 /// <see cref="CubeRecord.RolloutIndex"/> / <see cref="MoveRecord.RolloutIndices"/>.
 /// Carried byte-faithfully for round-trip; the producer consumes only the
-/// depth-label inputs (<see cref="Level2"/>, <see cref="Level1"/>,
+/// depth-label inputs (<see cref="Level1"/>, <see cref="Level2"/>,
 /// <see cref="LevelTrunc"/>, <see cref="GamesRolled"/>). The 37-slot
 /// accumulator arrays are XG-internal (per first-roll bucketing) and are
 /// not interpreted by this library.
@@ -837,15 +837,18 @@ internal sealed class RolloutContext
     /// <summary>Input: maximum games to roll.</summary>
     public int    MaxRolls            { get; init; }
     /// <summary>
-    /// Input: checker-play analysis level of the first leg phase. Fallback
-    /// source (after <see cref="Level2"/>) of the rollout's "inner ply"
-    /// depth label.
+    /// Input: checker-play analysis level of the first leg phase. Primary
+    /// source of the rollout's inner-level depth label — the first phase is
+    /// the strength the user set, so it names the rollout
+    /// (halheinrich/backgammon#251). A PLAYERLEVEL code: a ply level is
+    /// stored as ply − 1 (raw 2 labels a 3-ply rollout), 1000–1002 are the
+    /// XG Roller family.
     /// </summary>
     public int    Level1              { get; init; }
     /// <summary>
-    /// Input: checker-play analysis level of the second leg phase. Primary
-    /// source of the rollout's "inner ply" depth label (the stored value is
-    /// ply − 1: raw 2 labels a 3-ply rollout).
+    /// Input: checker-play analysis level of the second leg phase. Fallback
+    /// source (after <see cref="Level1"/>) of the rollout's inner-level depth
+    /// label.
     /// </summary>
     public int    Level2              { get; init; }
     /// <summary>Input: analysis level after the cut point, as stored by XG.</summary>
@@ -926,7 +929,7 @@ internal sealed class RolloutContext
     public float    Duration          { get; init; }
 
     /// <summary>Input: analysis level at the truncation point; last fallback
-    /// source of the rollout's "inner ply" depth label.</summary>
+    /// source of the rollout's inner-level depth label.</summary>
     public int      LevelTrunc        { get; init; }
     /// <summary>Output: games rolled on the double branch.</summary>
     public int      GamesRolledDouble { get; init; }

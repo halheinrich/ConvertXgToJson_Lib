@@ -540,15 +540,27 @@ pins the whole sequence, and its sibling pins that every ranked
 there rather than slipping in unranked. The mode distinguishes a book hit
 from an unrecognised level where rank 0 could not — that separation is
 deliberate. The rollout
-branch (valid `rolloutIndex`) computes `innerPly = plyLevel + 1` and stamps
-`Rollout` + `Ply1`–`Ply7` (rank 100 + innerPly); an inner ply outside 1–7
-degrades the *level* to `Unknown` while rank/abbreviation still reflect
-the raw value (defensive — real rollouts always carry an in-range inner
-ply). Trial count lives only in `Label`/`Abbreviation`, never the pair —
+branch (valid `rolloutIndex`) names the rollout by its inner evaluation
+level — the **first** leg phase (`Level1`), falling back to `Level2`, then
+`LevelTrunc`. The user's ruling on halheinrich/backgammon#251: the first
+phase is the strength the user set, a later cheaper phase is an economy,
+so XG's "First 2 moves: 4-ply … Remaining moves: XG Roller" is a 4-ply
+rollout (it once read `1001p1296` — the second phase, spelt by ply
+arithmetic over a Roller code). The inner level is decoded once through
+`LevelInfo`, and label, abbreviation token, rank and level all come from
+that one projection: `Rollout` + the inner level's `AnalysisLevel` (a ply
+member or a Roller member), rank **100 + the inner level's rank** on the
+same interleaved grid (3-ply rollout 130, XG Roller rollout 135, 4-ply
+140 …, every rollout above Book's 99). An unrecognised inner code degrades
+as it does anywhere — level `Unknown`, rank 100, its raw `level-{code}`
+spelling (defensive — real rollouts always carry a recognised inner
+level). Trial count lives only in `Label`/`Abbreviation`, never the pair —
 it is not a taxonomy axis. The two trial-bearing abbreviations — this
 rollout form and the book form below — share one owner,
 `DepthAbbreviationFormat`, and a shape (level token, separator, trial
-count), but **not a separator**: the rollout form joins with `p`
+count) whose token comes from one owner, `InnerLevelToken` (the ply digit,
+or the Roller abbreviation for a Roller-family level — `Rp1296`, never a
+number), but **not a separator**: the rollout form joins with `p`
 (`3p1296`), the book form with `_` behind its `B` prefix (`B4_12960`).
 They differ by the user's ruling of 2026-09-16 on the scope of
 halheinrich/backgammon#232 (halheinrich/backgammon#240) — the underscore
@@ -566,8 +578,9 @@ The book branch (see "Book enrichment" below) fires when the caller
 resolved a V2-book-stamped candidate to a *rollout* entry: label
 `"Book V2: {trials} trials. {moves-level label}"`, abbreviation in the
 book form of the depth-abbreviation grammar over the moves-level token and
-the trial count (the token, from `BookInnerToken`, is the ply digit, or the
-Roller abbreviation for a Roller-family level), pair
+the trial count (the token, from `InnerLevelToken` — the rollout form's
+token owner too — is the ply digit, or the Roller abbreviation for a
+Roller-family level), pair
 `BookRollout` + the entry's `RolloutMovesLevel` mapped through the same
 `LevelInfo` switch (the book's stored levels use the same PLAYERLEVEL code
 space — one decoding site). **Rank stays 99 under enrichment, ruled
