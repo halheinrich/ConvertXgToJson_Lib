@@ -541,12 +541,18 @@ there rather than slipping in unranked. The mode distinguishes a book hit
 from an unrecognised level where rank 0 could not — that separation is
 deliberate. The rollout
 branch (valid `rolloutIndex`) names the rollout by its inner evaluation
-level — the **first** leg phase (`Level1`), falling back to `Level2`, then
-`LevelTrunc`. The user's ruling on halheinrich/backgammon#251: the first
-phase is the strength the user set, a later cheaper phase is an economy,
-so XG's "First 2 moves: 4-ply … Remaining moves: XG Roller" is a 4-ply
-rollout (it once read `1001p1296` — the second phase, spelt by ply
-arithmetic over a Roller code). The inner level is decoded once through
+level — the **first** leg phase's (`Level1`) when a first phase exists,
+otherwise the second phase's (`Level2`), which then plays throughout. The
+user's ruling on halheinrich/backgammon#251: the first phase is the
+strength the user set, a later cheaper phase is an economy, so XG's
+"First 2 moves: 4-ply … Remaining moves: XG Roller" is a 4-ply rollout (it
+once read `1001p1296` — the second phase, spelt by ply arithmetic over a
+Roller code). Whether a first phase exists is `LevelCut > 0`: `LevelCut`
+is the number of moves the first phase covers — measured, that rollout
+stores 2, and the eleven fixture rollouts storing `Level1 = 0` beside a
+3-ply `Level2` store 0 and are 3-ply rollouts. No branch tests a *level*
+for `> 0` — level 0 is 1-ply, not "unset" — and `LevelTrunc` (truncation,
+not a phase) is not a depth input. The inner level is decoded once through
 `LevelInfo`, and label, abbreviation token, rank and level all come from
 that one projection: `Rollout` + the inner level's `AnalysisLevel` (a ply
 member or a Roller member), rank **100 + the inner level's rank** on the

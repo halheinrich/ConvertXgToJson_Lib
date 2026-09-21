@@ -817,8 +817,8 @@ internal sealed class MatchFooterRecord : SaveRecord
 /// accumulated results of one rollout leg, referenced by index from
 /// <see cref="CubeRecord.RolloutIndex"/> / <see cref="MoveRecord.RolloutIndices"/>.
 /// Carried byte-faithfully for round-trip; the producer consumes only the
-/// depth-label inputs (<see cref="Level1"/>, <see cref="Level2"/>,
-/// <see cref="LevelTrunc"/>, <see cref="GamesRolled"/>). The 37-slot
+/// depth-label inputs (<see cref="LevelCut"/>, <see cref="Level1"/>,
+/// <see cref="Level2"/>, <see cref="GamesRolled"/>). The 37-slot
 /// accumulator arrays are XG-internal (per first-roll bucketing) and are
 /// not interpreted by this library.
 /// </summary>
@@ -837,21 +837,35 @@ internal sealed class RolloutContext
     /// <summary>Input: maximum games to roll.</summary>
     public int    MaxRolls            { get; init; }
     /// <summary>
-    /// Input: checker-play analysis level of the first leg phase. Primary
-    /// source of the rollout's inner-level depth label — the first phase is
-    /// the strength the user set, so it names the rollout
-    /// (halheinrich/backgammon#251). A PLAYERLEVEL code: a ply level is
-    /// stored as ply − 1 (raw 2 labels a 3-ply rollout), 1000–1002 are the
-    /// XG Roller family.
+    /// Input: checker-play analysis level of the first leg phase, which
+    /// covers the rollout's first <see cref="LevelCut"/> moves. Names the
+    /// rollout's inner-level depth label when that phase exists
+    /// (<see cref="LevelCut"/> above 0) — the first phase is the strength
+    /// the user set (halheinrich/backgammon#251). Meaningless when
+    /// <see cref="LevelCut"/> is 0: XG keeps the setting (commonly equal to
+    /// <see cref="Level2"/>, sometimes 0) but plays no move at it. A
+    /// PLAYERLEVEL code: a ply level is stored as ply − 1 (raw 2 labels a
+    /// 3-ply rollout; raw 0 is 1-ply, not "unset"), 1000–1002 are the XG
+    /// Roller family.
     /// </summary>
     public int    Level1              { get; init; }
     /// <summary>
-    /// Input: checker-play analysis level of the second leg phase. Fallback
-    /// source (after <see cref="Level1"/>) of the rollout's inner-level depth
-    /// label.
+    /// Input: checker-play analysis level of the second leg phase — the
+    /// moves after the first <see cref="LevelCut"/>, or the whole rollout
+    /// when <see cref="LevelCut"/> is 0, in which case it names the rollout's
+    /// inner-level depth label.
     /// </summary>
     public int    Level2              { get; init; }
-    /// <summary>Input: analysis level after the cut point, as stored by XG.</summary>
+    /// <summary>
+    /// Input: the number of moves the first leg phase covers — XG's "First
+    /// N moves" (<see cref="Level1"/>) before the "Remaining moves"
+    /// (<see cref="Level2"/>).
+    /// 0 means there is no first phase: the second phase plays throughout.
+    /// Measured, not assumed (halheinrich/backgammon#251): a rollout XG shows
+    /// as "First 2 moves: 4-ply … Remaining moves: XG Roller" stores 2 here,
+    /// and every fixture rollout whose <see cref="Level1"/> is 0 beside a
+    /// <see cref="Level2"/> of 3-ply stores 0 and is a 3-ply rollout.
+    /// </summary>
     public int    LevelCut            { get; init; }
     /// <summary>Input: variance-reduction flag.</summary>
     public bool   VarianceReduction   { get; init; }
@@ -928,8 +942,12 @@ internal sealed class RolloutContext
     /// <summary>Output: rollout duration in seconds.</summary>
     public float    Duration          { get; init; }
 
-    /// <summary>Input: analysis level at the truncation point; last fallback
-    /// source of the rollout's inner-level depth label.</summary>
+    /// <summary>Input: analysis level at the truncation point, as stored by
+    /// XG (unmeasured: no fixture rollout is truncated). Not a depth-label
+    /// input: a rollout is named by the leg phase its moves are played at
+    /// (<see cref="LevelCut"/> chooses between <see cref="Level1"/> and
+    /// <see cref="Level2"/>), and this level belongs to truncation, not to a
+    /// phase.</summary>
     public int      LevelTrunc        { get; init; }
     /// <summary>Output: games rolled on the double branch.</summary>
     public int      GamesRolledDouble { get; init; }

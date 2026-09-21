@@ -345,17 +345,19 @@ public class DepthResolutionTests
 
     /// <summary>
     /// The user's shape (halheinrich/backgammon#251): XG's "First 2 moves:
-    /// 4-ply … Remaining moves: XG Roller" — first phase 4-ply (code 3),
-    /// second phase XG Roller (code 1000). The first phase names the rollout,
-    /// the user's ruling: it is a 4-ply rollout in label, abbreviation, rank,
-    /// mode and level.
+    /// 4-ply … Remaining moves: XG Roller" — a first phase of 2 moves
+    /// (<c>LevelCut</c> 2) at 4-ply (code 3), then XG Roller (code 1000).
+    /// The first phase names the rollout, the user's ruling: it is a 4-ply
+    /// rollout in label, abbreviation, rank, mode and level. The real file is
+    /// pinned end-to-end in
+    /// <see cref="IterateDiagramRequests_UserFourPlyThenRollerFixture_ReadsFourPly"/>.
     /// </summary>
     [Fact]
     public void ResolveDepthInfo_Rollout_FourPlyThenRoller_ClassifiedAsFourPly()
     {
         var rollouts = new List<RolloutContext>
         {
-            new() { Level1 = 3, Level2 = 1000, GamesRolled = 1296 },
+            new() { LevelCut = 2, Level1 = 3, Level2 = 1000, GamesRolled = 1296 },
         };
 
         var (label, abbrev, rank, mode, level) = XgDecisionIterator.ResolveDepthInfo(
@@ -372,17 +374,17 @@ public class DepthResolutionTests
     }
 
     /// <summary>
-    /// The mirror of the user's shape: first phase XG Roller, second phase
-    /// 4-ply. The first phase still names the rollout — an XG Roller rollout
-    /// in every form — so the precedence is by phase, not by whichever level
-    /// is deeper.
+    /// The mirror of the user's shape: a 2-move first phase at XG Roller,
+    /// then 4-ply. The first phase still names the rollout — an XG Roller
+    /// rollout in every form — so the precedence is by phase, not by
+    /// whichever level is deeper.
     /// </summary>
     [Fact]
     public void ResolveDepthInfo_Rollout_RollerThenFourPly_ClassifiedAsRoller()
     {
         var rollouts = new List<RolloutContext>
         {
-            new() { Level1 = 1000, Level2 = 3, GamesRolled = 1296 },
+            new() { LevelCut = 2, Level1 = 1000, Level2 = 3, GamesRolled = 1296 },
         };
 
         var (label, abbrev, rank, mode, level) = XgDecisionIterator.ResolveDepthInfo(
@@ -400,7 +402,7 @@ public class DepthResolutionTests
 
     /// <summary>
     /// The two trial-bearing forms spell the same inner level with the same
-    /// token: a rollout whose first phase is level <c>code</c> and a book
+    /// token: a rollout played at level <c>code</c> and a book
     /// entry whose moves level is <c>code</c> compose their abbreviations
     /// over one token — one rule for naming an inner level, one owner
     /// (<c>InnerLevelToken</c>). The forms may differ only in prefix and
@@ -499,46 +501,43 @@ public class DepthResolutionTests
     }
 
     /// <summary>
-    /// ResolveDepthInfo prefers Level1 (the first leg phase), then Level2,
-    /// then LevelTrunc when choosing the rollout's inner level — the user's
-    /// ruling on halheinrich/backgammon#251. This test pins the fallback
-    /// order so a refactor of the selection logic can't silently change
-    /// which field wins; each step sets every lower-precedence field to a
-    /// different level, so the field that wins is the one the assertion
-    /// names — asserting on the rank and the pair.
+    /// Which leg phase names the rollout is decided by whether a first phase
+    /// exists — <c>LevelCut</c>, the number of moves it covers, above 0 —
+    /// never by testing a level for "set" (halheinrich/backgammon#251). Each
+    /// case gives the losing field a different level, so the field that
+    /// wins is the one the assertion names — asserting on the rank and the
+    /// pair.
     /// </summary>
     [Fact]
-    public void ResolveDepthInfo_Rollout_LevelFallback_PrefersLevel1ThenLevel2ThenTrunc()
+    public void ResolveDepthInfo_Rollout_PhaseSelection_FollowsLevelCutNotLevelValues()
     {
-        // Level1 dominates.
-        var r1 = new List<RolloutContext>
-        {
-            new() { Level1 = 3, Level2 = 2, LevelTrunc = 1, GamesRolled = 100 },
-        };
-        var c1 = XgDecisionIterator.ResolveDepthInfo(0, 0, r1);
-        c1.Rank.Should().Be(140, "Level1=3 → 4-ply (40) → rank 140");
-        c1.Mode.Should().Be(AnalysisMode.Rollout);
-        c1.Level.Should().Be(AnalysisLevel.Ply4);
+        // No first phase — the fixtures' shape (Level1 0 beside a 3-ply Level2,
+        // LevelCut 0): the second phase plays throughout and names the rollout.
+        var noFirst = XgDecisionIterator.ResolveDepthInfo(0, 0,
+            [new() { LevelCut = 0, Level1 = 0, Level2 = 2, GamesRolled = 100 }]);
+        noFirst.Rank.Should().Be(130, "no first phase → Level2=2 → 3-ply (30) → rank 130");
+        noFirst.Mode.Should().Be(AnalysisMode.Rollout);
+        noFirst.Level.Should().Be(AnalysisLevel.Ply3);
 
-        // Level1 absent → Level2 wins.
-        var r2 = new List<RolloutContext>
-        {
-            new() { Level1 = 0, Level2 = 2, LevelTrunc = 1, GamesRolled = 100 },
-        };
-        var c2 = XgDecisionIterator.ResolveDepthInfo(0, 0, r2);
-        c2.Rank.Should().Be(130, "Level2=2 → 3-ply (30) → rank 130");
-        c2.Mode.Should().Be(AnalysisMode.Rollout);
-        c2.Level.Should().Be(AnalysisLevel.Ply3);
+        // No first phase, even with a deeper Level1 stored: a first-phase
+        // setting that covers no moves does not name the rollout.
+        var unusedFirst = XgDecisionIterator.ResolveDepthInfo(0, 0,
+            [new() { LevelCut = 0, Level1 = 3, Level2 = 2, GamesRolled = 100 }]);
+        unusedFirst.Level.Should().Be(AnalysisLevel.Ply3, "LevelCut 0 → Level2 names the rollout");
 
-        // Both absent → LevelTrunc wins.
-        var r3 = new List<RolloutContext>
-        {
-            new() { Level1 = 0, Level2 = 0, LevelTrunc = 1, GamesRolled = 100 },
-        };
-        var c3 = XgDecisionIterator.ResolveDepthInfo(0, 0, r3);
-        c3.Rank.Should().Be(120, "LevelTrunc=1 → 2-ply (20) → rank 120");
-        c3.Mode.Should().Be(AnalysisMode.Rollout);
-        c3.Level.Should().Be(AnalysisLevel.Ply2);
+        // A genuine 1-ply first phase (Level1 0 is 1-ply, not "unset") names
+        // the rollout 1-ply.
+        var onePlyFirst = XgDecisionIterator.ResolveDepthInfo(0, 0,
+            [new() { LevelCut = 2, Level1 = 0, Level2 = 2, GamesRolled = 100 }]);
+        onePlyFirst.Rank.Should().Be(110, "first phase exists → Level1=0 → 1-ply (10) → rank 110");
+        onePlyFirst.Mode.Should().Be(AnalysisMode.Rollout);
+        onePlyFirst.Level.Should().Be(AnalysisLevel.Ply1);
+
+        // LevelTrunc is not a depth input: a 1-ply second phase played
+        // throughout is 1-ply whatever the truncation level holds.
+        var truncIgnored = XgDecisionIterator.ResolveDepthInfo(0, 0,
+            [new() { LevelCut = 0, Level1 = 0, Level2 = 0, LevelTrunc = 3, GamesRolled = 100 }]);
+        truncIgnored.Level.Should().Be(AnalysisLevel.Ply1, "LevelTrunc never names the rollout");
     }
 
     /// <summary>
@@ -552,8 +551,8 @@ public class DepthResolutionTests
     {
         var rollouts = new List<RolloutContext>
         {
-            new() { Level1 = 2, GamesRolled = 1296 }, // idx 0
-            new() { Level1 = 3, GamesRolled = 5000 }, // idx 1
+            new() { Level2 = 2, GamesRolled = 1296 }, // idx 0
+            new() { Level2 = 3, GamesRolled = 5000 }, // idx 1
         };
 
         var c0 = XgDecisionIterator.ResolveDepthInfo(0, 0, rollouts);
@@ -653,7 +652,7 @@ public class DepthResolutionTests
     {
         var rollouts = new List<RolloutContext>
         {
-            new() { Level1 = 2, GamesRolled = 1296 },
+            new() { Level2 = 2, GamesRolled = 1296 },
         };
         var entry = new OpeningBookEntry { Level = 100, Trials = 12960, RolloutMovesLevel = 3 };
 
@@ -675,7 +674,7 @@ public class DepthResolutionTests
     /// <summary>
     /// XG stamps opening-book hits as bare level 999/998 (Book V1/V2) with no
     /// rollout context. The book is rollout-derived, so a hit ranks 99 — above
-    /// XG Roller++ (rank 22) and below the explicit-rollout floor (rank 100):
+    /// XG Roller++ (rank 75) and below the explicit-rollout floor (rank 100):
     /// a cached rollout whose parameters the file no longer records ranks under
     /// a rollout the file actually carries. In <c>ajhhBG0024.xg</c>, game 6's
     /// opening play (the 52 roll, <c>MoveNumber</c> 1) is such a book hit
@@ -957,5 +956,48 @@ public class DepthResolutionTests
               && p.DepthRank == 20
               && p.AnalysisMode == AnalysisMode.Evaluation,
             "level code 11 is plain 2-ply — XG's display draws no distinction");
+    }
+
+    /// <summary>
+    /// The user's file from halheinrich/backgammon#251, whose rollouts XG
+    /// shows as "First 2 moves: 4-ply … Remaining moves: XG Roller" and which
+    /// read <c>1001p1296</c> before the fix: every rolled-out candidate reads
+    /// as a 4-ply rollout of 1296 trials. The end-to-end counterpart to the
+    /// synthesized user's-shape test — evidence that XG stores the phase
+    /// split in <c>LevelCut</c> (2 here) and the first phase's level in
+    /// <c>Level1</c>.
+    ///
+    /// <para>
+    /// Local-only by the TestData rule: the fixture lives in the gitignored
+    /// <c>TestData/FixtureFiles/</c>, so this test carries the CI-excluded
+    /// <c>RequiresFixtureFiles</c> trait and nothing gating depends on it.
+    /// The gating coverage is the synthesized rollout tests above.
+    /// </para>
+    /// </summary>
+    [Fact]
+    [Trait("Category", "RequiresFixtureFiles")]
+    public void IterateDiagramRequests_UserFourPlyThenRollerFixture_ReadsFourPly()
+    {
+        string path = Path.Combine(TestPaths.FixtureFilesDir, "Opening 41 44 51 62 MEDIUM.xgp");
+        if (!File.Exists(path))
+            throw new Xunit.Sdk.XunitException(
+                $"Expected fixture not present: {path}. " +
+                "This test depends on the halheinrich/backgammon#251 fixture in TestData/FixtureFiles/.");
+
+        var file = XgFileReader.ReadFile(path);
+        var rolledOut = XgDecisionIterator
+            .IterateDiagramRequests(file, Path.GetFileName(path))
+            .Where(r => !r.Decision.IsCube)
+            .SelectMany(r => r.Decision.Plays)
+            .Where(p => p.AnalysisMode == AnalysisMode.Rollout)
+            .ToList();
+
+        rolledOut.Should().NotBeEmpty("the fixture's plays were rolled out");
+        rolledOut.Should().OnlyContain(
+            p => p.Depth == "Rollout: 1296 trials. 4-ply"
+              && p.DepthAbbreviation == DepthAbbreviationFormat.Rollout("4", 1296)
+              && p.DepthRank == 140
+              && p.AnalysisLevel == AnalysisLevel.Ply4,
+            "the first phase (2 moves at 4-ply) names the rollout, not the XG Roller remainder");
     }
 }

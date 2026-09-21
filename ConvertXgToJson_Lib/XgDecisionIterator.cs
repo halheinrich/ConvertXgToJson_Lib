@@ -1049,12 +1049,18 @@ public static class XgDecisionIterator
     /// <para>
     /// Rollout branch: when <paramref name="rolloutIndex"/> is a valid
     /// index into <paramref name="rollouts"/>, the rollout is named by its
-    /// inner evaluation level — the first leg phase (<c>Level1</c>), falling
-    /// back to the second (<c>Level2</c>), then <c>LevelTrunc</c>. First phase
-    /// first: it is what the user set as the rollout's strength, and a later,
-    /// cheaper phase is an economy, not the rollout's name — XG's "First 2
-    /// moves: 4-ply … Remaining moves: XG Roller" is a 4-ply rollout (the
-    /// user's ruling on halheinrich/backgammon#251). The inner level is
+    /// inner evaluation level: the first leg phase's (<c>Level1</c>) when a
+    /// first phase exists — <c>LevelCut</c>, the number of moves it covers,
+    /// is above 0 — otherwise the second phase's (<c>Level2</c>), which then
+    /// plays the whole rollout. First phase first: it is what the user set as
+    /// the rollout's strength, and a later, cheaper phase is an economy, not
+    /// the rollout's name — XG's "First 2 moves: 4-ply … Remaining moves:
+    /// XG Roller" (<c>LevelCut</c> 2) is a 4-ply rollout (the user's ruling
+    /// on halheinrich/backgammon#251). Phase existence is read from
+    /// <c>LevelCut</c>, never from a level: a level of 0 is 1-ply, not
+    /// "unset", so a genuine 1-ply phase is named 1-ply.
+    /// <c>LevelTrunc</c> is not consulted: it belongs to truncation, not to a
+    /// phase the rollout's moves are played at. The inner level is
     /// decoded once, through <see cref="LevelInfo"/> — the PLAYERLEVEL code
     /// space, where <c>Level*</c> value 2 is 3-ply and 1000–1002 the XG
     /// Roller family — and every output derives from that one projection,
@@ -1135,9 +1141,7 @@ public static class XgDecisionIterator
         if (rolloutIndex >= 0 && rolloutIndex < rollouts.Count)
         {
             var ctx = rollouts[rolloutIndex];
-            int innerLevel = ctx.Level1 > 0 ? ctx.Level1
-                           : ctx.Level2 > 0 ? ctx.Level2
-                           : ctx.LevelTrunc;
+            int innerLevel = ctx.LevelCut > 0 ? ctx.Level1 : ctx.Level2;
             var inner = LevelInfo((short)innerLevel);
             string label = $"Rollout: {ctx.GamesRolled} trials. {inner.Label}";
             string abbrev = DepthAbbreviationFormat.Rollout(InnerLevelToken(inner), ctx.GamesRolled);
