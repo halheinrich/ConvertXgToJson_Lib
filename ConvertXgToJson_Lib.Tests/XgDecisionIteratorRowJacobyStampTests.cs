@@ -5,10 +5,11 @@ namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
 /// The row-path mirror of <see cref="XgDecisionIteratorJacobyStampTests"/>:
-/// pins the Jacoby fact <see cref="XgDecisionIterator.Iterate"/> stamps onto
-/// <see cref="DecisionRow.IsJacoby"/> at both construction sites (checker
-/// plays and cube decisions), and the consequence that motivates it — what
-/// <see cref="DecisionRow.MatchScore"/> renders.
+/// pins the Jacoby fact a row from <see cref="XgDecisionIterator.Iterate"/>
+/// carries in <see cref="DecisionRow.IsJacoby"/> for both decision kinds, and
+/// the consequence that motivates it — what <see cref="DecisionRow.MatchScore"/>
+/// renders. A row is its record's projection (<see cref="DecisionRow.From"/>),
+/// so the fact is the record's session's, read off the match header's terms.
 ///
 /// <para>
 /// Before the stamp every row the converter produced left <c>IsJacoby</c> at
@@ -36,9 +37,9 @@ public class XgDecisionIteratorRowJacobyStampTests
 
     /// <summary>
     /// Reads a named fixture through the real row path and returns every row it
-    /// yields, asserting both decision kinds are present — the two
-    /// <see cref="DecisionRow"/> construction sites are separate code, so a
-    /// fixture carrying only one kind would leave one unproven.
+    /// yields, asserting both decision kinds are present — the two record
+    /// kinds are built by separate code, so a fixture carrying only one kind
+    /// would leave one unproven.
     /// </summary>
     private static List<DecisionRow> ReadBothKinds(string fixtureName)
     {
@@ -47,10 +48,10 @@ public class XgDecisionIteratorRowJacobyStampTests
             .Iterate(XgFileReader.ReadFile(path), fixtureName)
             .ToList();
 
-        rows.Should().Contain(r => !r.IsCube,
-            $"{fixtureName} must exercise the checker-play stamping site");
-        rows.Should().Contain(r => r.IsCube,
-            $"{fixtureName} must exercise the cube-decision stamping site");
+        rows.Should().Contain(r => r.Kind == DecisionKind.CheckerPlay,
+            $"{fixtureName} must exercise the checker-play builder");
+        rows.Should().Contain(r => r.Kind == DecisionKind.Cube,
+            $"{fixtureName} must exercise the cube-decision builder");
         return rows;
     }
 
@@ -65,9 +66,9 @@ public class XgDecisionIteratorRowJacobyStampTests
 
         rows.Should().OnlyContain(r => r.IsJacoby == true,
             "the file's match header has the Jacoby rule in force, and the row takes "
-            + "the fact from the same match context the record path reads");
-        rows.Should().OnlyContain(r => r.MatchLength == 0 && r.IsMoneyGame,
-            "MatchLength — not IsJacoby — is what says this is a money session");
+            + "the fact from its record's money session");
+        rows.Should().OnlyContain(r => r.SessionKind == SessionKind.Money && r.MatchLength == null,
+            "the session's kind — not IsJacoby, nor a length of 0 — is what says this is money");
     }
 
     [Fact]
@@ -81,9 +82,9 @@ public class XgDecisionIteratorRowJacobyStampTests
     }
 
     /// <summary>
-    /// A match row poses no Jacoby question, so it asserts no answer — the same
-    /// tri-state ruling leg 2 of halheinrich/backgammon#120 made for the record
-    /// path. <see cref="DecisionRow.MatchScore"/> never reaches the money branch
+    /// A match row poses no Jacoby question, so it states no answer: a money
+    /// session's columns are empty on a match row (halheinrich/backgammon#273).
+    /// <see cref="DecisionRow.MatchScore"/> never reaches the money branch
     /// here, so the fact is invisible in the rendering either way; the
     /// <see langword="null"/> is about the wire's honesty.
     /// </summary>

@@ -29,21 +29,24 @@ public class XgpSliceExportTests
         var source = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
         var original = XgDecisionIterator
             .IterateDiagramRequests(source, "MTCH4064.xg")
-            .Single(d => d.Descriptive.Game == 1 && d.Descriptive.MoveNumber == 22 && !d.IsCube);
+            .OfType<CheckerPlayDecision>()
+            .Single(d => d.Game == 1 && d.MoveNumber == 22);
 
         using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 1, moveNumber: 22, isCube: false));
         var sliced = XgFileReader.ReadStream(ms);
-        var reRead = XgDecisionIterator.IterateDiagramRequests(sliced, "slice.xgp").Single();
+        var reRead = XgDecisionIterator.IterateDiagramRequests(sliced, "slice.xgp").Single()
+            .Should().BeOfType<CheckerPlayDecision>().Subject;
 
-        reRead.IsCube.Should().BeFalse();
         reRead.Xgid.Should().Be(original.Xgid, "the XGID digests position, cube, dice, and match state");
-        reRead.Position.Mop.Should().Equal(original.Position.Mop);
+        reRead.Position.Mop.Should().Be(original.Position.Mop);
         reRead.Decision.Dice.Should().Equal(original.Decision.Dice);
         reRead.Decision.Plays.Should().NotBeEmpty("the analysis panes travel with the slice");
         reRead.Decision.Plays.Count.Should().Be(original.Decision.Plays.Count);
         reRead.Decision.Plays[0].Equity.Should().Be(original.Decision.Plays[0].Equity);
-        reRead.Decision.Plays[0].Depth.Should().Be(original.Decision.Plays[0].Depth);
-        reRead.Decision.UserPlayError.Should().Be(original.Decision.UserPlayError);
+        reRead.Decision.Plays[0].AnalysisLevel.Should().Be(original.Decision.Plays[0].AnalysisLevel);
+        reRead.Decision.UserPlayIndex.Should().Be(original.Decision.UserPlayIndex);
+        reRead.Decision.RankedBy(PlayRanking.Equity).PlayerResult
+            .Should().Be(original.Decision.RankedBy(PlayRanking.Equity).PlayerResult);
         reRead.Descriptive.OnRollName.Should().Be(original.Descriptive.OnRollName);
     }
 
@@ -55,17 +58,18 @@ public class XgpSliceExportTests
         var source = XgFileReader.ReadFile(Fixture("match35253054.xg"));
         var original = XgDecisionIterator
             .IterateDiagramRequests(source, "match35253054.xg")
-            .Single(d => d.Descriptive.Game == 2 && d.Descriptive.MoveNumber == 37 && d.IsCube);
-        original.Decision.CubeDepth.Should().StartWith("Rollout:",
+            .OfType<CubeDecision>()
+            .Single(d => d.Game == 2 && d.MoveNumber == 37);
+        original.Decision.AnalysisMode.Should().Be(AnalysisMode.Rollout,
             "this fixture decision is pinned as rolled out");
 
         using var ms = new MemoryStream(XgpExporter.ToBytes(source, game: 2, moveNumber: 37, isCube: true));
         var sliced = XgFileReader.ReadStream(ms);
-        var reRead = XgDecisionIterator.IterateDiagramRequests(sliced, "slice.xgp").Single();
+        var reRead = XgDecisionIterator.IterateDiagramRequests(sliced, "slice.xgp").Single()
+            .Should().BeOfType<CubeDecision>().Subject;
 
-        reRead.IsCube.Should().BeTrue();
         reRead.Xgid.Should().Be(original.Xgid);
-        reRead.Decision.CubeDepth.Should().Be(original.Decision.CubeDepth,
+        DepthFacts(reRead.Decision).Should().Be(DepthFacts(original.Decision),
             "the referenced rollout contexts are carried and the index remapped");
         reRead.Decision.NoDoubleEquity.Should().Be(original.Decision.NoDoubleEquity);
         reRead.Decision.DoubleTakeEquity.Should().Be(original.Decision.DoubleTakeEquity);
@@ -384,7 +388,7 @@ public class XgpSliceExportTests
             "fixture precondition: the source must carry real names for this test to prove anything");
         var original = XgDecisionIterator
             .IterateDiagramRequests(source, "MTCH4064.xg")
-            .Single(d => d.Descriptive.Game == 1 && d.Descriptive.MoveNumber == 22 && !d.IsCube);
+            .Single(d => d.Game == 1 && d.MoveNumber == 22 && d.Kind == DecisionKind.CheckerPlay);
 
         using var ms = new MemoryStream(XgpExporter.ToBytes(
             source, game: 1, moveNumber: 22, isCube: false, XgpSliceOptions.Anonymized));
@@ -759,13 +763,14 @@ public class XgpSliceExportTests
         copy.Records.Count.Should().Be(source.Records.Count, "a copy selects nothing out");
         copy.Rollouts.Count.Should().Be(source.Rollouts.Count);
 
-        var reRead = XgDecisionIterator.IterateDiagramRequests(copy, "copy.xgp").Single();
-        reRead.IsCube.Should().BeTrue();
+        var reRead = XgDecisionIterator.IterateDiagramRequests(copy, "copy.xgp").Single()
+            .Should().BeOfType<CubeDecision>().Subject;
+        var originalCube = (CubeDecision)original;
         reRead.Xgid.Should().Be(original.Xgid, "names never participate in the XGID");
-        reRead.Decision.CubeDepth.Should().Be(original.Decision.CubeDepth,
+        DepthFacts(reRead.Decision).Should().Be(DepthFacts(originalCube.Decision),
             "the rollout table travels verbatim — no remapping, no dropped legs");
-        reRead.Decision.NoDoubleEquity.Should().Be(original.Decision.NoDoubleEquity);
-        reRead.Decision.DoubleTakeEquity.Should().Be(original.Decision.DoubleTakeEquity);
+        reRead.Decision.NoDoubleEquity.Should().Be(originalCube.Decision.NoDoubleEquity);
+        reRead.Decision.DoubleTakeEquity.Should().Be(originalCube.Decision.DoubleTakeEquity);
     }
 
     [Fact]
@@ -832,4 +837,8 @@ public class XgpSliceExportTests
         var act = () => XgpExporter.ToBytes(new XgFile(), game: 1, moveNumber: 1, isCube: false);
         act.Should().Throw<ArgumentException>().WithMessage("*MatchHeaderRecord*");
     }
+
+    /// <summary>A cube analysis's typed depth facts, compared whole.</summary>
+    private static (AnalysisMode, AnalysisLevel, int?, BookEdition?, int?) DepthFacts(CubeDecisionData d) =>
+        (d.AnalysisMode, d.AnalysisLevel, d.RolloutTrials, d.BookEdition, d.UnrecognizedLevelCode);
 }

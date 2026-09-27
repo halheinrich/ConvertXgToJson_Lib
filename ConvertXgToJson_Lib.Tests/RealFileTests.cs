@@ -1,4 +1,5 @@
-﻿using ConvertXgToJson_Lib;
+using BgDataTypes_Lib;
+using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests;
@@ -126,7 +127,7 @@ public class RealFileTests
         {
             var xgFile = XgFileReader.ReadFile(path);
             return XgDecisionIterator.Iterate(xgFile, Path.GetFileName(path))
-                .Any(r => !r.IsCube);
+                .Any(r => r.Kind == DecisionKind.CheckerPlay);
         });
 
         anyMoveRows.Should().BeTrue("at least one .xgp file should contain analysed checker-play rows");
@@ -146,7 +147,7 @@ public class RealFileTests
         {
             var xgFile = XgFileReader.ReadFile(path);
             return XgDecisionIterator.Iterate(xgFile, Path.GetFileName(path))
-                .Any(r => r.IsCube);
+                .Any(r => r.Kind == DecisionKind.Cube);
         });
 
         anyCubeRows.Should().BeTrue("at least one .xgp file should contain analysed cube-decision rows");

@@ -55,16 +55,15 @@ public class XgpExportXgAgreementTests
         var truth = XgDecisionIterator
             .IterateDiagramRequests(XgFileReader.ReadFile(Fixture(xgpName)), xgpName)
             .Single();
-        var source = FindSourceDecision(xgName, game, moveNumber, truth.IsCube);
+        var source = FindSourceDecision(xgName, game, moveNumber, truth.Kind);
 
         truth.Xgid.Should().Be(source.Xgid, "the XGID digests position, cube, dice, and match state");
-        truth.Position.Mop.Should().Equal(source.Position.Mop);
-        truth.Decision.Dice.Should().Equal(source.Decision.Dice);
+        truth.Position.Mop.Should().Be(source.Position.Mop);
+        if (truth is CheckerPlayDecision truthPlay)
+            truthPlay.Decision.Dice.Should().Equal(((CheckerPlayDecision)source).Decision.Dice);
         truth.Position.CubeSize.Should().Be(source.Position.CubeSize);
         truth.Position.CubeOwner.Should().Be(source.Position.CubeOwner);
-        truth.Position.OnRollNeeds.Should().Be(source.Position.OnRollNeeds);
-        truth.Position.OpponentNeeds.Should().Be(source.Position.OpponentNeeds);
-        truth.Descriptive.MatchLength.Should().Be(source.Descriptive.MatchLength);
+        truth.Session.Should().Be(source.Session, "the session is the terms and the on-roll standing");
         truth.Descriptive.OnRollName.Should().Be(source.Descriptive.OnRollName);
         truth.Descriptive.OpponentName.Should().Be(source.Descriptive.OpponentName);
     }
@@ -80,10 +79,10 @@ public class XgpExportXgAgreementTests
         string xgpName, string xgName, int game, int moveNumber)
     {
         var xgSaved = XgFileReader.ReadFile(Fixture(xgpName));
-        bool isCube = XgDecisionIterator
+        var kind = XgDecisionIterator
             .IterateDiagramRequests(xgSaved, xgpName)
-            .Single().IsCube;
-        var source = FindSourceDecision(xgName, game, moveNumber, isCube);
+            .Single().Kind;
+        var source = FindSourceDecision(xgName, game, moveNumber, kind);
 
         using var ms = new MemoryStream(XgpExporter.ToBytes(source));
         var exported = XgFileReader.ReadStream(ms);
@@ -120,20 +119,20 @@ public class XgpExportXgAgreementTests
         // Cube record — board, cube encoding, and (for plays) the roll.
         ourCube.ActivePlayer.Should().Be(1);
         NormalizedBoard(ourCube.Position, ourCube.ActivePlayer)
-            .Should().Equal(NormalizedBoard(xgCube.Position, active));
+            .Should().Be(NormalizedBoard(xgCube.Position, active));
         (ourCube.CubeValue * ourCube.ActivePlayer).Should().Be(xgCube.CubeValue * active,
             "signed-log2 cube ownership must agree relative to the on-roll player");
-        if (!isCube)
+        if (kind == DecisionKind.CheckerPlay)
             ourCube.DiceRolled.Should().Be(xgCube.DiceRolled);
 
         // Move record (play decisions): dice and starting board.
-        if (!isCube)
+        if (kind == DecisionKind.CheckerPlay)
         {
             var xgMove = xgSaved.Records.OfType<MoveRecord>().Single();
             var ourMove = exported.Records.OfType<MoveRecord>().Single();
             ourMove.Dice.Should().Equal(xgMove.Dice);
             NormalizedBoard(ourMove.InitialPosition, ourMove.ActivePlayer)
-                .Should().Equal(NormalizedBoard(xgMove.InitialPosition, active));
+                .Should().Be(NormalizedBoard(xgMove.InitialPosition, active));
         }
     }
 
@@ -204,17 +203,15 @@ public class XgpExportXgAgreementTests
     // ------------------------------------------------------------------ //
 
     private static BgDecisionData FindSourceDecision(
-        string xgName, int game, int moveNumber, bool isCube)
+        string xgName, int game, int moveNumber, DecisionKind kind)
     {
         var file = XgFileReader.ReadFile(Fixture(xgName));
         return XgDecisionIterator
             .IterateDiagramRequests(file, xgName)
-            .Single(d => d.Descriptive.Game == game
-                      && d.Descriptive.MoveNumber == moveNumber
-                      && d.IsCube == isCube);
+            .Single(d => d.Game == game && d.MoveNumber == moveNumber && d.Kind == kind);
     }
 
-    /// <summary>Record position normalized to the on-roll player's perspective.</summary>
-    private static sbyte[] NormalizedBoard(PositionEngine position, int activePlayer) =>
-        activePlayer >= 0 ? position.Points : BackgammonConstants.Flip(position.Points);
+    /// <summary>Record position seen from the player on roll — the iterator's one frame reading.</summary>
+    private static BoardPosition NormalizedBoard(PositionEngine position, int activePlayer) =>
+        XgDecisionIterator.OnRollBoard(position, activePlayer);
 }

@@ -7,17 +7,28 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ConvertXgToJson_Lib;
 
 /// <summary>
-/// Iterates over XgFile records and yields one row per analysed decision —
-/// every checker-play (MoveRecord) and cube decision (CubeRecord) XG has
-/// analysed. Two surfaces over the same decision set: <see cref="Iterate"/>
-/// yields flat <see cref="DecisionRow"/> records (CSV-shaped), while
-/// <see cref="IterateDiagramRequests"/> yields <see cref="BgDecisionData"/>
-/// records (diagram-shaped).
+/// Iterates over XgFile records and yields one decision per analysed
+/// checker play (MoveRecord) and cube decision (CubeRecord) XG has analysed.
+/// Two surfaces over the same decisions:
+/// <see cref="IterateDiagramRequests"/> yields the <see cref="BgDecisionData"/>
+/// records — a <see cref="CheckerPlayDecision"/> or a <see cref="CubeDecision"/>
+/// — and <see cref="Iterate"/> yields each as a flat <see cref="DecisionRow"/>
+/// built from its record for one ranking.
 ///
 /// <para>
-/// <c>.xgp</c> position files are the exception: they yield <em>at most one</em>
-/// decision. See <see cref="SelectXgpDecision"/> for the policy and its
-/// rationale.
+/// <b>A record states what XG stores</b> (the arc's rule,
+/// halheinrich/backgammon#273): the board, the cube, the session's terms and
+/// standing, the roll, the candidates in XG's own order with their typed
+/// depth facts, the played move or cube actions, and XG's error only where
+/// the record states no move to derive it from. Everything those determine —
+/// the XGID, the pip counts, the after-boards, the notation, the depth
+/// labels and ranks, the best play and each play's error under a ranking —
+/// BgDataTypes_Lib derives, so nothing here produces it.
+/// </para>
+///
+/// <para>
+/// <c>.xgp</c> position files yield <em>at most one</em> decision. See
+/// <see cref="SelectXgpDecision"/> for the policy and its rationale.
 /// </para>
 /// </summary>
 public static class XgDecisionIterator
@@ -27,11 +38,15 @@ public static class XgDecisionIterator
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Yields all decisions from a single already-parsed <see cref="XgFile"/>.
+    /// Yields every decision of a single already-parsed <see cref="XgFile"/>
+    /// as a <see cref="DecisionRow"/>, built from its record for the options'
+    /// ranking (<see cref="XgIteratorOptions.Ranking"/>; the default is
+    /// <see cref="PlayRanking.Equity"/>) by <see cref="DecisionRow.From"/> —
+    /// so a row and its record cannot disagree.
     ///
     /// <para>
     /// When <paramref name="sourceFile"/> names an <c>.xgp</c> position file,
-    /// at most one decision is yielded — the analysed checker-play if there is
+    /// at most one decision is yielded — the analysed checker play if there is
     /// one, else the analysed cube. See <see cref="SelectXgpDecision"/>.
     /// </para>
     /// </summary>
@@ -39,10 +54,10 @@ public static class XgDecisionIterator
     /// <param name="sourceFile">
     /// Originating file name including extension (e.g. <c>"match.xg"</c> or
     /// <c>"position.xgp"</c>). Must be non-null — the iterator stamps a
-    /// <see cref="DecisionId"/> on every yielded row, and the extension
-    /// drives the discrimination between <see cref="XgDecisionId"/> and
-    /// <see cref="XgpDecisionId"/>. Copied verbatim onto every yielded
-    /// <see cref="DecisionRow.SourceFile"/>.
+    /// <see cref="DecisionId"/> on every decision, and the extension drives
+    /// the discrimination between <see cref="XgDecisionId"/> and
+    /// <see cref="XgpDecisionId"/>; a row's <see cref="DecisionRow.SourceFile"/>
+    /// is the id's.
     /// </param>
     /// <param name="state">
     /// Optional read-only observer. The iterator populates
@@ -54,20 +69,22 @@ public static class XgDecisionIterator
     /// </param>
     /// <param name="callbacks">
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/> for
-    /// the boundaries at which each predicate fires.
+    /// the boundaries at which each predicate fires; the post-yield ones see
+    /// the yielded row.
     /// </param>
     /// <param name="options">
     /// Optional producer configuration. See <see cref="XgIteratorOptions"/> —
-    /// notably <see cref="XgIteratorOptions.OpeningBook"/> for enriching
-    /// book-stamped candidates with the cached rollout's parameters.
+    /// the ranking the rows are built for, and the opening book that enriches
+    /// book-stamped candidates.
     /// </param>
     /// <param name="logger">
-    /// Optional logger. When a decision is skipped because XG stamped its
-    /// played candidate with the illegal-play marker (see
-    /// <see cref="SentinelKind.IllegalPlay"/>), a <c>Warning</c> is emitted
-    /// naming the source file, game, move, and roll. Defaults to
-    /// <see cref="NullLogger.Instance"/> — silent, and suppressible by log
-    /// level. Dance ((0, 0)) skips remain silent (normal, not an error).
+    /// Optional logger. A <c>Warning</c> names each decision skipped for a
+    /// fault in XG's data — its played candidate stamped with XG's
+    /// illegal-play marker (<see cref="SentinelKind.IllegalPlay"/>), or a
+    /// candidate invalid from its own position — with the source file, game,
+    /// move and roll. Defaults to <see cref="NullLogger.Instance"/> — silent,
+    /// and suppressible by log level. Dances ((0, 0)) and positions that are
+    /// not decisions skip silently: both are ordinary data, not errors.
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown eagerly (before any deferred enumeration) when
@@ -86,201 +103,19 @@ public static class XgDecisionIterator
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.Iterate requires a non-null sourceFile for DecisionId stamping.");
-        return IterateCore<DecisionRow>(file, sourceFile, state, callbacks, options, logger, BuildMoveRow, BuildCubeRows);
+        options ??= XgIteratorOptions.Default;
+        var ranking = options.Ranking;
+        return IterateCore(
+            file, sourceFile, state, callbacks, options, logger,
+            project: record => DecisionRow.From(record, ranking),
+            view: static row => row);
     }
 
     /// <summary>
-    /// Single entry point behind both decision surfaces. Walks the record
-    /// stream once via <see cref="IterateAnalysedDecisions"/>, then — for
-    /// <c>.xgp</c> position files only — narrows the result to a single
-    /// decision through <see cref="SelectXgpDecision"/>.
-    ///
-    /// <para>
-    /// Placing the <c>.xgp</c> emission policy here, rather than in either
-    /// caller, is what guarantees <see cref="Iterate"/> and
-    /// <see cref="IterateDiagramRequests"/> can never disagree about which
-    /// decision an <c>.xgp</c> represents.
-    /// </para>
-    /// </summary>
-    private static IEnumerable<T> IterateCore<T>(
-        XgFile file,
-        string sourceFile,
-        XgIteratorState? state,
-        XgIteratorCallbacks? callbacks,
-        XgIteratorOptions? options,
-        ILogger? logger,
-        Func<MoveRecord, MatchContext, string, List<RolloutContext>, OpeningBook?, T?> buildMove,
-        Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
-        where T : class, IDecisionFilterData
-    {
-        var decisions = IterateAnalysedDecisions(
-            file, sourceFile, state, callbacks, options, logger, buildMove, buildCube);
-
-        return IsXgpSource(sourceFile) ? SelectXgpDecision(decisions) : decisions;
-    }
-
-    /// <summary>
-    /// Applies the <c>.xgp</c> single-decision emission policy: emit the
-    /// checker-play if the file has an analysed, non-sentinel one; otherwise
-    /// emit the analysed cube, if any; otherwise emit nothing.
-    ///
-    /// <para>
-    /// An <c>.xgp</c>'s move pane exists only because dice were rolled, so
-    /// dice in the file mean the saved decision <em>is</em> the play. XG
-    /// nonetheless always writes a cube pane, which is incidental — a
-    /// curated cube problem is a pre-roll position and carries no move pane
-    /// at all. Analysis depth is deliberately not compared: an analysed play
-    /// wins even against a more deeply analysed cube.
-    /// </para>
-    ///
-    /// <para>
-    /// This is what makes the bare-filename <see cref="XgpDecisionId"/> a
-    /// valid key. Before the policy existed, an <c>.xgp</c> with analysis in
-    /// both panes yielded two decisions stamped with the same Id.
-    /// </para>
-    ///
-    /// <para>
-    /// A sentinel-skipped play (illegal play / dance) never reaches this
-    /// filter — <see cref="IterateAnalysedDecisions"/> drops it upstream — so
-    /// it does not suppress an otherwise analysed cube.
-    /// </para>
-    ///
-    /// <para>
-    /// Look-ahead is bounded and <c>.xgp</c>-scoped: at most one cube is held
-    /// while scanning for a play, and the first play short-circuits the walk.
-    /// <c>.xg</c> iteration bypasses this filter entirely and stays streaming.
-    /// </para>
-    /// </summary>
-    private static IEnumerable<T> SelectXgpDecision<T>(IEnumerable<T> decisions)
-        where T : class, IDecisionFilterData
-    {
-        T? cube = null;
-
-        foreach (var decision in decisions)
-        {
-            if (!decision.IsCube)
-            {
-                yield return decision;
-                yield break;
-            }
-            cube ??= decision;
-        }
-
-        if (cube != null)
-            yield return cube;
-    }
-
-    /// <summary>
-    /// Shared iteration skeleton for both decision surfaces. Walks the record
-    /// stream once — match-info extraction, state population, the skip / stop
-    /// callbacks, game-header handling — and delegates only the per-decision
-    /// row construction to <paramref name="buildMove"/> /
-    /// <paramref name="buildCube"/>. <c>Iterate</c> supplies the
-    /// <see cref="DecisionRow"/> builders; <c>IterateDiagramRequests</c> the
-    /// <see cref="BgDecisionData"/> builders.
-    /// </summary>
-    private static IEnumerable<T> IterateAnalysedDecisions<T>(
-        XgFile file,
-        string sourceFile,
-        XgIteratorState? state,
-        XgIteratorCallbacks? callbacks,
-        XgIteratorOptions? options,
-        ILogger? logger,
-        Func<MoveRecord, MatchContext, string, List<RolloutContext>, OpeningBook?, T?> buildMove,
-        Func<CubeRecord, MatchContext, string, List<RolloutContext>, IEnumerable<T>> buildCube)
-        where T : class, IDecisionFilterData
-    {
-        logger ??= NullLogger.Instance;
-        var openingBook = options?.OpeningBook;
-
-        var context = new MatchContext(file.Records, sourceFile, file.Comments);
-
-        var matchInfo = ExtractMatchInfo(file)
-            ?? throw new InvalidDataException(
-                $"XG file '{sourceFile}' has no readable match header — cannot iterate decisions.");
-
-        if (state != null)
-        {
-            state.MatchInfo = matchInfo;
-            state.GameInfo = null;
-        }
-
-        if (callbacks?.SkipMatchAt?.Invoke(matchInfo) == true)
-            yield break;
-
-        bool skipCurrentGame = false;
-
-        foreach (var record in file.Records)
-        {
-            if (record is GameHeaderRecord gh)
-            {
-                context.Update(record); // must be before GameInfo so MatchLength is current
-
-                var gameInfo = XgGameInfo.From(gh, context.MatchLength);
-
-                if (state != null)
-                    state.GameInfo = gameInfo;
-
-                skipCurrentGame = callbacks?.SkipGameAt?.Invoke(gameInfo) == true;
-                continue;
-            }
-
-            // Always update context — headers must be processed even when skipping
-            // so that scores, game number, and cube state stay correct.
-            context.Update(record);
-
-            if (skipCurrentGame)
-                continue;
-
-            if (record is MoveRecord move && IsAnalysed(move))
-            {
-                // Skip XG's non-play sentinels before they reach a move leaf:
-                // an illegal-play marker historically crashed AfterBoardBuilder,
-                // a dance rendered as "1/1" garbage. Illegal plays are worth a
-                // contextual warning; dances are normal and skip silently.
-                switch (ClassifySentinelAnalysis(move.Analysis))
-                {
-                    case SentinelKind.IllegalPlay:
-                        logger.LogWarning(
-                            "Illegal play in {SourceFile}, game {Game}, move {MoveNumber}, roll {Roll}",
-                            sourceFile, context.GameNumber, context.MoveNumber, DiceToInt(move.Dice));
-                        continue;
-                    case SentinelKind.Dance:
-                        continue;
-                }
-
-                var row = buildMove(move, context, sourceFile, file.Rollouts, openingBook);
-                if (row != null)
-                {
-                    yield return row;
-                    if (callbacks?.StopMatchAfter?.Invoke(row) == true)
-                        yield break;
-                    if (callbacks?.StopGameAfter?.Invoke(row) == true)
-                        skipCurrentGame = true;
-                }
-            }
-            else if (record is CubeRecord cube && IsCubeDecision(cube, context))
-            {
-                foreach (var row in buildCube(cube, context, sourceFile, file.Rollouts))
-                {
-                    yield return row;
-                    if (callbacks?.StopMatchAfter?.Invoke(row) == true)
-                        yield break;
-                    if (callbacks?.StopGameAfter?.Invoke(row) == true)
-                    {
-                        skipCurrentGame = true;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Yields a <see cref="BgDecisionData"/> for every analysed checker-play and
-    /// cube decision in <paramref name="file"/>. Analogous to <see cref="Iterate"/>
-    /// but produces diagram data directly from the raw parse records rather than
-    /// converting from <see cref="DecisionRow"/>.
+    /// Yields a <see cref="BgDecisionData"/> for every analysed checker play
+    /// and cube decision in <paramref name="file"/> — a
+    /// <see cref="CheckerPlayDecision"/> or a <see cref="CubeDecision"/>,
+    /// built directly from the raw records.
     ///
     /// <para>
     /// The <c>.xgp</c> single-decision emission policy applies identically here
@@ -292,10 +127,8 @@ public static class XgDecisionIterator
     /// <param name="sourceFile">
     /// Originating file name including extension (e.g. <c>"match.xg"</c> or
     /// <c>"position.xgp"</c>). Must be non-null — same contract as
-    /// <see cref="Iterate"/>; the iterator stamps a <see cref="DecisionId"/>
-    /// on every yielded record, and the extension drives the discrimination
-    /// between <see cref="XgDecisionId"/> and <see cref="XgpDecisionId"/>.
-    /// Copied verbatim onto every yielded <see cref="DescriptiveData.SourceFile"/>.
+    /// <see cref="Iterate"/>; the record's <see cref="BgDecisionData.SourceFile"/>
+    /// is its id's.
     /// </param>
     /// <param name="state">
     /// Optional read-only observer. Behaves identically to
@@ -304,16 +137,18 @@ public static class XgDecisionIterator
     /// at each <see cref="GameHeaderRecord"/>.
     /// </param>
     /// <param name="callbacks">
-    /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/>.
+    /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/>; the
+    /// post-yield ones see each record through its view for the options'
+    /// ranking (<see cref="BgDecisionData.ViewFor"/>).
     /// </param>
     /// <param name="options">
     /// Optional producer configuration. Behaves identically to
-    /// <see cref="Iterate"/> — see <see cref="XgIteratorOptions"/>.
+    /// <see cref="Iterate"/> — see <see cref="XgIteratorOptions"/>. A record
+    /// does not depend on the ranking; only the callbacks' views do.
     /// </param>
     /// <param name="logger">
-    /// Optional logger. Behaves identically to <see cref="Iterate"/>: an
-    /// illegal-play skip emits a contextual <c>Warning</c>; dances skip
-    /// silently. Defaults to <see cref="NullLogger.Instance"/>.
+    /// Optional logger. Behaves identically to <see cref="Iterate"/>.
+    /// Defaults to <see cref="NullLogger.Instance"/>.
     /// </param>
     /// <exception cref="InvalidOperationException">
     /// Thrown eagerly (before any deferred enumeration) when
@@ -332,7 +167,187 @@ public static class XgDecisionIterator
         if (sourceFile == null)
             throw new InvalidOperationException(
                 "XgDecisionIterator.IterateDiagramRequests requires a non-null sourceFile for DecisionId stamping.");
-        return IterateCore<BgDecisionData>(file, sourceFile, state, callbacks, options, logger, BuildMoveDiagramRequest, BuildCubeDiagramRequests);
+        options ??= XgIteratorOptions.Default;
+        var ranking = options.Ranking;
+        return IterateCore(
+            file, sourceFile, state, callbacks, options, logger,
+            project: static record => record,
+            view: record => record.ViewFor(ranking));
+    }
+
+    /// <summary>
+    /// Single entry point behind both decision surfaces. Walks the record
+    /// stream once via <see cref="IterateAnalysedDecisions"/>, projecting each
+    /// record to the surface's element, then — for <c>.xgp</c> position files
+    /// only — narrows the result to a single decision through
+    /// <see cref="SelectXgpDecision"/>.
+    ///
+    /// <para>
+    /// Placing the <c>.xgp</c> emission policy here, rather than in either
+    /// caller, is what guarantees <see cref="Iterate"/> and
+    /// <see cref="IterateDiagramRequests"/> can never disagree about which
+    /// decision an <c>.xgp</c> represents.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<T> IterateCore<T>(
+        XgFile file,
+        string sourceFile,
+        XgIteratorState? state,
+        XgIteratorCallbacks? callbacks,
+        XgIteratorOptions options,
+        ILogger? logger,
+        Func<BgDecisionData, T> project,
+        Func<T, IDecisionFilterData> view)
+        where T : class
+    {
+        var decisions = IterateAnalysedDecisions(
+            file, sourceFile, state, callbacks, options, logger, project, view);
+
+        return IsXgpSource(sourceFile) ? SelectXgpDecision(decisions, view) : decisions;
+    }
+
+    /// <summary>
+    /// Applies the <c>.xgp</c> single-decision emission policy: emit the
+    /// checker play if the file has one the walk built; otherwise emit the
+    /// analysed cube, if any; otherwise emit nothing.
+    ///
+    /// <para>
+    /// An <c>.xgp</c>'s move pane exists only because dice were rolled, so
+    /// dice in the file mean the saved decision <em>is</em> the play. XG
+    /// nonetheless always writes a cube pane, which is incidental — a
+    /// curated cube problem is a pre-roll position and carries no move pane
+    /// at all. Analysis depth is deliberately not compared: an analysed play
+    /// wins even against a more deeply analysed cube.
+    /// </para>
+    ///
+    /// <para>
+    /// This is what makes the bare-filename <see cref="XgpDecisionId"/> a
+    /// valid key. Before the policy existed, an <c>.xgp</c> with analysis in
+    /// both panes yielded two decisions stamped with the same Id.
+    /// </para>
+    ///
+    /// <para>
+    /// A play the walk skipped — a sentinel analysis (illegal play or dance),
+    /// a position that is not a decision, a candidate invalid from its
+    /// position — never reaches this filter:
+    /// <see cref="IterateAnalysedDecisions"/> drops it upstream, so it does
+    /// not suppress an otherwise analysed cube.
+    /// </para>
+    ///
+    /// <para>
+    /// Look-ahead is bounded and <c>.xgp</c>-scoped: at most one cube is held
+    /// while scanning for a play, and the first play short-circuits the walk.
+    /// <c>.xg</c> iteration bypasses this filter entirely and stays streaming.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<T> SelectXgpDecision<T>(IEnumerable<T> decisions, Func<T, IDecisionFilterData> view)
+        where T : class
+    {
+        T? cube = null;
+
+        foreach (var decision in decisions)
+        {
+            if (view(decision).Kind == DecisionKind.CheckerPlay)
+            {
+                yield return decision;
+                yield break;
+            }
+            cube ??= decision;
+        }
+
+        if (cube != null)
+            yield return cube;
+    }
+
+    /// <summary>
+    /// Shared iteration skeleton for both decision surfaces. Walks the record
+    /// stream once — match-info extraction, state population, the skip / stop
+    /// callbacks, game-header handling — and builds each decision's record,
+    /// which <paramref name="project"/> turns into the surface's element and
+    /// <paramref name="view"/> shows to the post-yield callbacks.
+    ///
+    /// <para>
+    /// <b>What is not a record.</b> The emission rules sit here, at the one
+    /// dispatch both surfaces share, so the two can never disagree about which
+    /// source decisions become records: an unanalysed move or cube pane; a
+    /// Crawford game's cube pane (<see cref="AdmitsCubeDecision"/>); and, in
+    /// <see cref="ReadCheckerPlay"/>, XG's two non-play sentinels and a move
+    /// record that states no roll.
+    /// </para>
+    /// </summary>
+    private static IEnumerable<T> IterateAnalysedDecisions<T>(
+        XgFile file,
+        string sourceFile,
+        XgIteratorState? state,
+        XgIteratorCallbacks? callbacks,
+        XgIteratorOptions options,
+        ILogger? logger,
+        Func<BgDecisionData, T> project,
+        Func<T, IDecisionFilterData> view)
+        where T : class
+    {
+        logger ??= NullLogger.Instance;
+
+        var context = new MatchContext(file.Records, file.Comments);
+
+        var matchInfo = ExtractMatchInfo(file)
+            ?? throw new InvalidDataException(
+                $"XG file '{sourceFile}' has no readable match header — cannot iterate decisions.");
+
+        if (state != null)
+        {
+            state.MatchInfo = matchInfo;
+            state.GameInfo = null;
+        }
+
+        if (callbacks?.SkipMatchAt?.Invoke(matchInfo) == true)
+            yield break;
+
+        bool skipCurrentGame = false;
+
+        foreach (var record in file.Records)
+        {
+            // Always update context — headers must be processed even when
+            // skipping so that the standing, game number and cube state stay
+            // correct.
+            context.Update(record);
+
+            if (record is GameHeaderRecord)
+            {
+                var gameInfo = context.GameInfo!;
+
+                if (state != null)
+                    state.GameInfo = gameInfo;
+
+                skipCurrentGame = callbacks?.SkipGameAt?.Invoke(gameInfo) == true;
+                continue;
+            }
+
+            if (skipCurrentGame)
+                continue;
+
+            BgDecisionData? decision = record switch
+            {
+                MoveRecord move when IsAnalysed(move) =>
+                    ReadCheckerPlay(move, context, sourceFile, file.Rollouts, options.OpeningBook, logger),
+                CubeRecord cube when IsCubeDecision(cube, context) =>
+                    BuildCube(cube, context, sourceFile, file.Rollouts),
+                _ => null,
+            };
+            if (decision is null)
+                continue;
+
+            var element = project(decision);
+            yield return element;
+
+            if (callbacks is null)
+                continue;
+            var filterView = view(element);
+            if (callbacks.StopMatchAfter?.Invoke(filterView) == true)
+                yield break;
+            if (callbacks.StopGameAfter?.Invoke(filterView) == true)
+                skipCurrentGame = true;
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -399,353 +414,252 @@ public static class XgDecisionIterator
     }
 
     // -----------------------------------------------------------------------
-    //  Move record — DecisionRow
+    //  Move record — the checker play
     // -----------------------------------------------------------------------
 
-    private static DecisionRow? BuildMoveRow(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts, OpeningBook? book)
+    /// <summary>
+    /// The checker-play record of an analysed move record, or
+    /// <see langword="null"/> when the source decision builds none. Two
+    /// kinds of analysed move build no record, each passed by without
+    /// catching anything:
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <b>A non-play sentinel</b> — XG's illegal-play marker, skipped with
+    ///     a warning, or a dance, skipped silently (see
+    ///     <see cref="ClassifySentinelAnalysis"/>).
+    ///   </description></item>
+    ///   <item><description>
+    ///     <b>No roll</b> — a move record whose dice are both 0 poses no
+    ///     checker-play decision.
+    ///   </description></item>
+    /// </list>
+    /// Any other refusal from BgDataTypes_Lib is not caught: it fails loud.
+    /// </summary>
+    private static CheckerPlayDecision? ReadCheckerPlay(
+        MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts,
+        OpeningBook? book, ILogger logger)
     {
-        var analysis = move.Analysis;
-        if (!IsAnalysed(move))
-            return null;
-
-        // XG's native rank 0 is not always the highest-equity candidate;
-        // CSV Equity and the depth label that describes it must both key
-        // off the best-by-equity index, not Evals[0]. See
-        // FindBestByEquityIndex for the convention rationale.
-        int bestIdx = FindBestByEquityIndex(analysis);
-        var bestEval = analysis.Evals[bestIdx];
-        int dice = DiceToInt(move.Dice);
-
-        // Label and taxonomy pair all key off the same best-by-equity
-        // candidate — book entry included — so DecisionRow.AnalysisDepth and
-        // DecisionRow.AnalysisMode/AnalysisLevel can never describe
-        // different candidates.
-        short bestLevel = bestIdx < analysis.EvalLevels.Length ? analysis.EvalLevels[bestIdx].Level : (short)0;
-        var (depth, _, _, mode, level) = ResolveDepthInfo(
-            evalLevel: bestLevel,
-            rolloutIndex: bestIdx < move.RolloutIndices.Length ? move.RolloutIndices[bestIdx] : -1,
-            rollouts: rollouts,
-            bookEntry: LookupBookEntry(book, bestLevel, analysis, bestIdx, move.ActivePlayer, ctx));
-
-        string xgid = BuildXgid(
-            move.InitialPosition, move.ActivePlayer, ctx.CubeValue, ctx.CubePosition, dice, ctx);
-
-        int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
-        int userPlayIndex = FindUserPlayIndex(analysis, move.FinalPosition);
-        var (afterBest, afterPlayer) = ComputeMoveAfterBoards(board, analysis, userPlayIndex);
-
-        return new DecisionRow
+        // Skip XG's non-play sentinels before they reach the translator:
+        // an illegal-play marker historically crashed the leaves, a dance
+        // rendered as "1/1" garbage. Illegal plays are worth a contextual
+        // warning; dances are normal and skip silently.
+        switch (ClassifySentinelAnalysis(move.Analysis))
         {
-            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber, isCube: false),
-            Xgid = xgid,
-            Error = move.MoveError > -999.0 ? Math.Abs(move.MoveError) : 0.0,
-            OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
-            OpponentNeeds = ctx.NeedsFor(-move.ActivePlayer),
-            IsCrawford = ctx.IsCrawford,
-            IsJacoby = ctx.JacobyStamp,
-            MatchLength = ctx.MatchLength,
-            Player = ctx.PlayerName(move.ActivePlayer),
-            SourceFile = ctx.SourceFile,
-            Game = ctx.GameNumber,
-            MoveNumber = ctx.MoveNumber,
-            IsStandardStart = ctx.IsStandardStart,
-            Roll = dice,
-            AnalysisDepth = depth,
-            AnalysisMode = mode,
-            AnalysisLevel = level,
-            Equity = bestEval.Equity,
-            Board = board,
-            AfterBestBoard = afterBest,
-            AfterPlayerBoard = afterPlayer,
-        };
-    }
-
-    // -----------------------------------------------------------------------
-    //  Move record — DiagramRequest
-    // -----------------------------------------------------------------------
-
-    private static BgDecisionData? BuildMoveDiagramRequest(MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts, OpeningBook? book)
-    {
-        var analysis = move.Analysis;
-        if (!IsAnalysed(move))
-            return null;
-        int dice = DiceToInt(move.Dice);
-        if (dice == 0) return null;
-
-        string xgid = BuildXgid(
-            move.InitialPosition, move.ActivePlayer, ctx.CubeValue, ctx.CubePosition, dice, ctx);
-
-        int[] board = ToBoard(move.InitialPosition.Points, move.ActivePlayer);
-        ComputePipCounts(board, out int onRollPips, out int opponentPips);
-
-        int rawUserPlayIndex = FindUserPlayIndex(analysis, move.FinalPosition);
-        var (afterBest, afterPlayer) = ComputeMoveAfterBoards(board, analysis, rawUserPlayIndex);
-
-        // XG stores candidates in its native ranking order, which is not
-        // strict equity-descending: a rank-2 candidate can have higher equity
-        // than rank-0. Sort by equity so Plays[0] is truly best, EquityLoss
-        // (= bestEquity - candidateEquity) is non-negative throughout, and
-        // the renderer's equity column reads monotonically. OrderByDescending
-        // is stable, preserving XG's order for ties.
-        int n = Math.Min(analysis.MoveCount, analysis.Evals.Length);
-        int[] sortedIdx = Enumerable.Range(0, n)
-            .OrderByDescending(i => analysis.Evals[i].Equity)
-            .ToArray();
-
-        // Sorted Plays means UserPlayIndex (an index into Plays per the
-        // BgDataTypes contract) must be re-mapped from the XG-native index
-        // FindUserPlayIndex returned.
-        int userPlayIndex = -1;
-        if (rawUserPlayIndex >= 0)
-        {
-            for (int k = 0; k < sortedIdx.Length; k++)
-                if (sortedIdx[k] == rawUserPlayIndex) { userPlayIndex = k; break; }
+            case SentinelKind.IllegalPlay:
+                logger.LogWarning(
+                    "Illegal play in {SourceFile}, game {Game}, move {MoveNumber}, roll {Roll}",
+                    sourceFile, ctx.GameNumber, ctx.MoveNumber, DiceToInt(move.Dice));
+                return null;
+            case SentinelKind.Dance:
+                return null;
         }
 
-        var plays = new List<PlayCandidate>(n);
-        double bestEquity = n > 0 ? analysis.Evals[sortedIdx[0]].Equity : 0.0;
-        for (int k = 0; k < n; k++)
+        if (!StatesRoll(move))
+            return null;
+
+        var board = OnRollBoard(move.InitialPosition, move.ActivePlayer);
+        var plays = CandidatePlays(move.Analysis, board);
+        return BuildCheckerPlay(move, ctx, sourceFile, board, plays, rollouts, book);
+    }
+
+    /// <summary>
+    /// Every candidate's play, in XG's order, translated from XG's encoding
+    /// against the decision's <paramref name="board"/> (the mover's frame).
+    /// A candidate is a slot the analysis carries a move encoding and an
+    /// evaluation for, within its move count.
+    /// </summary>
+    private static List<Play> CandidatePlays(BestMoveAnalysis analysis, BoardPosition board)
+    {
+        int count = CandidateCount(analysis);
+        var plays = new List<Play>(count);
+        for (int i = 0; i < count; i++)
+            plays.Add(XgMoveTranslator.Translate(analysis.Moves[i], board));
+        return plays;
+    }
+
+    /// <summary>The number of candidates an analysis carries: the slots with a move encoding and an evaluation, within its move count.</summary>
+    private static int CandidateCount(BestMoveAnalysis analysis) =>
+        Math.Min(analysis.MoveCount, Math.Min(analysis.Evals.Length, analysis.Moves.Length));
+
+    /// <summary>
+    /// Builds the checker-play record: the position, the session and the
+    /// descriptive facts, the roll as rolled, the candidates in XG's order —
+    /// each with its typed depth facts, equity and probabilities — the
+    /// played candidate, and XG's error for a played move not among them.
+    /// </summary>
+    private static CheckerPlayDecision BuildCheckerPlay(
+        MoveRecord move, MatchContext ctx, string sourceFile, BoardPosition board,
+        List<Play> plays, List<RolloutContext> rollouts, OpeningBook? book)
+    {
+        var analysis = move.Analysis;
+        var seat = MatchContext.SeatOf(move.ActivePlayer);
+        var id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber, isCube: false);
+
+        var candidates = new List<PlayCandidate>(plays.Count);
+        for (int i = 0; i < plays.Count; i++)
         {
-            int i = sortedIdx[k];
-            double equity = analysis.Evals[i].Equity;
             var eval = analysis.Evals[i];
-            sbyte[] candidateMoves = i < analysis.Moves.Length ? analysis.Moves[i] : [];
-            short evalLevel = i < analysis.EvalLevels.Length
-                ? analysis.EvalLevels[i].Level
-                : (short)0;
             // Each candidate enriches from its own book entry (keyed by its
             // own resulting position) — a book-analysed decision can mix
             // book-stamped and evaluated candidates, and different candidates
             // resolve to different book rollouts.
-            var (candidateDepth, candidateDepthAbbrev, candidateDepthRank, candidateMode, candidateLevel) = ResolveDepthInfo(
-                evalLevel: evalLevel,
-                rolloutIndex: i < move.RolloutIndices.Length ? move.RolloutIndices[i] : -1,
-                rollouts: rollouts,
-                bookEntry: LookupBookEntry(book, evalLevel, analysis, i, move.ActivePlayer, ctx));
-            // Each candidate gets its own scratch board so hit-tracking in
-            // one candidate doesn't leak into the next. Translate once and
-            // share the resulting Play between MoveNotation (rendered form)
-            // and Play (structural form) so the two views can never disagree.
-            int[] scratchBoard = (int[])board.Clone();
-            Play candidatePlay = XgMoveTranslator.Translate(candidateMoves, scratchBoard);
-            plays.Add(new PlayCandidate
+            var depth = i < analysis.EvalLevels.Length
+                ? XgDepthFacts.Resolve(
+                    analysis.EvalLevels[i].Level,
+                    rolloutIndex: i < move.RolloutIndices.Length ? move.RolloutIndices[i] : -1,
+                    rollouts,
+                    LookupBookEntry(book, analysis.EvalLevels[i].Level, analysis, i, move.ActivePlayer, ctx))
+                : XgDepthFacts.NotRecorded;
+            candidates.Add(new PlayCandidate
             {
-                MoveNotation = BgMoveGen.MoveNotationFormatter.Format(candidatePlay),
-                Play = candidatePlay,
-                Depth = candidateDepth,
-                DepthAbbreviation = candidateDepthAbbrev,
-                DepthRank = candidateDepthRank,
-                AnalysisMode = candidateMode,
-                AnalysisLevel = candidateLevel,
-                Equity = equity,
-                EquityLoss = bestEquity - equity,
+                Play = plays[i],
+                AnalysisMode = depth.Mode,
+                AnalysisLevel = depth.Level,
+                RolloutTrials = depth.RolloutTrials,
+                BookEdition = depth.BookEdition,
+                UnrecognizedLevelCode = depth.UnrecognizedLevelCode,
+                Equity = eval.Equity,
                 WinPct = eval.WinSingle,
                 WinGammonPct = eval.WinGammon,
                 WinBgPct = eval.WinBackgammon,
-                LosePct = eval.LoseSingle,
                 LoseGammonPct = eval.LoseGammon,
                 LoseBgPct = eval.LoseBackgammon,
             });
         }
 
-        return new BgDecisionData
+        int? userPlayIndex = FindUserPlayIndex(analysis, plays.Count, move.FinalPosition);
+
+        return new CheckerPlayDecision
         {
-            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber, isCube: false),
-            Xgid = xgid,
+            Id = id,
             Position = new PositionData
             {
                 Mop = board,
-                OnRollNeeds = ctx.NeedsFor(move.ActivePlayer),
-                OpponentNeeds = ctx.NeedsFor(-move.ActivePlayer),
-                OnRollPipCount = onRollPips,
-                OpponentPipCount = opponentPips,
                 CubeSize = ctx.CubeValue,
-                CubeOwner = CubeOwnerFor(ctx.CubePosition, move.ActivePlayer),
-                IsCrawford = ctx.IsCrawford,
-                IsJacoby = ctx.JacobyStamp,
+                CubeOwner = CubeOwnerFor(ctx.CubePosition, seat),
+                Session = ctx.SessionFor(seat),
             },
-            Decision = new DecisionData
+            Descriptive = Descriptive(id, ctx, seat, move.CommentIndex, move.Flagged),
+            Decision = new CheckerPlayDecisionData
             {
-                IsCube = false,
                 Dice = [move.Dice[0], move.Dice[1]],
-                BestPlayIndex = 0,
+                Plays = candidates,
                 UserPlayIndex = userPlayIndex,
-                UserPlayError = move.MoveError > -999.0 ? Math.Abs(move.MoveError) : (double?)null,
-                Plays = plays,
-            },
-            Descriptive = new DescriptiveData
-            {
-                MatchLength = ctx.MatchLength,
-                OnRollName = ctx.PlayerName(move.ActivePlayer),
-                OpponentName = ctx.PlayerName(-move.ActivePlayer),
-                SourceFile = ctx.SourceFile,
-                Game = ctx.GameNumber,
-                MoveNumber = ctx.MoveNumber,
-                IsStandardStart = ctx.IsStandardStart,
-                Comment = ctx.CommentAt(move.CommentIndex),
-                Flagged = move.Flagged,
-            },
-            Outcome = new PlayOutcomeData
-            {
-                AfterBestBoard = afterBest,
-                AfterPlayerBoard = afterPlayer,
+                // XG's error for the played move is stored only where the
+                // record states no played candidate to derive it from.
+                UnlistedPlayError = userPlayIndex is null && move.MoveError > -999.0
+                    ? Math.Abs(move.MoveError)
+                    : null,
             },
         };
     }
 
     // -----------------------------------------------------------------------
-    //  Cube record — DecisionRow
+    //  Cube record — the cube decision
     // -----------------------------------------------------------------------
 
-    private static IEnumerable<DecisionRow> BuildCubeRows(CubeRecord cube, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
+    /// <summary>
+    /// Builds the cube-decision record of a cube record the dispatch admitted
+    /// (<see cref="IsCubeDecision"/>), the doubler's view: the position, the
+    /// session and the descriptive facts, the analysis's typed depth facts,
+    /// equities and probabilities, the played actions, and XG's error for a
+    /// half whose action the record does not state.
+    /// </summary>
+    private static CubeDecision BuildCube(
+        CubeRecord cube, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
     {
         var analysis = cube.Analysis;
+        var board = OnRollBoard(cube.Position, cube.ActivePlayer);
+        var seat = MatchContext.SeatOf(cube.ActivePlayer);
+        var id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true);
 
         // No book entry: the cube-row keying convention against the opening
-        // book is unproven (see LookupBookEntry), so a book-stamped cube
-        // resolves to the degraded BookRollout + Unknown pair by design.
-        // Depth resolves from Level — the level that produced the emitted
-        // equities — not the LevelRequest setting; the two diverge on 59%
-        // of analysed corpus cubes (halheinrich/backgammon#161).
-        var (depth, _, _, mode, level) = ResolveDepthInfo(
-            evalLevel: (short)analysis.Level,
-            rolloutIndex: cube.RolloutIndex,
-            rollouts: rollouts);
-
-        int cubeActual = CubeValueActual(cube.CubeValue);
-        int cubePos = Math.Sign(cube.CubeValue);
-
-        string xgid = BuildXgid(
-            cube.Position, cube.ActivePlayer, cubeActual, cubePos, dice: 0, ctx);
-
-        int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
-
-        yield return new DecisionRow
-        {
-            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true),
-            Xgid = xgid,
-            Error = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : 0.0,
-            OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
-            OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
-            IsCrawford = ctx.IsCrawford,
-            IsJacoby = ctx.JacobyStamp,
-            MatchLength = ctx.MatchLength,
-            Player = ctx.PlayerName(cube.ActivePlayer),
-            SourceFile = ctx.SourceFile,
-            Game = ctx.GameNumber,
-            MoveNumber = ctx.MoveNumber + 1,
-            IsStandardStart = ctx.IsStandardStart,
-            Roll = 0,
-            AnalysisDepth = depth,
-            AnalysisMode = mode,
-            AnalysisLevel = level,
-            Equity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0f,
-            Board = board,
-            // Cube decisions carry no play; the PlayOutcomeData contract requires
-            // both after-boards empty. Explicit to document the producer intent.
-            AfterBestBoard = [],
-            AfterPlayerBoard = [],
-        };
-    }
-
-    // -----------------------------------------------------------------------
-    //  Cube record — DiagramRequest
-    // -----------------------------------------------------------------------
-
-    private static IEnumerable<BgDecisionData> BuildCubeDiagramRequests(CubeRecord cube, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts)
-    {
-        var analysis = cube.Analysis;
-
-        // No book entry — same degradation rationale as BuildCubeRows,
-        // and depth resolves from the ran Level for the same reason.
-        var (depth, depthAbbrev, depthRank, mode, level) = ResolveDepthInfo(
-            evalLevel: (short)analysis.Level,
-            rolloutIndex: cube.RolloutIndex,
-            rollouts: rollouts);
-
-        int cubePos = Math.Sign(cube.CubeValue);
-        int cubeActual = CubeValueActual(cube.CubeValue);
-
-        string xgid = BuildXgid(
-            cube.Position, cube.ActivePlayer, cubeActual, cubePos, dice: 0, ctx);
-
-        int[] board = ToBoard(cube.Position.Points, cube.ActivePlayer);
-        ComputePipCounts(board, out int onRollPips, out int opponentPips);
+        // book is unproven (see LookupBookEntry), so a book-stamped cube states
+        // its bare book facts by design. Depth resolves from Level — the level
+        // that produced the stored equities — not the LevelRequest setting; the
+        // two diverge on 59% of analysed corpus cubes (halheinrich/backgammon#161).
+        var depth = XgDepthFacts.Resolve(analysis.Level, cube.RolloutIndex, rollouts);
 
         // Resolved once: the doubler half is both a stamped field and the
-        // "a double was offered" gate on the take error, so the two can
+        // "a double was offered" gate on the taker's error, so the two can
         // never disagree about whether this record holds a double.
         CubeAction? doublerAction = UserDoublerActionOf(cube);
+        CubeAction? takerAction = UserTakerActionOf(cube);
 
-        yield return new BgDecisionData
+        return new CubeDecision
         {
-            Id = BuildDecisionId(sourceFile, ctx.GameNumber, ctx.MoveNumber + 1, isCube: true),
-            Xgid = xgid,
+            Id = id,
             Position = new PositionData
             {
                 Mop = board,
-                OnRollNeeds = ctx.NeedsFor(cube.ActivePlayer),
-                OpponentNeeds = ctx.NeedsFor(-cube.ActivePlayer),
-                OnRollPipCount = onRollPips,
-                OpponentPipCount = opponentPips,
-                CubeSize = cubeActual,
-                CubeOwner = CubeOwnerFor(cubePos, cube.ActivePlayer),
-                IsCrawford = ctx.IsCrawford,
-                IsJacoby = ctx.JacobyStamp,
+                CubeSize = CubeValueActual(cube.CubeValue),
+                CubeOwner = CubeOwnerFor(Math.Sign(cube.CubeValue), seat),
+                Session = ctx.SessionFor(seat),
             },
-            Decision = new DecisionData
+            Descriptive = Descriptive(id, ctx, seat, cube.CommentIndex, cube.Flagged),
+            Decision = new CubeDecisionData
             {
-                IsCube = true,
-                Dice = [0, 0],
-                NoDoubleEquity = IsUsable(analysis.EquityNoDouble) ? analysis.EquityNoDouble : 0.0,
-                DoubleTakeEquity = IsUsable(analysis.EquityDoubleTake) ? analysis.EquityDoubleTake : 0.0,
-                CubelessNoDoubleEquity = IsUsable(analysis.EvalNoDouble.Equity) ? analysis.EvalNoDouble.Equity : 0.0,
-                CubelessDoubleTakeEquity = IsUsable(analysis.EvalDoubleTake.Equity) ? analysis.EvalDoubleTake.Equity : 0.0,
+                AnalysisMode = depth.Mode,
+                AnalysisLevel = depth.Level,
+                RolloutTrials = depth.RolloutTrials,
+                BookEdition = depth.BookEdition,
+                UnrecognizedLevelCode = depth.UnrecognizedLevelCode,
+                NoDoubleEquity = analysis.EquityNoDouble,
+                DoubleTakeEquity = analysis.EquityDoubleTake,
+                CubelessNoDoubleEquity = analysis.EvalNoDouble.Equity,
+                CubelessDoubleTakeEquity = analysis.EvalDoubleTake.Equity,
                 WinPctAfterNoDouble = analysis.EvalNoDouble.WinSingle,
                 GammonPctAfterNoDouble = analysis.EvalNoDouble.WinGammon,
                 BgPctAfterNoDouble = analysis.EvalNoDouble.WinBackgammon,
-                LosePctAfterNoDouble = analysis.EvalNoDouble.LoseSingle,
                 LoseGammonPctAfterNoDouble = analysis.EvalNoDouble.LoseGammon,
                 LoseBgPctAfterNoDouble = analysis.EvalNoDouble.LoseBackgammon,
                 WinPctAfterDoubleTake = analysis.EvalDoubleTake.WinSingle,
                 GammonPctAfterDoubleTake = analysis.EvalDoubleTake.WinGammon,
                 BgPctAfterDoubleTake = analysis.EvalDoubleTake.WinBackgammon,
-                LosePctAfterDoubleTake = analysis.EvalDoubleTake.LoseSingle,
                 LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
                 LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
-                CubeDepth = depth,
-                CubeDepthAbbreviation = depthAbbrev,
-                CubeDepthRank = depthRank,
-                CubeAnalysisMode = mode,
-                CubeAnalysisLevel = level,
-                UserDoubleError = cube.ErrorCube > -999.0 ? Math.Abs(cube.ErrorCube) : (double?)null,
-                UserTakeError = (doublerAction is CubeAction.Double && cube.ErrorTake > -999.0)
-                    ? Math.Abs(cube.ErrorTake)
-                    : (double?)null,
+                // Temporary arc debt (Hal's ruling on halheinrich/backgammon#273,
+                // 2026-09-27): XG stores no such value, so the record's claim that
+                // it is stored is a producer-model gap. The 0 every converted
+                // record has carried stays until BgDataTypes_Lib's next leg of
+                // halheinrich/backgammon#273 removes the field; it is not derived
+                // here (the figure is booked as halheinrich/backgammon#288).
+                ProbOfOpponentErrorJustifyingDouble = 0,
                 UserDoublerAction = doublerAction,
-                UserTakerAction = UserTakerActionOf(cube),
-            },
-            Descriptive = new DescriptiveData
-            {
-                MatchLength = ctx.MatchLength,
-                OnRollName = ctx.PlayerName(cube.ActivePlayer),
-                OpponentName = ctx.PlayerName(-cube.ActivePlayer),
-                SourceFile = ctx.SourceFile,
-                Game = ctx.GameNumber,
-                MoveNumber = ctx.MoveNumber + 1,
-                IsStandardStart = ctx.IsStandardStart,
-                Comment = ctx.CommentAt(cube.CommentIndex),
-                Flagged = cube.Flagged,
-            },
-            // Cube decisions carry no play; PlayOutcomeData contract requires
-            // both after-boards empty. Explicit for producer intent.
-            Outcome = new PlayOutcomeData
-            {
-                AfterBestBoard = [],
-                AfterPlayerBoard = [],
+                UserTakerAction = takerAction,
+                // XG's error for a half is stored only where the record states
+                // no action of that half to derive it from; the taker's exists
+                // only once a double was offered.
+                UnstatedDoublerActionError = doublerAction is null && cube.ErrorCube > -999.0
+                    ? Math.Abs(cube.ErrorCube)
+                    : null,
+                UnstatedTakerActionError = doublerAction is CubeAction.Double && takerAction is null && cube.ErrorTake > -999.0
+                    ? Math.Abs(cube.ErrorTake)
+                    : null,
             },
         };
     }
+
+    // -----------------------------------------------------------------------
+    //  Both kinds — the descriptive facts
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The descriptive facts of a decision taken from <paramref name="seat"/>:
+    /// the players' names, whether its game started from the standard
+    /// position, its comment and its flag. A standalone position — an
+    /// <see cref="XgpDecisionId"/> — belongs to no game, so states no standard
+    /// start (halheinrich/backgammon#124); the record holds the two to
+    /// agreement, and the start is read off the id here so they cannot differ.
+    /// </summary>
+    private static DescriptiveData Descriptive(DecisionId id, MatchContext ctx, Seat seat, int commentIndex, bool flagged) => new()
+    {
+        OnRollName = ctx.NameOf(seat),
+        OpponentName = ctx.NameOf(seat == Seat.Player1 ? Seat.Player2 : Seat.Player1),
+        IsStandardStart = id is XgDecisionId ? ctx.GameInfo!.IsStandardStart : null,
+        Comment = ctx.CommentAt(commentIndex),
+        Flagged = flagged,
+    };
 
     // -----------------------------------------------------------------------
     //  Cube record — played action
@@ -756,7 +670,7 @@ public static class XgDecisionIterator
     /// <see cref="CubeAction"/> the player on roll actually played, or
     /// <see langword="null"/> when the record holds no played cube action.
     /// Single source of the "a double was offered" test for this producer —
-    /// the take-error gate reads it too.
+    /// the taker's error gate reads it too.
     ///
     /// <para>
     /// <c>Doubled</c> is a pane-state field, not a two-valued flag: only
@@ -840,175 +754,49 @@ public static class XgDecisionIterator
     //  Board helpers
     // -----------------------------------------------------------------------
 
-    private static int[] ToBoard(sbyte[] points, int activePlayer)
-    {
-        var board = new int[26];
-        for (int i = 0; i < 26; i++)
-            board[i] = points[i];
-        return activePlayer >= 0 ? board : BackgammonConstants.Flip(board);
-    }
-
-    private static PositionEngine FlipPosition(PositionEngine pos)
-        => new() { Points = BackgammonConstants.Flip(pos.Points) };
-
     /// <summary>
-    /// Builds the XGID string for a decision. When <paramref name="activePlayer"/>
-    /// is negative the position is flipped, the cube position negated, and the
-    /// two scores swapped so the XGID reads from the on-roll player's side.
-    /// Shared by the move-row and cube-row builders.
+    /// A record's position — stored in XG's player-1 frame — seen from the
+    /// player on roll, the frame of <see cref="PositionData.Mop"/>: as stored
+    /// for player 1, flipped by <see cref="BoardPosition.Flipped"/> for
+    /// player 2.
     /// </summary>
-    private static string BuildXgid(
-        PositionEngine position, int activePlayer, int cubeValue, int cubePosition,
-        int dice, MatchContext ctx)
+    internal static BoardPosition OnRollBoard(PositionEngine position, int activePlayer)
     {
-        var xgidPosition = activePlayer >= 0 ? position : FlipPosition(position);
-        int xgidCubePos = activePlayer >= 0 ? cubePosition : -cubePosition;
-
-        return XgidEncoder.Encode(
-            position: xgidPosition,
-            cubeValue: cubeValue,
-            cubePos: xgidCubePos,
-            turn: 1,
-            dice: dice,
-            score1: activePlayer >= 0 ? ctx.Score1 : ctx.Score2,
-            score2: activePlayer >= 0 ? ctx.Score2 : ctx.Score1,
-            crawfordJacoby: ctx.XgidCrawfordJacobyField,
-            matchLength: ctx.MatchLength,
-            maxCubeLog2: ctx.MaxCubeLimit);
+        var stored = position.ToBoardPosition();
+        return MatchContext.SeatOf(activePlayer) == Seat.Player1 ? stored : stored.Flipped();
     }
 
     /// <summary>
-    /// Computes pip counts from a board array already normalised to on-roll perspective.
-    /// Points 1–24 contribute their distance from each player's home; bar checkers
-    /// contribute the maximum distance of 25 pips each. Per the on-roll-POV layout,
-    /// <c>board[25]</c> holds the on-roll player's bar (positive entries) and
-    /// <c>board[0]</c> holds the opponent's bar (negative entries).
+    /// Returns the <see cref="CubeOwner"/> from the player on roll's side.
+    /// <paramref name="cubePosition"/> uses XG's raw sign convention (+1 =
+    /// player 1 owns, −1 = player 2 owns, 0 = centred).
     /// </summary>
-    internal static void ComputePipCounts(int[] board, out int onRollPips, out int opponentPips)
-    {
-        int onRoll = 0, opponent = 0;
-        for (int i = 1; i <= 24; i++)
-        {
-            int v = board[i];
-            if (v > 0) onRoll += v * i;
-            else if (v < 0) opponent += -v * (25 - i);
-        }
-        onRoll += board[25] * 25;
-        opponent += -board[0] * 25;
-        onRollPips = onRoll;
-        opponentPips = opponent;
-    }
-
-    /// <summary>
-    /// Returns the <see cref="CubeOwner"/> from the on-roll player's perspective.
-    /// <paramref name="cubePosition"/> uses the raw XG sign convention (+1 = player1 owns,
-    /// -1 = player2 owns, 0 = centred); <paramref name="activePlayer"/> is +1 or -1.
-    /// </summary>
-    private static CubeOwner CubeOwnerFor(int cubePosition, int activePlayer)
+    private static CubeOwner CubeOwnerFor(int cubePosition, Seat onRoll)
     {
         if (cubePosition == 0) return CubeOwner.Centered;
-        return cubePosition == activePlayer ? CubeOwner.OnRoll : CubeOwner.Opponent;
+        var owner = cubePosition > 0 ? Seat.Player1 : Seat.Player2;
+        return owner == onRoll ? CubeOwner.OnRoll : CubeOwner.Opponent;
     }
 
     /// <summary>
-    /// Returns true if two <see cref="PositionEngine"/> instances have identical Points arrays.
+    /// Identifies which candidate is the move the player actually made, by
+    /// resulting position: the candidate whose position after the play, as
+    /// XG stores it (<see cref="BestMoveAnalysis.PositionsPlayed"/>), is the
+    /// position XG stores after the move (<see cref="MoveRecord.FinalPosition"/>)
+    /// — the two compared as <see cref="BoardPosition"/> values, the one "same
+    /// position". <see langword="null"/> when no candidate reaches it: the
+    /// player chose a move XG did not list, or made none (a saved position
+    /// with dice but no move stores an empty final position).
     /// </summary>
-    private static bool PositionsEqual(PositionEngine a, PositionEngine b)
+    private static int? FindUserPlayIndex(BestMoveAnalysis analysis, int candidateCount, PositionEngine finalPosition)
     {
-        for (int i = 0; i < 26; i++)
-            if (a.Points[i] != b.Points[i]) return false;
-        return true;
-    }
-
-    /// <summary>
-    /// Returns the index of the highest-equity entry in
-    /// <see cref="BestMoveAnalysis.Evals"/> — the canonical "best play"
-    /// locator for this subproject.
-    ///
-    /// <para>
-    /// XG stores candidates in its native ranking order, which is not
-    /// always strict equity-descending: a rank-&gt;0 entry can have higher
-    /// equity than rank 0. Rank-coupled data (<c>Evals</c>, <c>Moves</c>,
-    /// <c>PositionsPlayed</c>, <c>EvalLevels</c>) shares the same index,
-    /// so any producer surface that reports "best play" — CSV
-    /// <c>DecisionRow.Equity</c>, <c>PlayOutcomeData.AfterBestBoard</c>,
-    /// the top of sorted <c>BgDecisionData.Plays</c> — must resolve it
-    /// through this helper rather than hard-coding <c>[0]</c>.
-    /// </para>
-    ///
-    /// <para>
-    /// Stable tie-break: on equal equity, the lower XG-native index
-    /// wins, matching the semantics of a descending stable sort.
-    /// Callers are expected to have already gated on <c>MoveCount == 0</c>
-    /// or <c>Evals.Length == 0</c>; returns 0 on an empty analysis.
-    /// </para>
-    /// </summary>
-    internal static int FindBestByEquityIndex(BestMoveAnalysis analysis)
-    {
-        int n = Math.Min(analysis.MoveCount, analysis.Evals.Length);
-        if (n == 0) return 0;
-
-        int bestIdx = 0;
-        double bestEq = analysis.Evals[0].Equity;
-        for (int i = 1; i < n; i++)
-        {
-            double eq = analysis.Evals[i].Equity;
-            if (eq > bestEq)
-            {
-                bestIdx = i;
-                bestEq = eq;
-            }
-        }
-        return bestIdx;
-    }
-
-    /// <summary>
-    /// Identifies which analysis candidate matches the move the player actually
-    /// made. Returns <c>-1</c> when the played position is not in the analysed
-    /// candidate set (e.g. the player chose a move XG didn't rank in its top-N).
-    /// </summary>
-    private static int FindUserPlayIndex(BestMoveAnalysis analysis, PositionEngine finalPosition)
-    {
-        for (int i = 0; i < analysis.PositionsPlayed.Length && i < analysis.MoveCount; i++)
-            if (PositionsEqual(analysis.PositionsPlayed[i], finalPosition)) return i;
-        return -1;
-    }
-
-    /// <summary>
-    /// Computes the after-boards for a checker-play decision.
-    ///
-    /// <para>
-    /// When <paramref name="userPlayIndex"/> is a valid index into
-    /// <see cref="BestMoveAnalysis.Moves"/>, both boards are computed via
-    /// <see cref="AfterBoardBuilder.ComputeAfterBoard"/>: best from
-    /// <c>Moves[FindBestByEquityIndex(analysis)]</c>, player from
-    /// <c>Moves[userPlayIndex]</c>. The "best" index keys off the
-    /// highest-equity candidate (see <see cref="FindBestByEquityIndex"/>),
-    /// not XG-native rank 0 — those disagree on the subset of decisions
-    /// where XG's stored ranking is not strict equity-descending.
-    /// </para>
-    ///
-    /// <para>
-    /// Otherwise — when the player's actual play is not in the analysed
-    /// candidate set, or XG did not emit a move encoding for that index —
-    /// both boards are returned empty. Per the
-    /// <see cref="PlayOutcomeData"/> contract this makes the decision
-    /// invisible to board-based play-type filters, matching the handling of
-    /// cube decisions.
-    /// </para>
-    /// </summary>
-    private static (IReadOnlyList<int> afterBest, IReadOnlyList<int> afterPlayer) ComputeMoveAfterBoards(
-        int[] priorBoard, BestMoveAnalysis analysis, int userPlayIndex)
-    {
-        if (userPlayIndex < 0 || userPlayIndex >= analysis.Moves.Length)
-            return ([], []);
-
-        int bestIdx = FindBestByEquityIndex(analysis);
-
-        return (
-            AfterBoardBuilder.ComputeAfterBoard(priorBoard, analysis.Moves[bestIdx]),
-            AfterBoardBuilder.ComputeAfterBoard(priorBoard, analysis.Moves[userPlayIndex])
-        );
+        if (!finalPosition.TryToBoardPosition(out var played))
+            return null;
+        int scan = Math.Min(candidateCount, analysis.PositionsPlayed.Length);
+        for (int i = 0; i < scan; i++)
+            if (analysis.PositionsPlayed[i].TryToBoardPosition(out var reached) && reached == played)
+                return i;
+        return null;
     }
 
     // -----------------------------------------------------------------------
@@ -1018,11 +806,13 @@ public static class XgDecisionIterator
     /// <summary>
     /// Scans <paramref name="file"/>'s records for the first
     /// <see cref="MatchHeaderRecord"/> and returns an <see cref="XgMatchInfo"/>
-    /// populated from it, or <c>null</c> if no match header is present.
-    /// Callers that previously relied on a default-constructed return (empty
-    /// strings, <c>MatchLength = 0</c>) should treat <c>null</c> as
-    /// "match header unreadable" rather than as a zero-length money match.
+    /// projected from it, or <c>null</c> if no match header is present.
+    /// Callers must treat <c>null</c> as "match header unreadable".
     /// </summary>
+    /// <exception cref="InvalidDataException">
+    /// Thrown when the header states terms this reader will not read (see
+    /// <see cref="XgMatchInfo"/>).
+    /// </exception>
     public static XgMatchInfo? ExtractMatchInfo(XgFile file)
     {
         foreach (var r in file.Records)
@@ -1034,182 +824,8 @@ public static class XgDecisionIterator
     }
 
     // -----------------------------------------------------------------------
-    //  Depth resolution
+    //  Book enrichment
     // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// Resolves the analysis depth for a candidate into five parallel
-    /// forms: the full human-readable label, a compact abbreviation for
-    /// narrow cells, an ordinal rank (higher = deeper / more rigorous),
-    /// and the machine-usable <see cref="AnalysisMode"/> ×
-    /// <see cref="AnalysisLevel"/> taxonomy pair. All five come from the
-    /// same structured inputs — no string re-parsing — so the producer
-    /// keeps ownership of depth semantics.
-    ///
-    /// <para>
-    /// Rollout branch: when <paramref name="rolloutIndex"/> is a valid
-    /// index into <paramref name="rollouts"/>, the rollout is named by its
-    /// inner evaluation level: the first leg phase's (<c>Level1</c>) when a
-    /// first phase exists — <c>LevelCut</c>, the number of moves it covers,
-    /// is above 0 — otherwise the second phase's (<c>Level2</c>), which then
-    /// plays the whole rollout. First phase first: it is what the user set as
-    /// the rollout's strength, and a later, cheaper phase is an economy, not
-    /// the rollout's name — XG's "First 2 moves: 4-ply … Remaining moves:
-    /// XG Roller" (<c>LevelCut</c> 2) is a 4-ply rollout (the user's ruling
-    /// on halheinrich/backgammon#251). Phase existence is read from
-    /// <c>LevelCut</c>, never from a level: a level of 0 is 1-ply, not
-    /// "unset", so a genuine 1-ply phase is named 1-ply.
-    /// <c>LevelTrunc</c> is not consulted: it belongs to truncation, not to a
-    /// phase the rollout's moves are played at. The inner level is
-    /// decoded once, through <see cref="LevelInfo"/> — the PLAYERLEVEL code
-    /// space, where <c>Level*</c> value 2 is 3-ply and 1000–1002 the XG
-    /// Roller family — and every output derives from that one projection,
-    /// combined with <c>GamesRolled</c>:
-    /// <c>Label = "Rollout: {trials} trials. {inner label}"</c>, an
-    /// <c>Abbreviation</c> in the grammar's rollout form over the inner
-    /// level's token (<see cref="InnerLevelToken"/>, shared with the book
-    /// branch) and the trial count (<see cref="DepthAbbreviationFormat.Rollout"/>
-    /// — the grammar's one spelling), <c>Rank = 100 + inner rank</c>, and the
-    /// pair <see cref="AnalysisMode.Rollout"/> plus the inner level's
-    /// <see cref="AnalysisLevel"/>. An unrecognised inner code degrades as it
-    /// does anywhere — <see cref="AnalysisLevel.Unknown"/>, inner rank 0 (so
-    /// the rollout floor, 100), and its raw <c>level-{code}</c> spelling in
-    /// label and abbreviation (defensive — a rolled-out candidate always
-    /// carries a recognised inner level in practice).
-    /// </para>
-    ///
-    /// <para>
-    /// Book branch: when <paramref name="bookEntry"/> is non-null — the
-    /// caller resolved a V2-book-stamped candidate against a loaded
-    /// <see cref="OpeningBook"/> (see <see cref="LookupBookEntry"/>) — and
-    /// the entry is a rollout entry (<c>Level == 100</c>), the entry's
-    /// stored rollout parameters enrich the projection:
-    /// <c>Label = "Book V2: {trials} trials. {moves-level label}"</c> and an
-    /// <c>Abbreviation</c> in the grammar's book form over the moves-level
-    /// token (<see cref="InnerLevelToken"/>, the rollout branch's token
-    /// owner) and the trial count (<see cref="DepthAbbreviationFormat.Book"/>),
-    /// following the rollout sibling forms above. The pair is
-    /// <see cref="AnalysisMode.BookRollout"/> plus the entry's
-    /// <c>RolloutMovesLevel</c> mapped through <see cref="LevelInfo"/> —
-    /// the moves level, because only checker-play candidates are enriched
-    /// today: the book's cube-row keying convention is unproven (no
-    /// book-stamped cube decision exists in the fixture corpus to pin it),
-    /// so cube rows never pass an entry and degrade to
-    /// <see cref="AnalysisMode.BookRollout"/> +
-    /// <see cref="AnalysisLevel.Unknown"/>. Rank stays 99 — enrichment
-    /// recovers the cached rollout's parameters, but <c>DepthRank</c>
-    /// semantics hold stable across enrichment (the file itself still
-    /// records less than an explicit rollout). A non-rollout entry (the
-    /// book also stores Roller++ evaluation baselines) falls through
-    /// unenriched: its stored levels are zeroed, not rollout parameters.
-    /// </para>
-    ///
-    /// <para>
-    /// Non-rollout branch: returns the <see cref="LevelInfo"/> projection —
-    /// label, abbreviation, rank, and the mode × level pair — for
-    /// <paramref name="evalLevel"/>. The rank ordering follows XG's own
-    /// interleaved menu — 1-ply 10, 2-ply 20, 3-ply Red 25, 3-ply 30,
-    /// XG Roller 35, 4-ply 40, XG Roller+ 45, 5-ply 50, 6-ply 60, 7-ply 70,
-    /// XG Roller++ 75 — then Book V1/V2 → 99 (rollout-derived opening book:
-    /// above every evaluation, below the explicit-rollout floor (100)), and
-    /// any unrecognised level → 0. An explicit rollout (the rollout branch
-    /// above) ranks 100 plus its inner level's rank on this same grid — a
-    /// 3-ply rollout 130, an XG Roller rollout 135, a 4-ply rollout 140 — so
-    /// rollouts order among themselves by the interleaved grid and every one
-    /// outranks Book. The edge case is a "Rollout" sentinel (<c>short 100</c>)
-    /// without a matching rollout context, which ranks 100 as
-    /// <see cref="AnalysisMode.Rollout"/> + <see cref="AnalysisLevel.Unknown"/>
-    /// — the same degradation as a rollout whose inner level is unrecognised.
-    /// </para>
-    ///
-    /// <para>
-    /// Per-candidate scalar input: callers pass the rollout index keyed
-    /// to a single candidate (move-path: <c>move.RolloutIndices[i]</c>;
-    /// cube-path: <c>cube.RolloutIndex</c>) and the book entry resolved
-    /// for that same candidate's resulting position. The earlier
-    /// array-shaped signature iterated and returned on the first valid
-    /// hit, which caused every candidate in a decision to inherit the
-    /// rollout label whenever any candidate was rolled out.
-    /// </para>
-    /// </summary>
-    internal static (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) ResolveDepthInfo(
-        short evalLevel,
-        int rolloutIndex,
-        List<RolloutContext> rollouts,
-        OpeningBookEntry? bookEntry = null)
-    {
-        if (rolloutIndex >= 0 && rolloutIndex < rollouts.Count)
-        {
-            var ctx = rollouts[rolloutIndex];
-            int innerLevel = ctx.LevelCut > 0 ? ctx.Level1 : ctx.Level2;
-            var inner = LevelInfo((short)innerLevel);
-            string label = $"Rollout: {ctx.GamesRolled} trials. {inner.Label}";
-            string abbrev = DepthAbbreviationFormat.Rollout(InnerLevelToken(inner), ctx.GamesRolled);
-            return (label, abbrev, 100 + inner.Rank, AnalysisMode.Rollout, inner.Level);
-        }
-
-        if (bookEntry is { IsRollout: true })
-        {
-            var inner = LevelInfo((short)bookEntry.RolloutMovesLevel);
-            string label = $"Book V2: {bookEntry.Trials} trials. {inner.Label}";
-            string abbrev = DepthAbbreviationFormat.Book(InnerLevelToken(inner), bookEntry.Trials);
-            return (label, abbrev, LevelInfo(evalLevel).Rank, AnalysisMode.BookRollout, inner.Level);
-        }
-
-        return LevelInfo(evalLevel);
-    }
-
-    /// <summary>
-    /// Compact inner-level token for both trial-bearing abbreviations — the
-    /// token slot of <see cref="DepthAbbreviationFormat.Rollout"/> (the
-    /// rollout's inner evaluation level) and of
-    /// <see cref="DepthAbbreviationFormat.Book"/> (the book entry's moves
-    /// level). One rule names an inner level in an abbreviation, so it has
-    /// one owner: the two forms differ only in prefix and separator, never in
-    /// how the level is spelt. This method owns what the token is; the format
-    /// owns how it is written. A ply level contributes its ply number (token
-    /// "4" for a 4-ply level), any other level its <see cref="LevelInfo"/>
-    /// abbreviation — "R" / "R+" / "R++" for the XG Roller family, which a
-    /// rollout's phase can be set to (halheinrich/backgammon#251) and the book
-    /// format allows (unreachable for moves levels in the shipped database,
-    /// all ply codes, but the cube level demonstrably uses them).
-    ///
-    /// <para>
-    /// The ply number comes from the <see cref="AnalysisLevel"/> member, not
-    /// from <c>Rank</c>. Ranks used to <i>be</i> the ply number (1–7), so the
-    /// token read them directly; the interleaved rank grid ended that
-    /// coincidence, and the level axis — which names the ply outright — is
-    /// the honest source either way.
-    /// </para>
-    ///
-    /// <para>
-    /// <see cref="AnalysisLevel.Ply3Red"/> contributes "3", the same token as
-    /// a full <see cref="AnalysisLevel.Ply3"/>: it is a 3-ply search, and the
-    /// abbreviation is the deliberately lossy form. The Red distinction
-    /// survives in the <c>Label</c> ("Book V2: 648 trials. 3-ply Red"),
-    /// exactly as the Book V1/V2 distinction survives there while both
-    /// abbreviate to "Book".
-    /// </para>
-    /// </summary>
-    private static string InnerLevelToken(
-        (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) inner) =>
-        inner.Level switch
-        {
-            AnalysisLevel.Ply1                          => "1",
-            AnalysisLevel.Ply2                          => "2",
-            AnalysisLevel.Ply3Red or AnalysisLevel.Ply3 => "3",
-            AnalysisLevel.Ply4                          => "4",
-            AnalysisLevel.Ply5                          => "5",
-            AnalysisLevel.Ply6                          => "6",
-            AnalysisLevel.Ply7                          => "7",
-            _                                           => inner.Abbreviation,
-        };
-
-    /// <summary>XG's level code for a V2-book-analysed candidate — the only
-    /// code the enrichment lookup fires on. The V1 code (999) is never looked
-    /// up: only the V2 database is parsed, and a V1 stamp's rollout did not
-    /// come from it.</summary>
-    private const short BookV2Level = 998;
 
     /// <summary>
     /// Resolves a book-stamped checker-play candidate against the caller's
@@ -1218,28 +834,26 @@ public static class XgDecisionIterator
     /// supplied, the candidate is not V2-book-stamped
     /// (<paramref name="evalLevel"/> ≠ 998), no stored resulting position, a
     /// decision context outside the proven keying conventions, or a plain
-    /// lookup miss. A null return degrades the candidate to the bare
-    /// <see cref="AnalysisMode.BookRollout"/> + <see cref="AnalysisLevel.Unknown"/>
-    /// stamp in <see cref="ResolveDepthInfo"/>.
+    /// lookup miss. A null return leaves the candidate's bare book facts —
+    /// <see cref="AnalysisMode.BookRollout"/>, <see cref="AnalysisLevel.Unknown"/>
+    /// and its edition — in <see cref="XgDepthFacts.Resolve"/>.
     ///
     /// <para>
     /// The key is exactly the pane data session 1 proved bitwise:
     /// <c>PositionsPlayed[i]</c> (the candidate's resulting position,
-    /// player-1-relative) plus the decision context, normalized by the
+    /// player-1-relative) plus the decision's session, normalized by the
     /// <see cref="OpeningBookKey"/> factories (perspective flip, away-pair
-    /// orientation, Jacoby / Crawford). Two context guards scope the lookup
+    /// orientation, Jacoby / Crawford). One context guard scopes the lookup
     /// to what those factories cover: the cube must be centred at 1 (the
     /// factories' only supported cube context — the book's turned-cube owner
-    /// sign is unverified), and match play must have both aways ≥ 1 (the
-    /// factories' argument contract; a book stamp outside a real match score
-    /// would be malformed input anyway).
+    /// sign is unverified).
     /// </para>
     ///
     /// <para>
-    /// Checker-play candidates only. Cube rows never reach this helper: the
-    /// book's cube-decision keying convention is unproven — the fixture
+    /// Checker-play candidates only. Cube decisions never reach this helper:
+    /// the book's cube-decision keying convention is unproven — the fixture
     /// corpus contains no book-stamped cube decision to pin it against — so
-    /// cube book stamps degrade rather than guess (see the cube builders).
+    /// cube book stamps degrade rather than guess (see the cube builder).
     /// </para>
     /// </summary>
     private static OpeningBookEntry? LookupBookEntry(
@@ -1250,51 +864,28 @@ public static class XgDecisionIterator
         int activePlayer,
         MatchContext ctx)
     {
-        if (book == null || evalLevel != BookV2Level)
+        if (book == null || evalLevel != XgDepthFacts.BookV2Code)
             return null;
         if (candidateIndex >= analysis.PositionsPlayed.Length)
             return null;
         if (ctx.CubeValue != 1 || ctx.CubePosition != 0)
             return null;
 
-        OpeningBookKey key;
-        if (ctx.IsMoneyGame)
-        {
-            key = OpeningBookKey.ForMoneyPlay(
-                analysis.PositionsPlayed[candidateIndex], activePlayer, ctx.IsJacoby);
-        }
-        else
-        {
-            int moverAway = ctx.NeedsFor(activePlayer);
-            int opponentAway = ctx.NeedsFor(-activePlayer);
-            if (moverAway < 1 || opponentAway < 1)
-                return null;
-            key = OpeningBookKey.ForMatchPlay(
-                analysis.PositionsPlayed[candidateIndex], activePlayer,
-                moverAway, opponentAway, ctx.IsCrawford);
-        }
+        var positionPlayed = analysis.PositionsPlayed[candidateIndex];
+        var key = ctx.SessionFor(MatchContext.SeatOf(activePlayer)).Match(
+            money => OpeningBookKey.ForMoneyPlay(positionPlayed, activePlayer, money.Terms.IsJacoby),
+            match => OpeningBookKey.ForMatchPlay(
+                positionPlayed, activePlayer, match.OnRollNeeds, match.OpponentNeeds, match.IsCrawford));
 
         return book.TryGetEntry(key, out var entry) ? entry : null;
     }
-
-    /// <summary>
-    /// Thin wrapper returning only the label form of
-    /// <see cref="ResolveDepthInfo"/>, for callers that don't need the
-    /// abbreviation, rank, or class.
-    /// </summary>
-    internal static string ResolveDepth(
-        short evalLevel,
-        int rolloutIndex,
-        List<RolloutContext> rollouts)
-        => ResolveDepthInfo(evalLevel, rolloutIndex, rollouts).Label;
 
     // -----------------------------------------------------------------------
     //  Helpers
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Builds the <see cref="DecisionId"/> stamped onto every yielded
-    /// <see cref="DecisionRow"/> / <see cref="BgDecisionData"/> by
+    /// Builds the <see cref="DecisionId"/> stamped onto every record by
     /// dispatching on the source file's extension.
     ///
     /// <list type="bullet">
@@ -1330,8 +921,8 @@ public static class XgDecisionIterator
     ///
     /// <para>
     /// The cube emission path passes <c>ctx.MoveNumber + 1</c> for
-    /// <paramref name="moveNumber"/> so the Id agrees with the emitted
-    /// <c>DecisionRow.MoveNumber</c> / <c>DescriptiveData.MoveNumber</c>.
+    /// <paramref name="moveNumber"/>, so a cube decision numbers as the move
+    /// its turn goes on to play.
     /// </para>
     ///
     /// <para>
@@ -1340,14 +931,13 @@ public static class XgDecisionIterator
     /// shape. Any other extension is a producer-side contract violation;
     /// <see cref="Iterate"/> / <see cref="IterateDiagramRequests"/> validate
     /// <c>sourceFile</c> non-null at iteration entry, but the extension is
-    /// only verified once a candidate reaches a <c>Build*</c> site.
+    /// only verified once a decision reaches a builder.
     /// </para>
     ///
     /// <para>
     /// Internal-not-private so test code can drive the unknown-extension
     /// path directly without synthesizing a full <see cref="XgFile"/>.
-    /// Parallel to <see cref="IsSentinelOnlyAnalysis"/> and
-    /// <see cref="FindBestByEquityIndex"/>.
+    /// Parallel to <see cref="IsSentinelOnlyAnalysis"/>.
     /// </para>
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -1379,17 +969,19 @@ public static class XgDecisionIterator
     private static bool IsXgpSource(string sourceFile) =>
         string.Equals(Path.GetExtension(sourceFile), ".xgp", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Whether a move record carries an analysis at all: a move count and an
+    /// evaluation. The first of the move emission rules the dispatch applies.
+    /// </summary>
     private static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;
 
     /// <summary>
     /// Returns <c>true</c> when any candidate in <paramref name="analysis"/>'s
-    /// <c>Moves</c> array is a known XG non-play sentinel. Used by
-    /// <see cref="Iterate"/> and <see cref="IterateDiagramRequests"/> to skip
-    /// these decisions before they reach
-    /// <see cref="Parsing.AfterBoardBuilder.ComputeAfterBoard"/> or
-    /// <see cref="XgMoveTranslator.Translate"/>: feeding either leaf the
-    /// sentinel encoding has historically produced an
+    /// <c>Moves</c> array is a known XG non-play sentinel. The walk skips
+    /// these decisions before any candidate reaches
+    /// <see cref="XgMoveTranslator.Translate"/>: feeding a leaf the sentinel
+    /// encoding has historically produced an
     /// <see cref="IndexOutOfRangeException"/> (the illegal-play marker) or a
     /// "1/1" notation glitch (the <c>(0, 0)</c> dance). A thin
     /// <c>!= </c><see cref="SentinelKind.None"/> projection of
@@ -1411,7 +1003,7 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// Classifies an analysis by the first non-play sentinel among its real
-    /// candidates, driving both the iterator skip and (for
+    /// candidates, driving both the walk's skip and (for
     /// <see cref="SentinelKind.IllegalPlay"/>) the contextual warning. Returns
     /// <see cref="SentinelKind.None"/> for an ordinary analysis.
     ///
@@ -1460,41 +1052,42 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// Whether a cube pane in the current game can be a decision at all —
-    /// the emission rule both surfaces apply beside <see cref="IsAnalysed(CubeRecord)"/>
-    /// at the one dispatch site they share. In the Crawford game it cannot:
-    /// doubling is prohibited there, so the cube pane XG writes for it —
-    /// and does analyse; the corpus carries such panes, so this is a format
-    /// fact the converter drops, not an anomaly worth a log line — describes
-    /// no decision. The rule's owner is the wire type: both
-    /// <see cref="DecisionRow"/> and <see cref="BgDecisionData"/> refuse to
-    /// construct a Crawford cube (BgDataTypes_Lib's <c>CrawfordRule</c>,
-    /// halheinrich/backgammon#201), and this predicate is what keeps the walk
+    /// the emission rule the dispatch applies beside <see cref="IsAnalysed(CubeRecord)"/>.
+    /// In the Crawford game it cannot: doubling is prohibited there, so the
+    /// cube pane XG writes for it — and does analyse; the corpus carries such
+    /// panes, so this is a format fact the converter drops, not an anomaly
+    /// worth a log line — describes no decision. The rule's owner is the wire
+    /// type: a <see cref="CubeDecision"/> refuses a Crawford position
+    /// (halheinrich/backgammon#201), and this predicate is what keeps the walk
     /// from reaching that guard; it does not restate the rule. Skipping
-    /// changes nothing else: a cube's id and <c>MoveNumber</c> read
-    /// <c>ctx.MoveNumber + 1</c> without incrementing the counter, so the
-    /// following plays number as they always did, and the stop callbacks see
-    /// only emitted rows.
+    /// changes nothing else: a cube's id reads <c>ctx.MoveNumber + 1</c>
+    /// without incrementing the counter, so the following plays number as
+    /// they always did, and the stop callbacks see only emitted decisions.
     /// </summary>
     private static bool AdmitsCubeDecision(MatchContext ctx) =>
         !ctx.IsCrawford;
 
     /// <summary>
-    /// The cube emission gate both surfaces apply at their shared dispatch
-    /// site: the record is a decision when it is analysed and the game
-    /// admits one. Internal-not-private for the same reason as
-    /// <see cref="IsSentinelOnlyAnalysis"/>: test code that pairs raw
+    /// The cube emission gate the dispatch applies: the record is a decision
+    /// when it is analysed and the game admits one. Internal-not-private for
+    /// the same reason as <see cref="IsSentinelOnlyAnalysis"/>: test code that pairs raw
     /// <c>CubeRecord</c>s with iterator output mirrors the emission filter
     /// through this predicate, driving a <see cref="MatchContext"/> record
-    /// by record as the walk does, rather than re-implementing either half.
+    /// by record as the walk does, rather than re-implementing any part.
     /// </summary>
     internal static bool IsCubeDecision(CubeRecord cube, MatchContext ctx) =>
         IsAnalysed(cube) && AdmitsCubeDecision(ctx);
 
+    /// <summary>
+    /// Whether a move record states a roll: a move record whose dice are both
+    /// 0 poses no checker-play decision. One of the move emission rules
+    /// <see cref="ReadCheckerPlay"/> applies.
+    /// </summary>
+    private static bool StatesRoll(MoveRecord move) => DiceToInt(move.Dice) != 0;
+
+    /// <summary>XG's roll as a two-digit number in rolled order — the form the warnings name it by; 0 for no roll.</summary>
     private static int DiceToInt(int[] dice) =>
         dice.Length >= 2 ? dice[0] * 10 + dice[1] : 0;
-
-    private static bool IsUsable(float v) =>
-        !float.IsNaN(v) && !float.IsInfinity(v) && v > -999f;
 
     /// <summary>
     /// Converts a raw XG cube value (signed log2 encoding) to the actual cube size.
@@ -1503,127 +1096,4 @@ public static class XgDecisionIterator
     /// </summary>
     internal static int CubeValueActual(int raw) =>
         raw == 0 ? 1 : (int)Math.Pow(2, Math.Abs(raw));
-
-    /// <summary>
-    /// Resolves an XG analysis level into its three display / ordering forms:
-    /// the full <c>Label</c>, a compact <c>Abbreviation</c> for narrow table
-    /// cells, and an ordinal <c>Rank</c> (higher = deeper / more rigorous).
-    /// Single source of the level taxonomy — <see cref="ResolveDepthInfo"/>
-    /// projects whichever forms a caller needs.
-    ///
-    /// <para>
-    /// Abbreviation: N-ply labels are short enough to keep intact; the XG
-    /// Roller family collapses to R / R+ / R++; Book V1 and V2 both collapse
-    /// to "Book" (the version distinction survives only in <c>Label</c>). The
-    /// Rollout sentinel (<c>short 100</c>) without a matching rollout context
-    /// abbreviates to "Ro" — the normal rollout path goes through
-    /// <see cref="ResolveDepthInfo"/>'s rollout branch and never reaches here.
-    /// </para>
-    ///
-    /// <para>
-    /// Rank: the evaluation ranks follow XG's own analysis-level menu, in
-    /// which the ply family and the XG Roller family <i>interleave</i> rather
-    /// than forming two blocks — 1-ply, 2-ply, 3-ply Red, 3-ply, XG Roller,
-    /// 4-ply, XG Roller+, 5-ply, 6-ply, 7-ply, XG Roller++. That is the
-    /// user's ruling of 2026-08-28 on the authority of XG's menu, the same
-    /// order <see cref="AnalysisLevel"/> declares contractually. The values
-    /// are a decade grid: a full N-ply ranks 10 × N, and a level sitting
-    /// between two plies takes the midpoint — 3-ply Red 25, XG Roller 35,
-    /// XG Roller+ 45, XG Roller++ 75. The grid restates the "leave room for
-    /// future depths without renumbering" intent that the flat 1..7 / 20..22
-    /// scale carried before the interleave made a contiguous ply block
-    /// impossible: every gap can absorb a new level in place. Only the
-    /// <i>ordering</i> is meaningful: downstream consumers compare ranks with
-    /// each other, never against a constant, and none may start. (The
-    /// producer's own corpus invariant does map absolute ranks to tiers — it
-    /// is pinning this table against itself, not consuming a record.)
-    /// </para>
-    ///
-    /// <para>
-    /// Above the evaluations: Book V1/V2 rank 99 — XG's opening book is
-    /// rollout-derived, so it sits above every evaluation (XG Roller++, 75)
-    /// yet below the explicit-rollout floor (100 + the inner level's rank, see
-    /// <see cref="ResolveDepthInfo"/>): a cached rollout whose parameters the
-    /// file no longer records ranks under a rollout the file actually
-    /// carries. Any unrecognised level ranks 0 — the floor, below everything
-    /// meaningful. The rank lets downstream rendering order candidates by
-    /// depth and flag out-of-order analysis across adjacent sorted-by-equity
-    /// plays. Book enrichment (<see cref="ResolveDepthInfo"/>'s book branch)
-    /// deliberately leaves the rank at 99 even when the entry's rollout
-    /// parameters are recovered — <c>DepthRank</c> semantics stay stable
-    /// across enrichment.
-    /// </para>
-    ///
-    /// <para>
-    /// One table, both axes: the cube side resolves its depth through this
-    /// same switch (<c>CubeDepth</c> / <c>CubeDepthRank</c> /
-    /// <c>CubeAnalysisLevel</c> reach it via <see cref="ResolveDepthInfo"/>
-    /// exactly as the checker side does), so the interleaved order governs
-    /// cube depth ordering identically and on the same authority. There is no
-    /// second scale to keep in step.
-    /// </para>
-    ///
-    /// <para>
-    /// The <see cref="AnalysisMode"/> × <see cref="AnalysisLevel"/> pair is
-    /// the machine-usable taxonomy behind the three display forms — the
-    /// single-sourced classification for depth filtering. The mode says how
-    /// the numbers were produced (ply searches and the Roller family are
-    /// <see cref="AnalysisMode.Evaluation"/>; the book codes are
-    /// <see cref="AnalysisMode.BookRollout"/> — a cached rollout whose
-    /// parameters live in the book database, not the file); the level is the
-    /// evaluation level itself, or <see cref="AnalysisLevel.Unknown"/> where
-    /// the file does not record one (both book codes here — enrichment in
-    /// <see cref="ResolveDepthInfo"/> supplies the level when a book database
-    /// is available; and the no-context rollout sentinel, whose known inner
-    /// levels are stamped in <see cref="ResolveDepthInfo"/>'s rollout branch).
-    /// XG level 12 ("3-ply Red") levels as its own
-    /// <see cref="AnalysisLevel.Ply3Red"/>: XG's menu ranks its
-    /// reduced-variance 3-ply search <i>below</i> a full 3-ply, so it is a
-    /// distinct level rather than a label variant of
-    /// <see cref="AnalysisLevel.Ply3"/> (ruled 2026-08-28). An unrecognised
-    /// code is <see cref="AnalysisMode.Unknown"/> +
-    /// <see cref="AnalysisLevel.Unknown"/>.
-    /// </para>
-    ///
-    /// <para>
-    /// Codes <c>1</c> and <c>11</c> both mean 2-ply and deliberately share one
-    /// arm, so the two can never drift apart. Code 11 was identified by XG's
-    /// own display — the designated authority — opened over the three code-11
-    /// rows of the "3-ply Red" fixture: XG shows <c>Level: 2-ply</c> for each,
-    /// drawing no distinction from plain 2-ply. So 11 takes code 1's exact
-    /// tuple rather than a new <see cref="AnalysisLevel"/> member (user-ruled
-    /// 2026-08-28, halheinrich/backgammon#160). An earlier conditional
-    /// identification as a 3-ply-Red sibling — inferred only from 11 sitting
-    /// adjacent to 12 in the code space — was superseded by that observation
-    /// the same day; the trail is on halheinrich/backgammon#160.
-    /// </para>
-    ///
-    /// <para>
-    /// The book entry's stored rollout levels (<c>RolloutMovesLevel</c> /
-    /// <c>RolloutCubeLevel</c>) use this same PLAYERLEVEL code space, so the
-    /// book branch maps them through this switch too — the level taxonomy has
-    /// exactly one decoding site.
-    /// </para>
-    /// </summary>
-    private static (string Label, string Abbreviation, int Rank, AnalysisMode Mode, AnalysisLevel Level) LevelInfo(short level) => level switch
-    {
-        // Arms read in ascending rigor — XG's menu order, not XG's code order.
-        0    => ("1-ply",        "1-ply",     10,  AnalysisMode.Evaluation,  AnalysisLevel.Ply1),
-        1 or
-        11   => ("2-ply",        "2-ply",     20,  AnalysisMode.Evaluation,  AnalysisLevel.Ply2),
-        12   => ("3-ply Red",    "3-ply Red", 25,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3Red),
-        2    => ("3-ply",        "3-ply",     30,  AnalysisMode.Evaluation,  AnalysisLevel.Ply3),
-        1000 => ("XG Roller",    "R",         35,  AnalysisMode.Evaluation,  AnalysisLevel.XgRoller),
-        3    => ("4-ply",        "4-ply",     40,  AnalysisMode.Evaluation,  AnalysisLevel.Ply4),
-        1001 => ("XG Roller+",   "R+",        45,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlus),
-        4    => ("5-ply",        "5-ply",     50,  AnalysisMode.Evaluation,  AnalysisLevel.Ply5),
-        5    => ("6-ply",        "6-ply",     60,  AnalysisMode.Evaluation,  AnalysisLevel.Ply6),
-        6    => ("7-ply",        "7-ply",     70,  AnalysisMode.Evaluation,  AnalysisLevel.Ply7),
-        1002 => ("XG Roller++",  "R++",       75,  AnalysisMode.Evaluation,  AnalysisLevel.XgRollerPlusPlus),
-        998  => ("Book V2",      "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown),
-        999  => ("Book V1",      "Book",      99,  AnalysisMode.BookRollout, AnalysisLevel.Unknown),
-        100  => ("Rollout",      "Ro",        100, AnalysisMode.Rollout,     AnalysisLevel.Unknown),
-        _    => ($"level-{level}", $"level-{level}", 0, AnalysisMode.Unknown, AnalysisLevel.Unknown),
-    };
-
 }

@@ -37,8 +37,8 @@ public class DecisionCsvTests
             rows.Should().NotBeEmpty($"{matchId} should contain at least one analysed decision");
             rows.Should().OnlyContain(r => r.Xgid.StartsWith("XGID="),
                 "every row should have a valid XGID");
-            rows.Should().OnlyContain(r => r.Error >= 0,
-                "error values should be non-negative");
+            rows.Should().OnlyContain(r => r.Error == null || r.Error >= 0,
+                "an error, where the row states one, is never negative");
         }
     }
 
@@ -66,9 +66,9 @@ public class DecisionCsvTests
             var file = XgFileReader.ReadFile(path);
 
             foreach (var row in XgDecisionIterator.Iterate(file, Path.GetFileName(path))
-                                                   .Where(r => !r.IsCube))
+                                                   .Where(r => r.Kind == DecisionKind.CheckerPlay))
             {
-                row.Roll.Should().NotBe(0,
+                row.Roll.Should().NotBeNull().And.NotBe(0,
                     $"checker play in {matchId} game {row.Game} move {row.MoveNumber} should have dice");
             }
         }
@@ -174,7 +174,7 @@ public class DecisionCsvTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, Path.GetFileName(jsonPath)))
             {
-                if (row.MatchLength == 0) continue; // money — no away scores
+                if (row.MatchLength is not int matchLength) continue; // money — no away scores
 
                 var parts = row.Xgid.Split(':');
                 int xgidScore1 = int.Parse(parts[5]);
@@ -184,10 +184,10 @@ public class DecisionCsvTests
                 int msAway1 = int.Parse(scoreParts[0]);
                 int msAway2 = int.Parse(scoreParts[1]);
 
-                msAway1.Should().Be(row.MatchLength - xgidScore1,
+                msAway1.Should().Be(matchLength - xgidScore1,
                     $"away1 should be on-roll player's away score in {matchId} " +
                     $"game {row.Game} move {row.MoveNumber} (XGID score1={xgidScore1})");
-                msAway2.Should().Be(row.MatchLength - xgidScore2,
+                msAway2.Should().Be(matchLength - xgidScore2,
                     $"away2 should be opponent's away score in {matchId} " +
                     $"game {row.Game} move {row.MoveNumber} (XGID score2={xgidScore2})");
             }

@@ -1,3 +1,5 @@
+using System.Numerics;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
@@ -51,18 +53,24 @@ internal static class XgRecordFactory
 
     /// <summary>
     /// A match header with XG's editor-save defaults and this library's
-    /// provenance. <paramref name="matchLength"/> is the <i>normalized</i>
-    /// length (0 = money); the wire sentinel is applied here.
-    /// <paramref name="jacoby"/> / <paramref name="beaver"/> apply to money
-    /// sessions only and are masked off otherwise. The ANSI twins mirror
-    /// the Unicode fields; the writer applies its own truncation.
+    /// provenance, stating <paramref name="terms"/> in XG's spelling — the
+    /// inverse of the reading in <see cref="XgMatchInfo"/>: money terms as
+    /// XG's money-sentinel length with their Jacoby and beaver rules and their
+    /// cube limit as its Max Cube exponent; a match's terms as its length, with
+    /// the rules off and XG's default exponent, the value XG typically writes
+    /// — the terms state no limit to write.
+    /// The ANSI twins mirror the Unicode fields; the writer applies its own
+    /// truncation.
     /// </summary>
     internal static MatchHeaderRecord MatchHeader(
-        int matchLength, bool jacoby, bool beaver,
+        SessionTerms terms,
         string player1, string player2,
         string eventName, DateTime date, int gameId)
     {
-        bool isMoney = matchLength <= 0;
+        var (matchLength, jacoby, beaver, cubeLimitExponent) = terms.Match(
+            money => (MatchHeaderRecord.MoneyMatchLengthSentinel, money.IsJacoby, money.IsBeaver,
+                BitOperations.Log2((uint)money.CubeLimit)),
+            match => (match.Length, false, false, XgMatchInfo.DefaultCubeLimitExponent));
         return new MatchHeaderRecord
         {
             EntryType = RecordType.HeaderMatch,
@@ -70,11 +78,11 @@ internal static class XgRecordFactory
             Player2Ansi = player2,
             Player1 = player1,
             Player2 = player2,
-            MatchLength = isMoney ? MatchHeaderRecord.MoneyMatchLengthSentinel : matchLength,
+            MatchLength = matchLength,
             Variation = 0,
             Crawford = true,           // XG writes the rule flag on even for money sessions
-            Jacoby = isMoney && jacoby,
-            Beaver = isMoney && beaver,
+            Jacoby = jacoby,
+            Beaver = beaver,
             AutoDouble = false,
             Elo1 = 1600,
             Elo2 = 1600,
@@ -94,7 +102,7 @@ internal static class XgRecordFactory
             CommentFooterMatchIndex = -1,
             IsMoneyMatch = false,      // XG leaves this false; 99999 is the money signal
             SiteId = (SiteId)(-1),
-            CubeLimit = 10,            // XG default: max cube 2^10
+            CubeLimit = cubeLimitExponent,
         };
     }
 

@@ -68,7 +68,9 @@ namespace ConvertXgToJson_Lib.Json;
 ///     <see cref="XgMatchInfo"/> and <see cref="XgGameInfo"/> — public
 ///     metadata DTOs with their own pinned wire shapes
 ///     (<c>MetadataContractTests</c>) that this options object serves but
-///     the document does not contain.
+///     the document does not contain. Their kinded members — the terms and
+///     the standing — are BgDataTypes_Lib's wire types, read through its
+///     converters and resolved one link down the chain.
 ///   </description></item>
 /// </list>
 /// A completeness test keeps the declarations honest: the serialized
@@ -81,10 +83,12 @@ namespace ConvertXgToJson_Lib.Json;
 /// <see cref="BgDataTypes_Lib.BgDataTypesJsonContext"/>, per the arc's
 /// composition pattern. The chain is a standing seam rather than a live
 /// dependency for this document — the <see cref="XgFile"/> closure contains
-/// no BgDataTypes_Lib type — but <see cref="XgJsonOptions.Default"/> is
-/// asked for the four wire enums directly (their halheinrich/backgammon#164
-/// strictness is pinned by <c>EnumTokenStrictnessTests</c> against exactly
-/// this options object), and those resolve one link down the chain.
+/// no BgDataTypes_Lib type — but it is a live one for the metadata DTOs,
+/// whose terms and standing are BgDataTypes_Lib's kinded documents, and
+/// <see cref="XgJsonOptions.Default"/> is asked for the five wire enums
+/// directly (their halheinrich/backgammon#164 strictness is pinned by
+/// <c>EnumTokenStrictnessTests</c> against exactly this options object);
+/// those resolve one link down the chain.
 /// </para>
 ///
 /// <para>

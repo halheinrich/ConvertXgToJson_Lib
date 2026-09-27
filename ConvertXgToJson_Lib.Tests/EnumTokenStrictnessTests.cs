@@ -56,6 +56,16 @@ public class EnumTokenStrictnessTests
         AssertStringTokenExact("onRoll", CubeOwner.OnRoll);
 
     /// <summary>
+    /// The kind a metadata DTO's terms and standing state
+    /// (<see cref="XgMatchInfo.Terms"/>, <see cref="XgGameInfo.Standing"/>) —
+    /// the member BgDataTypes_Lib's dispatch reads, so a numeric kind would
+    /// read as a kind this options object should never admit.
+    /// </summary>
+    [Fact]
+    public void SessionKind_IsStringTokenExact() =>
+        AssertStringTokenExact("money", SessionKind.Money);
+
+    /// <summary>
     /// The camelCase spelling is the document's pinned wire contract, and it
     /// comes from this options object rather than from the enums' own
     /// type-level attributes — those write PascalCase, and an options-level
@@ -70,6 +80,7 @@ public class EnumTokenStrictnessTests
         AssertRoundTrips<AnalysisMode>();
         AssertRoundTrips<CubeAction>();
         AssertRoundTrips<CubeOwner>();
+        AssertRoundTrips<SessionKind>();
 
         static void AssertRoundTrips<TEnum>()
             where TEnum : struct, Enum

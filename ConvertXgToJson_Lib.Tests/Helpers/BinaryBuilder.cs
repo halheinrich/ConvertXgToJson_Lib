@@ -178,11 +178,12 @@ internal static class XgBytesBuilder
         string player2 = "Bob",
         int matchLength = 7,
         DateTime? date = null,
-        string location = "Monaco")
+        string location = "Monaco",
+        int maxCubeExponent = 10)
     {
         var matchDate = date ?? new DateTime(2024, 1, 15, 14, 30, 0, DateTimeKind.Utc);
 
-        byte[] xgBytes = BuildXgStream(player1, player2, matchLength, matchDate, location);
+        byte[] xgBytes = BuildXgStream(player1, player2, matchLength, matchDate, location, maxCubeExponent);
         byte[] xgiBytes = BuildXgiStream(xgBytes);
         byte[] xgrBytes = [];
         byte[] xgcBytes = Encoding.Latin1.GetBytes("Match comment\r\n");
@@ -219,9 +220,10 @@ internal static class XgBytesBuilder
 
     // ------------------------------------------------------------------
 
-    private static byte[] BuildXgStream(string p1, string p2, int matchLen, DateTime date, string location = "Monaco")
+    private static byte[] BuildXgStream(
+        string p1, string p2, int matchLen, DateTime date, string location = "Monaco", int maxCubeExponent = 10)
     {
-        byte[] rec0 = BuildMatchHeaderRecord(p1, p2, matchLen, date, location);
+        byte[] rec0 = BuildMatchHeaderRecord(p1, p2, matchLen, date, location, maxCubeExponent);
         byte[] rec1 = BuildMatchFooterRecord(matchLen);
         return [.. rec0, .. rec1];
     }
@@ -251,7 +253,7 @@ internal static class XgBytesBuilder
     // ------------------------------------------------------------------
 
     internal static byte[] BuildMatchHeaderRecord(
-        string p1, string p2, int matchLen, DateTime date, string location = "Monaco")
+        string p1, string p2, int matchLen, DateTime date, string location = "Monaco", int maxCubeExponent = 10)
     {
         const int MagicNumber = 0x494C4D44;
 
@@ -305,7 +307,7 @@ internal static class XgBytesBuilder
          .Float(0f)                     // FeeMoney
          .Float(0f)                     // TableStake
          .Int32(0)                      // SiteId
-         .Int32(0)                      // CubeLimit
+         .Int32(maxCubeExponent)        // CubeLimit: the Max Cube exponent; XG typically writes 10
          .Int32(0)                      // AutoDoubleMax
          .Bool(false);                  // Transcribed
 

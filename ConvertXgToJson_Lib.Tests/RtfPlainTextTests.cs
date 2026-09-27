@@ -282,14 +282,13 @@ public class RtfPlainTextTests(ITestOutputHelper output)
             string name = Path.GetFileName(path);
             foreach (var request in XgDecisionIterator.IterateDiagramRequests(file, name))
             {
-                string comment = request.Descriptive.Comment;
-                if (comment.Length == 0)
+                if (request.Descriptive.Comment is not { } comment)
                     continue;
 
                 stamped++;
-                output.WriteLine($"=== {name}  game {request.Descriptive.Game} "
-                    + $"move {request.Descriptive.MoveNumber} "
-                    + $"({(request.Decision.IsCube ? "cube" : "play")})");
+                output.WriteLine($"=== {name}  game {request.Game} "
+                    + $"move {request.MoveNumber} "
+                    + $"({(request.Kind == DecisionKind.Cube ? "cube" : "play")})");
                 output.WriteLine(comment);
                 output.WriteLine("");
 

@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
 
 namespace ConvertXgToJson_Lib;
@@ -32,14 +31,20 @@ namespace ConvertXgToJson_Lib;
 ///
 /// <para>
 /// <b>Selection policy — this library's, not XG's: the most rigorous
-/// entry wins.</b> Rollout entries outrank evaluation entries; deeper
-/// rollout levels outrank shallower ones (checker level first, then cube
-/// level, compared by the <see cref="XgDecisionIterator.ResolveDepthInfo"/>
-/// rank taxonomy); then more trials; then the later analysis date; then
-/// the later file position (the book grows by import-append, so later
-/// wins). The relative order of the checker-level and cube-level
-/// comparisons is the one untested choice: the shipped database offers no
-/// key where they disagree across competing entries.
+/// entry wins.</b> Rollout entries outrank evaluation entries (and between
+/// two evaluation entries the more rigorous level wins); deeper rollout
+/// levels outrank shallower ones (checker level first, then cube level);
+/// then more trials; then the later analysis date; then the later file
+/// position (the book grows by import-append, so later wins). Levels are
+/// compared by rigor: each XG level code is decoded once, through
+/// <see cref="XgDepthFacts.OfLevel"/>, and ordered by
+/// <see cref="BgDataTypes_Lib.AnalysisLevel"/>'s declaration order, which
+/// BgDataTypes_Lib makes contractual as ascending rigor — XG's own menu
+/// order, the ply and XG Roller families interleaved — with a level not
+/// recognized below every level that is. The relative order of the
+/// checker-level and cube-level comparisons is the one untested choice: the
+/// shipped database offers no key where they disagree across competing
+/// entries.
 /// </para>
 ///
 /// <para>
@@ -72,8 +77,6 @@ namespace ConvertXgToJson_Lib;
 /// </summary>
 public sealed class OpeningBook
 {
-    private static readonly List<RolloutContext> NoRollouts = [];
-
     private readonly OpeningBookEntry[] _entries;                  // file order
     private readonly Dictionary<OpeningBookKey, List<int>> _index; // key → file indices, ascending
 
@@ -206,11 +209,13 @@ public sealed class OpeningBook
         var ea = _entries[a];
         var eb = _entries[b];
 
-        int c = Rank(eb.Level).CompareTo(Rank(ea.Level));
+        int c = eb.IsRollout.CompareTo(ea.IsRollout);
         if (c != 0) return c;
-        c = Rank(eb.RolloutMovesLevel).CompareTo(Rank(ea.RolloutMovesLevel));
+        c = Rigor(eb.Level).CompareTo(Rigor(ea.Level));
         if (c != 0) return c;
-        c = Rank(eb.RolloutCubeLevel).CompareTo(Rank(ea.RolloutCubeLevel));
+        c = Rigor(eb.RolloutMovesLevel).CompareTo(Rigor(ea.RolloutMovesLevel));
+        if (c != 0) return c;
+        c = Rigor(eb.RolloutCubeLevel).CompareTo(Rigor(ea.RolloutCubeLevel));
         if (c != 0) return c;
         c = eb.Trials.CompareTo(ea.Trials);
         if (c != 0) return c;
@@ -220,14 +225,12 @@ public sealed class OpeningBook
     }
 
     /// <summary>
-    /// Depth rank of an XG level code, routed through the level taxonomy's
-    /// single source (<see cref="XgDecisionIterator.ResolveDepthInfo"/>):
-    /// rollout (100) ranks above the opening book (99), which ranks above
-    /// every evaluation. Within the evaluations the ply and XG Roller
-    /// families <i>interleave</i> per XG's own menu, so this comparison is a
-    /// rigor ordering — not "Roller beats ply". Only the ordering is used;
-    /// the absolute values are the taxonomy's business.
+    /// An XG level code's place in the rigor order the policy compares
+    /// levels by: its <see cref="BgDataTypes_Lib.AnalysisLevel"/>, decoded
+    /// through <see cref="XgDepthFacts.OfLevel"/> and ordered by the enum's
+    /// contractual declaration order. <see cref="BgDataTypes_Lib.AnalysisLevel.Unknown"/>,
+    /// a code not recognized as a level, is the zero value, so it orders
+    /// below every recognized level.
     /// </summary>
-    private static int Rank(int level) =>
-        XgDecisionIterator.ResolveDepthInfo((short)level, rolloutIndex: -1, NoRollouts).Rank;
+    private static BgDataTypes_Lib.AnalysisLevel Rigor(int level) => XgDepthFacts.OfLevel(level).Level;
 }

@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
@@ -37,10 +37,10 @@ namespace ConvertXgToJson_Lib;
 /// </summary>
 internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
 {
-    // The 26 position sbytes packed into four little-endian ulongs
-    // (zero-padded to 32 bytes) so the struct is equatable and hashable
-    // without per-comparison array walks.
-    private readonly ulong _p0, _p1, _p2, _p3;
+    // The resulting position, in the book's frame, as the ecosystem's one
+    // "same position": BoardPosition's equality and hash, never a packing of
+    // this key's own.
+    private readonly BoardPosition _position;
     private readonly int _cubeValue;
     private readonly int _cubeOwnerSign;
     private readonly int _onRollAway;    // stored slot c; -1 = money
@@ -49,15 +49,10 @@ internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
     private readonly bool _crawford;     // match contexts only
 
     private OpeningBookKey(
-        ReadOnlySpan<sbyte> positionOnRollPov, int cubeValue, int cubeOwnerSign,
+        BoardPosition positionOnRollPov, int cubeValue, int cubeOwnerSign,
         int onRollAway, int opponentAway, bool jacoby, bool crawford)
     {
-        Span<byte> packed = stackalloc byte[32];
-        MemoryMarshal.AsBytes(positionOnRollPov).CopyTo(packed);
-        _p0 = BitConverter.ToUInt64(packed[..8]);
-        _p1 = BitConverter.ToUInt64(packed[8..16]);
-        _p2 = BitConverter.ToUInt64(packed[16..24]);
-        _p3 = BitConverter.ToUInt64(packed[24..32]);
+        _position = positionOnRollPov;
         _cubeValue = cubeValue;
         _cubeOwnerSign = cubeOwnerSign;
         _onRollAway = onRollAway;
@@ -126,7 +121,7 @@ internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
     {
         bool money = entry.IsMoneySession;
         return new OpeningBookKey(
-            entry.Position.Points,
+            entry.Position.ToBoardPosition(),
             entry.CubeValue, entry.CubeOwnerSign,
             entry.OnRollAway, entry.OpponentAway,
             jacoby: money && entry.Jacoby,
@@ -135,18 +130,20 @@ internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
 
     /// <summary>
     /// Re-expresses a player-1-relative resulting position from the
-    /// perspective of the player on roll after the play: flip when player 1
-    /// was the mover, pass through when player 2 was (the new on-roll
-    /// player 1 already reads positive).
+    /// perspective of the player on roll after the play: flipped
+    /// (<see cref="BoardPosition.Flipped"/>, the one flip) when player 1 was
+    /// the mover, as stored when player 2 was (the new on-roll player 1
+    /// already reads positive).
     /// </summary>
-    private static sbyte[] NormalizeToNewOnRoll(PositionEngine positionPlayed, int activePlayer)
-        => activePlayer >= 0
-            ? BackgammonConstants.Flip(positionPlayed.Points)
-            : positionPlayed.Points;
+    private static BoardPosition NormalizeToNewOnRoll(PositionEngine positionPlayed, int activePlayer)
+    {
+        var stored = positionPlayed.ToBoardPosition();
+        return MatchContext.SeatOf(activePlayer) == Seat.Player1 ? stored.Flipped() : stored;
+    }
 
     /// <inheritdoc/>
     public bool Equals(OpeningBookKey other) =>
-        _p0 == other._p0 && _p1 == other._p1 && _p2 == other._p2 && _p3 == other._p3 &&
+        _position == other._position &&
         _cubeValue == other._cubeValue && _cubeOwnerSign == other._cubeOwnerSign &&
         _onRollAway == other._onRollAway && _opponentAway == other._opponentAway &&
         _jacoby == other._jacoby && _crawford == other._crawford;
@@ -156,7 +153,7 @@ internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
 
     /// <inheritdoc/>
     public override int GetHashCode() => HashCode.Combine(
-        _p0, _p1, _p2, _p3,
+        _position,
         _cubeValue * 4 + _cubeOwnerSign,
         _onRollAway * 65536 + _opponentAway,
         _jacoby, _crawford);

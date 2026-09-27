@@ -48,49 +48,49 @@ public class XgFileBuilderTests
 
         var info = XgDecisionIterator.ExtractMatchInfo(file);
         info.Should().NotBeNull();
-        info!.MatchLength.Should().Be(7);
+        info!.Terms.Should().Be(new MatchTerms { Length = 7 });
         info.Player1.Should().Be("Alice");
         info.Player2.Should().Be("Bob");
         Rows(file).Should().BeEmpty("a match with no games has no decisions");
 
         // The single record is a complete file for the writer and the JSON path.
         var reread = XgFileReader.ReadStream(new MemoryStream(XgFileWriter.ToBytes(file)));
-        XgDecisionIterator.ExtractMatchInfo(reread)!.MatchLength.Should().Be(7);
+        XgDecisionIterator.ExtractMatchInfo(reread)!.Terms.Should().Be(new MatchTerms { Length = 7 });
         Rows(reread).Should().BeEmpty();
     }
 
     [Fact]
-    public void ForMoneySession_IsMoneyGame_WithJacobyStamped()
+    public void ForMoneySession_StatesMoneyTerms_WithTheJacobyRule()
     {
         var builder = XgFileBuilder.ForMoneySession("Alice", "Bob", jacoby: true, beaver: false);
         builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
         var file = builder.Build();
 
-        var info = XgDecisionIterator.ExtractMatchInfo(file)!;
-        ((IMatchInfo)info).IsMoneyGame.Should().BeTrue();
-        info.MatchLength.Should().Be(0);
+        XgDecisionIterator.ExtractMatchInfo(file)!.Terms.Should().Be(
+            new MoneyTerms { IsJacoby = true, IsBeaver = false, CubeLimit = 1024 },
+            "the header states XG's money sentinel, the rules and XG's default cube limit");
 
         var request = Requests(file).Should().ContainSingle().Subject;
-        request.Position.IsJacoby.Should().BeTrue("the money-session Jacoby fact is stamped on every decision");
-        request.Position.OnRollNeeds.Should().Be(0);
+        request.Session.Should().BeOfType<MoneySession>()
+            .Which.Terms.IsJacoby.Should().BeTrue("every decision's money session states the rule");
     }
 
     [Fact]
-    public void ForMoneySession_JacobyOff_StampsFalse()
+    public void ForMoneySession_JacobyOff_StatesTheRuleOff()
     {
         var builder = XgFileBuilder.ForMoneySession("Alice", "Bob", jacoby: false);
         builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
 
-        Requests(builder.Build()).Single().Position.IsJacoby.Should().BeFalse();
+        ((MoneySession)Requests(builder.Build()).Single().Session).Terms.IsJacoby.Should().BeFalse();
     }
 
     [Fact]
-    public void ForMatch_JacobyStampIsNull_MatchPlayDoesNotPoseTheQuestion()
+    public void ForMatch_IsAMatchSession_WhichStatesNoJacobyRule()
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
 
-        Requests(builder.Build()).Single().Position.IsJacoby.Should().BeNull();
+        Requests(builder.Build()).Single().Session.Should().BeOfType<MatchSession>();
     }
 
     [Theory]
@@ -148,8 +148,7 @@ public class XgFileBuilderTests
         {
             var games = XgFileReader.ReadGameHeaders(path, state).ToList();
             var game = games.Should().ContainSingle().Subject;
-            game.Away1.Should().Be(5);
-            game.Away2.Should().Be(4);
+            game.Standing.Should().Be(new MatchStanding { Away1 = 5, Away2 = 4, IsCrawford = false });
             game.IsStandardStart.Should().BeTrue();
         }
         finally
@@ -170,9 +169,9 @@ public class XgFileBuilderTests
 
         rows.Should().HaveCount(2);
         rows[0].Player.Should().Be("Alice");
-        (rows[0].OnRollNeeds, rows[0].OpponentNeeds).Should().Be((5, 4));
+        (rows[0].OnRollNeeds, rows[0].OpponentNeeds).Should().Be(((int?)5, (int?)4));
         rows[1].Player.Should().Be("Bob");
-        (rows[1].OnRollNeeds, rows[1].OpponentNeeds).Should().Be((4, 5),
+        (rows[1].OnRollNeeds, rows[1].OpponentNeeds).Should().Be(((int?)4, (int?)5),
             "the on-roll tuple is anchored to the decision-maker, not the header slot");
     }
 
@@ -186,7 +185,7 @@ public class XgFileBuilderTests
 
         var rows = Rows(builder.Build());
 
-        rows.Select(r => (r.Game, r.MoveNumber)).Should().Equal((1, 1), (1, 2), (2, 1));
+        rows.Select(r => (r.Game!.Value, r.MoveNumber!.Value)).Should().Equal((1, 1), (1, 2), (2, 1));
     }
 
     [Fact]
@@ -239,7 +238,7 @@ public class XgFileBuilderTests
 
         var row = Rows(builder.Build()).Single();
         row.IsStandardStart.Should().BeTrue();
-        row.Board.Should().Equal(BackgammonConstants.StandardOpeningPosition.Select(p => (int)p));
+        row.Board.Should().Be(BoardPosition.Standard);
     }
 
     [Fact]
@@ -253,7 +252,7 @@ public class XgFileBuilderTests
 
         var row = Rows(builder.Build()).Single();
         row.IsStandardStart.Should().BeFalse();
-        row.Board.Should().Equal(oneCheckerOn24);
+        row.Board.Should().Be(new BoardPosition(oneCheckerOn24));
     }
 
     public static TheoryData<string, int[]> InvalidPositions => new()
@@ -297,16 +296,16 @@ public class XgFileBuilderTests
         row.Error.Should().Be(0.0);
         row.AnalysisLevel.Should().Be(AnalysisLevel.Ply1);
 
-        var request = Requests(file).Single();
+        var request = Requests(file).OfType<CheckerPlayDecision>().Single();
         var candidate = request.Decision.Plays.Should().ContainSingle().Subject;
-        candidate.MoveNotation.Should().Be("8/5 6/5");
-        candidate.Play.Should().Be(MakeFivePoint);
+        candidate.Notation.Should().Be("8/5 6/5");
+        candidate.Play.IsSameEncoding(MakeFivePoint).Should().BeTrue();
         request.Decision.UserPlayIndex.Should().Be(0, "the played move is the candidate");
-        request.Decision.UserPlayError.Should().Be(0.0);
+        request.Decision.RankedBy(PlayRanking.Equity).PlayerResult.Should().Be(PlayerResult.Scored(0.0));
     }
 
     [Fact]
-    public void Play_WithCandidates_BestIsByEquity_AndTheErrorIsThePlayedMovesLoss()
+    public void Play_WithCandidates_KeepTheirOrder_AndTheEquityRankingScoresThePlayedMove()
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGame().Play(XgPlayer.Player1, ThreeOne, Split31,
@@ -317,16 +316,18 @@ public class XgFileBuilderTests
         var file = builder.Build();
 
         var row = Rows(file).Single();
-        row.Equity.Should().BeApproximately(0.25, 1e-6, "the best candidate, regardless of list order");
+        row.Equity.Should().BeApproximately(0.25, 1e-6, "the equity ranking's best, regardless of list order");
         row.Error.Should().BeApproximately(0.15, 1e-6);
-        row.AnalysisLevel.Should().Be(AnalysisLevel.Ply3, "depth follows the best candidate");
+        row.AnalysisLevel.Should().Be(AnalysisLevel.Ply3, "depth follows the ranking's best candidate");
 
-        var decision = Requests(file).Single().Decision;
-        decision.Plays.Select(p => p.MoveNotation).Should().Equal("8/5 6/5", "24/23 13/10");
-        decision.Plays[0].AnalysisLevel.Should().Be(AnalysisLevel.Ply3);
-        decision.Plays[1].AnalysisLevel.Should().Be(AnalysisLevel.Ply2);
-        decision.UserPlayIndex.Should().Be(1);
-        decision.UserPlayError.Should().BeApproximately(0.15, 1e-6);
+        var decision = Requests(file).OfType<CheckerPlayDecision>().Single().Decision;
+        decision.Plays.Select(p => p.Notation).Should().Equal(["24/23 13/10", "8/5 6/5"],
+            "the candidates keep the analysis's own order; which is best is a ranking's");
+        decision.Plays[0].AnalysisLevel.Should().Be(AnalysisLevel.Ply2);
+        decision.Plays[1].AnalysisLevel.Should().Be(AnalysisLevel.Ply3);
+        decision.UserPlayIndex.Should().Be(0);
+        decision.RankedBy(PlayRanking.Equity).PlayerResult.TryGetError(out double error).Should().BeTrue();
+        error.Should().BeApproximately(0.15, 1e-6);
     }
 
     [Fact]
@@ -336,9 +337,9 @@ public class XgFileBuilderTests
         builder.AddGame().Play(XgPlayer.Player1, ThreeOne, Split31,
             [new XgPlayCandidate(MakeFivePoint, equity: 0.25)]);
 
-        var decision = Requests(builder.Build()).Single().Decision;
-        decision.UserPlayIndex.Should().Be(-1);
-        decision.UserPlayError.Should().BeNull();
+        var decision = Requests(builder.Build()).OfType<CheckerPlayDecision>().Single().Decision;
+        decision.UserPlayIndex.Should().BeNull("the played move is not among the candidates");
+        decision.UnlistedPlayError.Should().BeNull("the builder records no error for a play outside its list");
     }
 
     [Fact]
@@ -375,20 +376,21 @@ public class XgFileBuilderTests
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGame().Play(XgPlayer.Player2, ThreeOne, MakeFivePoint);
 
-        var request = Requests(builder.Build()).Single();
+        var request = Requests(builder.Build()).OfType<CheckerPlayDecision>().Single();
         request.Descriptive.OnRollName.Should().Be("Bob");
         request.Descriptive.OpponentName.Should().Be("Alice");
-        request.Position.Mop.Should().Equal(BackgammonConstants.StandardOpeningPosition.Select(p => (int)p),
+        request.Position.Mop.Should().Be(BoardPosition.Standard,
             "the opening is symmetric, so the on-roll board reads the same from either side");
-        request.Decision.Plays.Single().MoveNotation.Should().Be("8/5 6/5");
-        request.Outcome.AfterPlayerBoard[20].Should().Be(-2,
+        request.Decision.Plays.Single().Notation.Should().Be("8/5 6/5");
+        request.AfterPlayerBoard!.Value[20].Should().Be(-2,
             "after-boards are from the new on-roll player's (player 1's) side: Bob's 5-point is Alice's 20");
     }
 
     [Fact]
     public void Play_Hit_RequiresAndSendsTheBlotToTheBar()
     {
-        int[] blotOnFive = (int[])BackgammonConstants.StandardOpeningPosition.Select(p => (int)p).ToArray();
+        int[] blotOnFive = new int[26];
+        BoardPosition.Standard.CopyTo(blotOnFive);
         blotOnFive[5] = -1;                       // player 2 blot on player 1's 5-point
         blotOnFive[19] = -4;                      // taken from their 19 (keeps 15 checkers)
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
@@ -398,9 +400,9 @@ public class XgFileBuilderTests
         notAHit.Should().Throw<ArgumentException>("landing on a blot must be encoded as a hit");
 
         game.Play(XgPlayer.Player1, ThreeOne, Play.Create(new Move(8, -5), new Move(6, 5)));
-        var request = Requests(builder.Build()).Single();
-        request.Decision.Plays.Single().MoveNotation.Should().Be("8/5* 6/5");
-        request.Outcome.AfterPlayerBoard[25].Should().Be(1, "the hit checker sits on the new on-roll player's bar");
+        var request = Requests(builder.Build()).OfType<CheckerPlayDecision>().Single();
+        request.Decision.Plays.Single().Notation.Should().Be("8/5* 6/5");
+        request.AfterPlayerBoard!.Value[25].Should().Be(1, "the hit checker sits on the new on-roll player's bar");
     }
 
     public static TheoryData<string, Move> IllegalMoves => new()
@@ -425,7 +427,8 @@ public class XgFileBuilderTests
     [Fact]
     public void Play_WithACheckerOnTheBar_MustEnterFirst()
     {
-        int[] onBar = (int[])BackgammonConstants.StandardOpeningPosition.Select(p => (int)p).ToArray();
+        int[] onBar = new int[26];
+        BoardPosition.Standard.CopyTo(onBar);
         onBar[25] = 1;
         onBar[13] = 4;                            // keeps player 1 at 15 checkers
         var game = XgFileBuilder.ForMatch(7, "Alice", "Bob").AddGame(initialPosition: onBar);
@@ -451,6 +454,7 @@ public class XgFileBuilderTests
     {
         int[] oneCheckerOn24 = new int[26];
         oneCheckerOn24[24] = 1;
+        oneCheckerOn24[1] = -1;                  // a checker of each side: a decision position
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGame()
             .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint)
@@ -458,7 +462,7 @@ public class XgFileBuilderTests
             .Play(XgPlayer.Player1, ThreeOne, Play24To23);
 
         var rows = Rows(builder.Build());
-        rows[1].Board.Should().Equal(oneCheckerOn24);
+        rows[1].Board.Should().Be(new BoardPosition(oneCheckerOn24));
         rows[1].IsStandardStart.Should().BeTrue("the game header is untouched by a mid-game override");
     }
 
@@ -486,7 +490,7 @@ public class XgFileBuilderTests
 
         var rows = Rows(builder.Build());
         rows.Should().ContainSingle().Which.MoveNumber.Should().Be(2);
-        rows[0].Board.Should().Equal(BackgammonConstants.StandardOpeningPosition.Select(p => (int)p));
+        rows[0].Board.Should().Be(BoardPosition.Standard);
     }
 
     [Fact]
@@ -499,7 +503,7 @@ public class XgFileBuilderTests
 
         var rows = Rows(builder.Build());
         rows.Should().ContainSingle().Which.MoveNumber.Should().Be(2);
-        rows[0].Board.Should().Equal(BackgammonConstants.StandardOpeningPosition.Select(p => (int)p));
+        rows[0].Board.Should().Be(BoardPosition.Standard);
     }
 
     // ------------------------------------------------------------------ //
@@ -515,15 +519,14 @@ public class XgFileBuilderTests
 
         var row = Rows(file).Should().ContainSingle().Subject;
         row.Player.Should().Be("Bob");
-        row.Roll.Should().Be(0);
+        row.Roll.Should().BeNull("a cube row states no roll");
         row.AnalysisLevel.Should().Be(AnalysisLevel.Ply3);
 
-        var request = Requests(file).Single();
-        request.Decision.IsCube.Should().BeTrue();
-        request.Decision.CubeDepth.Should().Be("3-ply");
+        var request = Requests(file).Single().Should().BeOfType<CubeDecision>().Subject;
+        request.Decision.AnalysisMode.Should().Be(AnalysisMode.Evaluation);
+        request.Decision.AnalysisLevel.Should().Be(AnalysisLevel.Ply3);
         request.Decision.NoDoubleEquity.Should().BeApproximately(0.30, 1e-6);
         request.Decision.DoubleTakeEquity.Should().BeApproximately(0.45, 1e-6);
-        request.Decision.CubeAnalysisLevel.Should().Be(AnalysisLevel.Ply3);
         request.Decision.UserDoublerAction.Should().BeNull("no action was recorded");
         request.Decision.UserTakerAction.Should().BeNull();
         request.Decision.UserDoubleError.Should().BeNull();
@@ -541,7 +544,7 @@ public class XgFileBuilderTests
         builder.AddGame().CubeDecision(XgPlayer.Player1, new XgCubeEquities(0.2, 0.3, 1.0),
             doublerAction: doubler, takerAction: taker);
 
-        var decision = Requests(builder.Build()).Single().Decision;
+        var decision = Requests(builder.Build()).OfType<CubeDecision>().Single().Decision;
         decision.UserDoublerAction.Should().Be(expectedDoubler);
         decision.UserTakerAction.Should().Be(expectedTaker);
     }
@@ -555,19 +558,19 @@ public class XgFileBuilderTests
 
         var noDouble = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         noDouble.AddGame().CubeDecision(XgPlayer.Player1, equities, doublerAction: CubeAction.NoDouble);
-        Requests(noDouble.Build()).Single().Decision.UserDoubleError.Should().BeApproximately(0.15, 1e-6);
+        Requests(noDouble.Build()).OfType<CubeDecision>().Single().Decision.UserDoubleError.Should().BeApproximately(0.15, 1e-6);
 
         var doublePass = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         doublePass.AddGame().CubeDecision(XgPlayer.Player1, equities,
             doublerAction: CubeAction.Double, takerAction: CubeAction.Pass);
-        var d = Requests(doublePass.Build()).Single().Decision;
+        var d = Requests(doublePass.Build()).OfType<CubeDecision>().Single().Decision;
         d.UserDoubleError.Should().Be(0.0);
         d.UserTakeError.Should().BeApproximately(0.55, 1e-6);
 
         var doubleTake = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         doubleTake.AddGame().CubeDecision(XgPlayer.Player1, equities,
             doublerAction: CubeAction.Double, takerAction: CubeAction.Take);
-        Requests(doubleTake.Build()).Single().Decision.UserTakeError.Should().Be(0.0);
+        Requests(doubleTake.Build()).OfType<CubeDecision>().Single().Decision.UserTakeError.Should().Be(0.0);
     }
 
     [Fact]
@@ -580,7 +583,7 @@ public class XgFileBuilderTests
             .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
 
         var play = Requests(builder.Build()).Last();
-        play.Decision.IsCube.Should().BeFalse();
+        play.Kind.Should().Be(DecisionKind.CheckerPlay);
         play.Position.CubeSize.Should().Be(2);
         play.Position.CubeOwner.Should().Be(CubeOwner.Opponent, "Bob took, so Bob owns the 2-cube");
     }
@@ -652,7 +655,7 @@ public class XgFileBuilderTests
         XgFileReader.ReadStream(new MemoryStream(XgFileWriter.ToBytes(file)));
 
     [Fact]
-    public void Comment_OnAPlayAndACube_SurvivesTheWire_AndAnUncommentedDecisionReadsEmpty()
+    public void Comment_OnAPlayAndACube_SurvivesTheWire_AndAnUncommentedDecisionHasNone()
     {
         const string cubeComment = "No double: the race is too close.";
         const string playComment = "8/5 6/5 makes the best point.";
@@ -666,10 +669,10 @@ public class XgFileBuilderTests
         var requests = Requests(ThroughTheWire(builder.Build()));
 
         requests.Should().HaveCount(3);
-        requests.Single(r => r.Decision.IsCube).Descriptive.Comment.Should().Be(cubeComment);
-        var plays = requests.Where(r => !r.Decision.IsCube).ToList();
+        requests.Single(r => r.Kind == DecisionKind.Cube).Descriptive.Comment.Should().Be(cubeComment);
+        var plays = requests.Where(r => r.Kind == DecisionKind.CheckerPlay).ToList();
         plays.Single(r => r.Descriptive.OnRollName == "Alice").Descriptive.Comment.Should().Be(playComment);
-        plays.Single(r => r.Descriptive.OnRollName == "Bob").Descriptive.Comment.Should().BeEmpty(
+        plays.Single(r => r.Descriptive.OnRollName == "Bob").Descriptive.Comment.Should().BeNull(
             "a decision recorded without a comment has none, however many its neighbours carry");
     }
 
@@ -701,7 +704,7 @@ public class XgFileBuilderTests
 
         XgFileWriter.ToBytes(withEmpty.Build()).Should().Equal(XgFileWriter.ToBytes(withNone.Build()),
             "an empty comment adds no table entry — the file carries no comment stream at all");
-        Requests(withEmpty.Build()).Single().Descriptive.Comment.Should().BeEmpty();
+        Requests(withEmpty.Build()).Single().Descriptive.Comment.Should().BeNull();
     }
 
     [Fact]
@@ -716,7 +719,7 @@ public class XgFileBuilderTests
 
         XgFileWriter.ToBytes(earlier).Should().Equal(earlierBytes,
             "a comment recorded after a build must not reach the file that build returned");
-        Requests(builder.Build()).Select(r => (r.Descriptive.Game, r.Descriptive.Comment))
+        Requests(builder.Build()).Select(r => (r.Game!.Value, r.Descriptive.Comment))
             .Should().Equal((1, "first game"), (2, "second game"));
     }
 
@@ -889,12 +892,13 @@ public class XgFileBuilderTests
         var built = FullMatch();
         var sliced = XgFileReader.ReadStream(new MemoryStream(XgpExporter.ToBytes(built, game: 1, moveNumber: 1, isCube: false)));
 
-        var request = Requests(sliced, "slice.xgp").Should().ContainSingle().Subject;
-        request.Decision.Plays.Select(p => p.MoveNotation).Should().Equal("8/5 6/5", "24/23 13/10");
+        var request = Requests(sliced, "slice.xgp").Should().ContainSingle().Subject
+            .Should().BeOfType<CheckerPlayDecision>().Subject;
+        request.Decision.Plays.Select(p => p.Notation).Should().Equal("8/5 6/5", "24/23 13/10");
     }
 
     private static string Fingerprint(BgDecisionData d) =>
-        $"{d.Id}|{d.Xgid}|{d.Decision.IsCube}|{string.Join(",", d.Decision.Plays.Select(p => $"{p.MoveNotation}@{p.Equity}"))}" +
-        $"|{d.Decision.NoDoubleEquity}|{d.Decision.DoubleTakeEquity}|{d.Decision.UserDoublerAction}|{d.Decision.UserTakerAction}" +
-        $"|{d.Position.CubeSize}|{d.Position.CubeOwner}|{d.Position.OnRollNeeds}|{d.Position.OpponentNeeds}";
+        $"{d.Id}|{d.Xgid}|{d.Kind}|{d.Position.CubeSize}|{d.Position.CubeOwner}|{d.Session}|" + d.Match(
+            play => string.Join(",", play.Decision.Plays.Select(p => $"{p.Notation}@{p.Equity}")),
+            cube => $"{cube.Decision.NoDoubleEquity}|{cube.Decision.DoubleTakeEquity}|{cube.Decision.UserDoublerAction}|{cube.Decision.UserTakerAction}");
 }

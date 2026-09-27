@@ -5,9 +5,11 @@ namespace ConvertXgToJson_Lib;
 
 /// <summary>
 /// Translates XG's raw per-candidate move encoding into a
-/// <see cref="BgDataTypes_Lib.Play"/> with hits pre-encoded into
-/// <see cref="BgDataTypes_Lib.Move.ToPt"/>'s sign, ready to hand to
-/// <see cref="BgMoveGen.MoveNotationFormatter.Format(Play)"/>.
+/// <see cref="BgDataTypes_Lib.Play"/>, with each hit recorded in
+/// <see cref="BgDataTypes_Lib.Move.ToPt"/>'s sign. XG's encoding carries no
+/// hit mark, so the translator reads it off the board the play starts from;
+/// the play is then spelt by <see cref="Play.ToNotation"/> and applied by
+/// BgDataTypes_Lib's play rule, never here.
 ///
 /// <para>
 /// Input is the 8-element <see cref="sbyte"/> array stored at
@@ -17,36 +19,41 @@ namespace ConvertXgToJson_Lib;
 /// <list type="bullet">
 ///   <item><description><c>from == -1</c> — terminator (stop)</description></item>
 ///   <item><description><c>from == 24</c> — bar entry → <c>FrPt = 25</c></description></item>
-///   <item><description><c>to &lt; 0</c> — bear off → <c>ToPt = 0</c>. XG encodes overshoots as <c>to = from - die</c> and so can emit <c>-2, -3, …</c>; treating any negative as bear-off. Point-index resolution is shared with <see cref="ConvertXgToJson_Lib.Parsing.AfterBoardBuilder"/> via <see cref="ConvertXgToJson_Lib.Parsing.XgMoveEncoding"/>.</description></item>
+///   <item><description><c>to &lt; 0</c> — bear off → <c>ToPt = 0</c>. XG encodes overshoots as <c>to = from - die</c> and so can emit <c>-2, -3, …</c>; any negative is a bear-off. Point-index resolution is <see cref="XgMoveEncoding"/>'s.</description></item>
 ///   <item><description>otherwise — regular point, <c>FrPt = from + 1</c>, <c>ToPt = to + 1</c></description></item>
 /// </list>
 ///
 /// <para>
-/// Hit detection consumes the on-roll-POV board passed in: when the
-/// destination point holds an opponent blot (<c>board[to+1] == -1</c>),
-/// the translator records the hit by negating <c>ToPt</c> and updates
-/// the board in place so chained sub-moves that revisit the same point
-/// don't re-flag the hit. The caller is responsible for passing a
-/// scratch copy if it needs to preserve the original — this method
-/// mutates the array. Mirrors the producer-side hit semantics that
-/// previously lived inline in the local <c>MoveNotationFormatter</c>;
-/// surfacing it on the translator keeps the formatter (and the
-/// underlying <see cref="BgDataTypes_Lib.Play"/> primitive) board-agnostic.
+/// A move landing on a point that holds an opponent blot in the starting
+/// position is the hit: its <c>ToPt</c> is negated, and the point stops
+/// counting as a blot for the rest of the play, so a later move landing there
+/// is not marked again. That is the whole of the translator's board reading —
+/// it does not apply the play. XG's stored encodings are kept as they are,
+/// multi-die moves included (halheinrich/backgammon#277): whether a
+/// translated play is valid from its position is BgDataTypes_Lib's play rule's
+/// question, which the decision iterator asks of every candidate.
 /// </para>
 ///
 /// <para>
 /// The translator does NOT special-case XG's <c>(0, 0)</c> "no legal
-/// moves" (dance) sentinel — preserving the local formatter's prior
-/// behaviour, which rendered dances as "1/1" garbage. AfterBoardBuilder
-/// breaks on <c>(0, 0)</c> because a dance has no board change to
-/// apply; rendering a recognizable dance sentinel in notation is a
-/// distinct concern, deferred to a follow-up.
+/// moves" (dance) sentinel; the decision iterator skips sentinel analyses
+/// before any candidate reaches here.
 /// </para>
 /// </summary>
 internal static class XgMoveTranslator
 {
-    public static Play Translate(sbyte[] moves, int[] boardOnRollPov)
+    private const int BoardSize = 26;
+
+    /// <summary>
+    /// The play <paramref name="moves"/> encodes, played from
+    /// <paramref name="board"/> — the position in the mover's frame, which
+    /// the translator only reads.
+    /// </summary>
+    public static Play Translate(sbyte[] moves, BoardPosition board)
     {
+        Span<int> points = stackalloc int[BoardSize];
+        board.CopyTo(points);
+
         var play = new Play();
         for (int i = 0; i + 1 < moves.Length; i += 2)
         {
@@ -60,10 +67,9 @@ internal static class XgMoveTranslator
             {
                 toPt = 0;
             }
-            else if (boardOnRollPov[toLabel] == -1)
+            else if (points[toLabel] == -1)
             {
-                boardOnRollPov[toLabel] = 0;
-                boardOnRollPov[0] -= 1;
+                points[toLabel] = 0;
                 toPt = -toLabel;
             }
             else

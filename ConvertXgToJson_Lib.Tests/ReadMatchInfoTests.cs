@@ -24,7 +24,7 @@ public class ReadMatchInfoTests
             full.Should().NotBeNull($"ExtractMatchInfo should read {name}");
             fast!.Player1.Should().Be(full!.Player1, $"Player1 mismatch in {name}");
             fast.Player2.Should().Be(full.Player2, $"Player2 mismatch in {name}");
-            fast.MatchLength.Should().Be(full.MatchLength, $"MatchLength mismatch in {name}");
+            fast.Terms.Should().Be(full.Terms, $"terms mismatch in {name}");
         }
     }
 }

@@ -1,257 +1,193 @@
-﻿using ConvertXgToJson_Lib.Models;
+using BgDataTypes_Lib;
+using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="MatchContext"/>'s Crawford / Jacoby / Beaver
-/// separation. The old <c>CrawfordJacoby</c> int folded two orthogonal
-/// concepts into one, yielding a latent false-positive IsCrawford on
-/// Jacoby money-game decisions. These tests pin the separation.
+/// Unit tests for <see cref="MatchContext"/>: the session it builds for a
+/// decision from the match header's terms and the current game's standing
+/// (<see cref="Session.Create"/>, never an orientation of its own), the
+/// Crawford game the walk's cube rule asks about, and the names and comments
+/// it reads as a record states them — <see langword="null"/> for none.
 /// </summary>
 public class MatchContextTests
 {
+    private static MatchContext Context(
+        int matchLength, bool jacoby = false, bool beaver = false, List<string>? comments = null,
+        string player1 = "Alice", string player2 = "Bob") =>
+        new(
+            [new MatchHeaderRecord
+            {
+                MatchLength = matchLength,
+                CubeLimit = XgMatchInfo.DefaultCubeLimitExponent,
+                Jacoby = jacoby,
+                Beaver = beaver,
+                Player1 = player1,
+                Player2 = player2,
+            }],
+            comments ?? []);
+
+    private static GameHeaderRecord Game(int score1 = 0, int score2 = 0, bool crawford = false, bool standard = true) => new()
+    {
+        Score1 = score1,
+        Score2 = score2,
+        CrawfordApplies = crawford,
+        InitialPosition = standard
+            ? new PositionEngine { Points = XgGameBuilder.PointsOf(BoardPosition.Standard) }
+            : new PositionEngine(),
+    };
+
+    private const int Money = MatchHeaderRecord.MoneyMatchLengthSentinel;
+
     // -----------------------------------------------------------------------
-    //  Match play — Crawford and non-Crawford games
+    //  The session: terms and standing, turned to the seat on roll
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void MatchPlay_NonCrawfordGame_IsCrawfordFalse_OthersFalse()
+    public void Match_SessionFor_TurnsTheStandingToTheSeatOnRoll()
     {
-        var ctx = BuildContext(matchLength: 7, jacoby: false, beaver: false, crawfordApplies: false);
+        var ctx = Context(matchLength: 7);
+        ctx.Update(Game(score1: 2, score2: 5));
 
-        ctx.IsCrawford.Should().BeFalse();
-        ctx.IsJacoby.Should().BeFalse();
-        ctx.IsBeaver.Should().BeFalse();
-        ctx.XgidCrawfordJacobyField.Should().Be(0);
+        ctx.SessionFor(Seat.Player1).Should().Be(
+            Session.Create(new MatchTerms { Length = 7 }, new MatchStanding { Away1 = 5, Away2 = 2, IsCrawford = false }, Seat.Player1));
+        var player2 = (MatchSession)ctx.SessionFor(Seat.Player2);
+        player2.OnRollNeeds.Should().Be(2);
+        player2.OpponentNeeds.Should().Be(5);
+        player2.IsCrawford.Should().BeFalse();
     }
 
     [Fact]
-    public void MatchPlay_CrawfordGame_IsCrawfordTrue_OthersFalse()
+    public void Match_CrawfordGame_IsTheStandingsFact()
     {
-        var ctx = BuildContext(matchLength: 7, jacoby: false, beaver: false, crawfordApplies: true);
+        var ctx = Context(matchLength: 7);
+        ctx.Update(Game(score1: 6, score2: 3, crawford: true));
 
         ctx.IsCrawford.Should().BeTrue();
-        ctx.IsJacoby.Should().BeFalse();
-        ctx.IsBeaver.Should().BeFalse();
-        ctx.XgidCrawfordJacobyField.Should().Be(1);
+        ((MatchSession)ctx.SessionFor(Seat.Player2)).IsCrawford.Should().BeTrue();
+
+        ctx.Update(Game(score1: 6, score2: 4));
+        ctx.IsCrawford.Should().BeFalse("the flag is each game's own");
     }
 
     /// <summary>
-    /// The old CrawfordJacoby int encoded Jacoby in money games as 1 — the
-    /// same value as Crawford in match play. A match-header Jacoby flag must
-    /// NOT leak into match-play IsCrawford. This test guards that.
+    /// A match header's Jacoby and beaver flags have no place in a match
+    /// session: its terms are its length alone, so nothing of them reaches a
+    /// record.
     /// </summary>
     [Fact]
-    public void MatchPlay_WithMatchHeaderJacobyFlag_IsJacobyFalse()
+    public void Match_HeaderRuleFlags_DoNotReachTheSession()
     {
-        // Jacoby is a money-game setting; match play ignores it.
-        var ctx = BuildContext(matchLength: 7, jacoby: true, beaver: true, crawfordApplies: false);
+        var ctx = Context(matchLength: 7, jacoby: true, beaver: true);
+        ctx.Update(Game());
 
-        ctx.IsCrawford.Should().BeFalse();
-        ctx.IsJacoby.Should().BeFalse();
-        ctx.IsBeaver.Should().BeFalse();
-        ctx.XgidCrawfordJacobyField.Should().Be(0);
-    }
-
-    // -----------------------------------------------------------------------
-    //  Money games — Jacoby / Beaver combinations
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public void MoneyGame_Plain_AllFalse()
-    {
-        var ctx = BuildContext(matchLength: 0, jacoby: false, beaver: false, crawfordApplies: false);
-
-        ctx.IsCrawford.Should().BeFalse();
-        ctx.IsJacoby.Should().BeFalse();
-        ctx.IsBeaver.Should().BeFalse();
-        ctx.XgidCrawfordJacobyField.Should().Be(0);
-    }
-
-    /// <summary>
-    /// The regression guard: money-game + Jacoby used to produce
-    /// <c>CrawfordJacoby == 1</c>, and downstream consumers reading
-    /// <c>CrawfordJacoby == 1</c> as IsCrawford tripped here. After the
-    /// separation, IsCrawford is unconditionally false in money games.
-    /// </summary>
-    [Fact]
-    public void MoneyGame_Jacoby_IsJacobyOnly_IsCrawfordFalse()
-    {
-        var ctx = BuildContext(matchLength: 0, jacoby: true, beaver: false, crawfordApplies: false);
-
-        ctx.IsCrawford.Should().BeFalse();
-        ctx.IsJacoby.Should().BeTrue();
-        ctx.IsBeaver.Should().BeFalse();
-        ctx.XgidCrawfordJacobyField.Should().Be(1);
-    }
-
-    [Fact]
-    public void MoneyGame_Beaver_IsBeaverOnly_XgidFieldIs2()
-    {
-        var ctx = BuildContext(matchLength: 0, jacoby: false, beaver: true, crawfordApplies: false);
-
-        ctx.IsCrawford.Should().BeFalse();
-        ctx.IsJacoby.Should().BeFalse();
-        ctx.IsBeaver.Should().BeTrue();
-        ctx.XgidCrawfordJacobyField.Should().Be(2);
-    }
-
-    [Fact]
-    public void MoneyGame_JacobyAndBeaver_XgidFieldIs3()
-    {
-        var ctx = BuildContext(matchLength: 0, jacoby: true, beaver: true, crawfordApplies: false);
-
-        ctx.IsCrawford.Should().BeFalse();
-        ctx.IsJacoby.Should().BeTrue();
-        ctx.IsBeaver.Should().BeTrue();
-        ctx.XgidCrawfordJacobyField.Should().Be(3);
-    }
-
-    /// <summary>
-    /// Money games never have a Crawford game, even if a (malformed) game
-    /// header claimed <c>CrawfordApplies</c>. Match-length 0 is the
-    /// unconditional guard.
-    /// </summary>
-    [Fact]
-    public void MoneyGame_WithSpuriousCrawfordApplies_IsCrawfordFalse()
-    {
-        var ctx = BuildContext(matchLength: 0, jacoby: true, beaver: false, crawfordApplies: true);
-
-        ctx.IsCrawford.Should().BeFalse();
-    }
-
-    // -----------------------------------------------------------------------
-    //  JacobyStamp — the money-only fact as stamped onto a decision record
-    // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// <see cref="MatchContext.JacobyStamp"/> is what the iterator writes to
-    /// <see cref="BgDataTypes_Lib.PositionData.IsJacoby"/>. Off money the
-    /// fact does not exist, so the stamp is <see langword="null"/> rather
-    /// than a <c>false</c> that would answer a question the record never
-    /// poses — including when the match header carries the flag anyway
-    /// (halheinrich/backgammon#120; SPEC-stats-identity.md §1, amended
-    /// 2026-08-20).
-    /// </summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void MatchPlay_JacobyStampIsNull_WhateverTheHeaderSays(bool jacoby)
-    {
-        var ctx = BuildContext(matchLength: 7, jacoby: jacoby, beaver: false, crawfordApplies: false);
-
-        ctx.JacobyStamp.Should().BeNull();
+        ctx.MatchInfo.Terms.Should().Be(new MatchTerms { Length = 7 });
+        ctx.SessionFor(Seat.Player1).Should().BeOfType<MatchSession>();
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void MoneyGame_JacobyStampIsTheFact(bool jacoby)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Money_SessionFor_StatesTheRulesAndTheOrientedScores(bool jacoby, bool beaver)
     {
-        var ctx = BuildContext(matchLength: 0, jacoby: jacoby, beaver: true, crawfordApplies: false);
+        var ctx = Context(Money, jacoby, beaver);
+        ctx.Update(Game(score1: 3, score2: 1));
 
-        ctx.JacobyStamp.Should().Be(jacoby,
-            "in a money game the question arises and the header answers it");
+        var session = (MoneySession)ctx.SessionFor(Seat.Player2);
+        session.Terms.Should().Be(new MoneyTerms { IsJacoby = jacoby, IsBeaver = beaver, CubeLimit = 1024 });
+        session.OnRollScore.Should().Be(1);
+        session.OpponentScore.Should().Be(3);
     }
 
-    // -----------------------------------------------------------------------
-    //  IsStandardStart — standard vs. non-standard opening positions
-    // -----------------------------------------------------------------------
-
     /// <summary>
-    /// A GameHeaderRecord whose InitialPosition is the canonical opening
-    /// drives IsStandardStart to true. The flag is recomputed per-game from
-    /// the header, so downstream consumers can gate move-number filtering
-    /// on it.
+    /// A money session has no Crawford game: a (malformed) game header
+    /// claiming one leaves no trace, since a money standing has no flag to
+    /// carry it.
     /// </summary>
     [Fact]
-    public void StandardOpeningPosition_IsStandardStartTrue()
+    public void Money_SpuriousCrawfordFlag_IsNoCrawfordGame()
     {
-        var hm = new MatchHeaderRecord { MatchLength = 7 };
-        var gh = new GameHeaderRecord
-        {
-            InitialPosition = new PositionEngine
-            {
-                Points = (sbyte[])BackgammonConstants.StandardOpeningPosition.Clone(),
-            },
-        };
+        var ctx = Context(Money, jacoby: true);
+        ctx.Update(Game(crawford: true));
 
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
-        ctx.Update(gh);
-
-        ctx.IsStandardStart.Should().BeTrue();
+        ctx.IsCrawford.Should().BeFalse();
+        ctx.GameInfo!.Standing.Should().BeOfType<MoneyStanding>();
     }
 
-    /// <summary>
-    /// A non-canonical InitialPosition (problem position, Bg960, mid-game
-    /// snapshot, etc.) drives IsStandardStart to false. Uses the all-zeros
-    /// default <see cref="PositionEngine"/> as a representative
-    /// non-standard shape.
-    /// </summary>
     [Fact]
-    public void NonStandardOpeningPosition_IsStandardStartFalse()
+    public void SessionFor_BeforeAnyGameHeader_IsRefused()
     {
-        var hm = new MatchHeaderRecord { MatchLength = 7 };
-        var gh = new GameHeaderRecord(); // default InitialPosition is all-zero
-
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
-        ctx.Update(gh);
-
-        ctx.IsStandardStart.Should().BeFalse();
+        FluentActions.Invoking(() => Context(matchLength: 7).SessionFor(Seat.Player1))
+            .Should().Throw<InvalidDataException>();
     }
 
-    /// <summary>
-    /// IsStandardStart is recomputed per-game: a standard-start game
-    /// followed by a non-standard-start game flips the flag back to false.
-    /// Pins the per-game reset semantic — without it, a stale true from
-    /// game 1 would falsely admit move-number-filtered decisions in
-    /// non-standard later games.
-    /// </summary>
     [Fact]
-    public void IsStandardStart_ResetPerGame()
+    public void Construction_WithoutALeadingMatchHeader_IsRefused()
     {
-        var hm = new MatchHeaderRecord { MatchLength = 7 };
-        var standardGh = new GameHeaderRecord
-        {
-            InitialPosition = new PositionEngine
-            {
-                Points = (sbyte[])BackgammonConstants.StandardOpeningPosition.Clone(),
-            },
-        };
-        var nonStandardGh = new GameHeaderRecord();
-
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
-        ctx.Update(standardGh);
-        ctx.IsStandardStart.Should().BeTrue("standard-start game should set IsStandardStart=true");
-        ctx.Update(nonStandardGh);
-        ctx.IsStandardStart.Should().BeFalse("subsequent non-standard-start game must reset IsStandardStart=false");
+        FluentActions.Invoking(() => new MatchContext([new GameHeaderRecord()], []))
+            .Should().Throw<InvalidDataException>();
     }
 
     // -----------------------------------------------------------------------
-    //  Helper
+    //  The game's metadata, per game
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Builds a <see cref="MatchContext"/> from synthetic headers and drives
-    /// it through a single <see cref="GameHeaderRecord"/> update so
-    /// IsCrawford reflects the current game. Covers just the fields the
-    /// Crawford/Jacoby/Beaver logic actually reads; other fields left default.
+    /// The current game's metadata is rebuilt at each game header, so a
+    /// standard start in game 1 does not leak into a saved-position game 2.
     /// </summary>
-    private static MatchContext BuildContext(int matchLength, bool jacoby, bool beaver, bool crawfordApplies)
+    [Fact]
+    public void GameInfo_IsRebuiltAtEachGameHeader()
     {
-        var hm = new MatchHeaderRecord
-        {
-            MatchLength = matchLength,
-            Jacoby = jacoby,
-            Beaver = beaver,
-        };
-        var gh = new GameHeaderRecord
-        {
-            CrawfordApplies = crawfordApplies,
-        };
+        var ctx = Context(matchLength: 7);
+        ctx.GameInfo.Should().BeNull("no game has begun");
 
-        var ctx = new MatchContext(new List<SaveRecord> { hm }, sourceFile: null, comments: []);
-        ctx.Update(gh);
-        return ctx;
+        ctx.Update(Game(standard: true));
+        ctx.GameInfo!.IsStandardStart.Should().BeTrue();
+        ctx.GameNumber.Should().Be(1);
+
+        ctx.Update(Game(standard: false));
+        ctx.GameInfo!.IsStandardStart.Should().BeFalse("the start is each game's own");
+        ctx.GameNumber.Should().Be(2);
+    }
+
+    // -----------------------------------------------------------------------
+    //  None recorded is null
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void NameOf_IsTheSeatsName_OrNullWhenTheHeaderRecordsNone()
+    {
+        var ctx = Context(matchLength: 7, player1: "Alice", player2: "  ");
+
+        ctx.NameOf(Seat.Player1).Should().Be("Alice");
+        ctx.NameOf(Seat.Player2).Should().BeNull("a record states no name rather than an empty one");
+    }
+
+    [Fact]
+    public void SeatOf_ReadsXgsActivePlayerSign()
+    {
+        MatchContext.SeatOf(1).Should().Be(Seat.Player1);
+        MatchContext.SeatOf(0).Should().Be(Seat.Player1);
+        MatchContext.SeatOf(-1).Should().Be(Seat.Player2);
+    }
+
+    /// <summary>
+    /// XG's no-comment index, an index past the table and a comment whose
+    /// text is empty are all none: <see langword="null"/>, never an empty
+    /// comment, and never another entry of the table.
+    /// </summary>
+    [Fact]
+    public void CommentAt_IsTheCommentsText_OrNullWhenThereIsNone()
+    {
+        var ctx = Context(matchLength: 7, comments: ["first note", "", "  "]);
+
+        ctx.CommentAt(0).Should().Be("first note");
+        ctx.CommentAt(1).Should().BeNull();
+        ctx.CommentAt(2).Should().BeNull();
+        ctx.CommentAt(-1).Should().BeNull();
+        ctx.CommentAt(3).Should().BeNull();
     }
 }

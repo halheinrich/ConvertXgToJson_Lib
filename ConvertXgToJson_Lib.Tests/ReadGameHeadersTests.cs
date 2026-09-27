@@ -22,17 +22,15 @@ public class ReadGameHeadersTests
             var fast = XgFileReader.ReadGameHeaders(path, state).ToList();
 
             var file = XgFileReader.ReadFile(path);
-            int matchLength = XgDecisionIterator.ExtractMatchInfo(file)!.MatchLength;
+            var terms = XgDecisionIterator.ExtractMatchInfo(file)!.Terms;
             var full = file.Records.OfType<GameHeaderRecord>()
-                .Select(gh => XgGameInfo.From(gh, matchLength))
+                .Select(gh => XgGameInfo.From(gh, terms))
                 .ToList();
 
             fast.Should().HaveCount(full.Count, $"game-header count in {name}");
             for (int i = 0; i < full.Count; i++)
             {
-                fast[i].Away1.Should().Be(full[i].Away1, $"Away1 game#{i} in {name}");
-                fast[i].Away2.Should().Be(full[i].Away2, $"Away2 game#{i} in {name}");
-                fast[i].IsCrawfordGame.Should().Be(full[i].IsCrawfordGame, $"Crawford game#{i} in {name}");
+                fast[i].Standing.Should().Be(full[i].Standing, $"standing game#{i} in {name}");
                 fast[i].IsStandardStart.Should().Be(full[i].IsStandardStart, $"StdStart game#{i} in {name}");
             }
         }

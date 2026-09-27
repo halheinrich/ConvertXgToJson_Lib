@@ -109,7 +109,7 @@ public class XgpAnalysisFilterTests
         var file = XgFileReader.ReadFile(Fixture("PlayAnalysis.xgp"));
         var rows = XgDecisionIterator.Iterate(file, "PlayAnalysis.xgp").ToList();
         rows.Should().ContainSingle();
-        rows[0].IsCube.Should().BeFalse(
+        rows[0].Kind.Should().Be(DecisionKind.CheckerPlay,
             "PlayAnalysis.xgp contains an analysed move and an unanalysed cube; " +
             "only the move row should be yielded");
     }
@@ -123,7 +123,7 @@ public class XgpAnalysisFilterTests
         rows.Should().ContainSingle(
             "the cube has Level=-100 (queued, never analysed) — only the analysed " +
             "move row should be yielded");
-        rows[0].IsCube.Should().BeFalse(
+        rows[0].Kind.Should().Be(DecisionKind.CheckerPlay,
             "the only yielded row must be the analysed move, not the phantom cube");
     }
 
@@ -134,7 +134,7 @@ public class XgpAnalysisFilterTests
         var file = XgFileReader.ReadFile(Fixture(name));
         var requests = XgDecisionIterator.IterateDiagramRequests(file, name).ToList();
         requests.Should().ContainSingle();
-        requests[0].Decision.IsCube.Should().BeFalse(
+        requests[0].Kind.Should().Be(DecisionKind.CheckerPlay,
             "the cube was requested but never analysed — the diagram request iterator " +
             "must skip it, not emit an empty cube panel");
     }
@@ -171,7 +171,7 @@ public class XgpAnalysisFilterTests
         rows.Should().ContainSingle(
             "both panes are analysed, but an .xgp records exactly one decision; " +
             "emitting both stamped them with the same bare-filename XgpDecisionId");
-        rows[0].IsCube.Should().BeFalse(
+        rows[0].Kind.Should().Be(DecisionKind.CheckerPlay,
             "dice in the file mean the saved decision is the play — the cube pane is " +
             "XG's always-present incidental");
     }
@@ -184,7 +184,7 @@ public class XgpAnalysisFilterTests
         var requests = XgDecisionIterator.IterateDiagramRequests(file, JoeRussellXgp).ToList();
 
         requests.Should().ContainSingle();
-        requests[0].Decision.IsCube.Should().BeFalse(
+        requests[0].Kind.Should().Be(DecisionKind.CheckerPlay,
             "both surfaces route through the same IterateCore and must agree on which " +
             "decision an .xgp represents");
     }
@@ -296,10 +296,10 @@ public class XgpAnalysisFilterTests
     private static void AssertSingleDecision(XgFile file, string sourceFile, bool expectCube)
     {
         var row = XgDecisionIterator.Iterate(file, sourceFile).Should().ContainSingle().Subject;
-        row.IsCube.Should().Be(expectCube);
+        (row.Kind == DecisionKind.Cube).Should().Be(expectCube);
 
         var request = XgDecisionIterator.IterateDiagramRequests(file, sourceFile).Should().ContainSingle().Subject;
-        request.Decision.IsCube.Should().Be(expectCube);
+        (request.Kind == DecisionKind.Cube).Should().Be(expectCube);
     }
 
     /// <summary>
@@ -389,10 +389,12 @@ public class XgpAnalysisFilterTests
         return file;
     }
 
+    /// <summary>A checker of each side — a decision position — the mover's on 24.</summary>
     private static sbyte[] BoardWithCheckerOn24()
     {
         var pts = new sbyte[26];
         pts[24] = 1;
+        pts[1] = -1;
         return pts;
     }
 

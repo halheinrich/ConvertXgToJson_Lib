@@ -86,7 +86,7 @@ public class XgDecisionIteratorTests
             // Need >1 decision in some game AND decisions in another game.
             int targetGame = byGame
                 .Where(g => g.Count() > 1)
-                .Select(g => g.Key)
+                .Select(g => g.Key!.Value)
                 .FirstOrDefault(-1);
             if (targetGame == -1 || byGame.Count < 2)
                 continue;
@@ -278,8 +278,8 @@ public class XgDecisionIteratorTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// GameInfo is populated on state before the first row of each game is yielded.
-    /// Away scores are non-negative and sum to less than or equal to match length.
+    /// GameInfo is populated on state before the first row of each game is
+    /// yielded, its standing of the match's kind.
     /// </summary>
     [Fact]
     public void GameInfo_IsPopulatedBeforeFirstRow()
@@ -293,8 +293,8 @@ public class XgDecisionIteratorTests
         foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             state.GameInfo.Should().NotBeNull("GameInfo should be set before the first row");
-            state.GameInfo!.Away1.Should().BeGreaterThanOrEqualTo(0);
-            state.GameInfo.Away2.Should().BeGreaterThanOrEqualTo(0);
+            state.GameInfo!.Standing.Kind.Should().Be(state.MatchInfo!.Terms.Kind,
+                "a game's standing is of its match's kind");
             break;
         }
     }
@@ -372,7 +372,7 @@ public class XgDecisionIteratorTests
         if (gamesWithRows.Count < 2)
             return;
 
-        int skipGame = gamesWithRows.First().Key;
+        int skipGame = gamesWithRows.First().Key!.Value;
 
         // SkipGameAt fires once per game header, ordered by file position.
         // Skip the Nth invocation where N matches the target game number
@@ -391,8 +391,9 @@ public class XgDecisionIteratorTests
             "rows from other games should still be yielded");
     }
     /// <summary>
-    /// GameInfo.Away scores are correct: MatchLength - Score at game start.
-    /// Verified against the first game of a match file where scores start at 0.
+    /// A match game's standing states each player's away score — the match's
+    /// length less the score at the game's start. Verified against the first
+    /// game of a match file, where the scores start at 0.
     /// </summary>
     [Fact]
     public void GameInfo_AwayScores_CorrectForFirstGame()
@@ -402,17 +403,7 @@ public class XgDecisionIteratorTests
         string sourceFile = Path.GetFileName(path);
 
         // Get match length from the file
-        int matchLength = 0;
-        foreach (var r in file.Records)
-        {
-            if (r is MatchHeaderRecord hm)
-            {
-                matchLength = hm.MatchLength >= 99999 ? 0 : hm.MatchLength;
-                break;
-            }
-        }
-
-        if (matchLength == 0)
+        if (XgDecisionIterator.ExtractMatchInfo(file)!.Terms is not MatchTerms terms)
             return; // money session — skip
 
         var state = new XgIteratorState();
@@ -420,10 +411,9 @@ public class XgDecisionIteratorTests
         foreach (var row in XgDecisionIterator.Iterate(file, sourceFile, state))
         {
             // First game of a match always starts 0-0
-            state.GameInfo!.Away1.Should().Be(matchLength,
-                "first game starts at score 0, so away = matchLength");
-            state.GameInfo.Away2.Should().Be(matchLength,
-                "first game starts at score 0, so away = matchLength");
+            var standing = state.GameInfo!.Standing.Should().BeOfType<MatchStanding>().Subject;
+            standing.Away1.Should().Be(terms.Length, "first game starts at score 0, so away = the length");
+            standing.Away2.Should().Be(terms.Length, "first game starts at score 0, so away = the length");
             break;
         }
     }
@@ -442,7 +432,7 @@ public class XgDecisionIteratorTests
 
             foreach (var row in XgDecisionIterator.Iterate(file, sourceFile))
             {
-                if (row.MatchLength == 0) continue; // money — no away scores
+                if (row.MatchLength is not int matchLength) continue; // money — no away scores
 
                 // XGID format: XGID=<pos>:<cv>:<cp>:<turn>:<dice>:<score1>:<score2>:<cj>:<ml>:<maxcube>
                 var parts = row.Xgid.Split(':');
@@ -454,8 +444,8 @@ public class XgDecisionIteratorTests
                 int msAway1 = int.Parse(scoreParts[0]);
                 int msAway2 = int.Parse(scoreParts[1]);
 
-                int expectedAway1 = row.MatchLength - xgidScore1;
-                int expectedAway2 = row.MatchLength - xgidScore2;
+                int expectedAway1 = matchLength - xgidScore1;
+                int expectedAway2 = matchLength - xgidScore2;
 
                 msAway1.Should().Be(expectedAway1,
                     $"away1 should be on-roll player's away score in {Path.GetFileName(path)} " +
@@ -493,16 +483,16 @@ public class XgDecisionIteratorTests
 
             foreach (var req in XgDecisionIterator.IterateDiagramRequests(file, expected))
             {
-                req.Descriptive.SourceFile.Should().Be(expected,
+                req.SourceFile.Should().Be(expected,
                     $"every BgDecisionData from {expected} must carry that filename");
             }
         }
     }
 
     /// <summary>
-    /// Cube DecisionRows (both doubler and taker) carry no play, so the
-    /// PlayOutcomeData contract requires both after-boards empty. Producer-
-    /// enforced — board-based play-type filters rely on this to skip cube rows.
+    /// A cube row carries no play, so it states no after-board: both are
+    /// <see langword="null"/>, the other kind's columns empty — board-based
+    /// play-type filters rely on this to skip cube rows.
     /// </summary>
     [Fact]
     public void CubeDecisionRows_AfterBoardsAreEmpty()
@@ -514,13 +504,13 @@ public class XgDecisionIteratorTests
             var file = XgFileReader.ReadFile(path);
 
             foreach (var row in XgDecisionIterator.Iterate(file, Path.GetFileName(path))
-                                                   .Where(r => r.IsCube))
+                                                   .Where(r => r.Kind == DecisionKind.Cube))
             {
                 foundCube = true;
-                row.AfterBestBoard.Should().BeEmpty(
-                    $"cube DecisionRow in {Path.GetFileName(path)} must have empty AfterBestBoard");
-                row.AfterPlayerBoard.Should().BeEmpty(
-                    $"cube DecisionRow in {Path.GetFileName(path)} must have empty AfterPlayerBoard");
+                row.AfterBestBoard.Should().BeNull(
+                    $"cube DecisionRow in {Path.GetFileName(path)} states no AfterBestBoard");
+                row.AfterPlayerBoard.Should().BeNull(
+                    $"cube DecisionRow in {Path.GetFileName(path)} states no AfterPlayerBoard");
             }
         }
 
@@ -528,22 +518,20 @@ public class XgDecisionIteratorTests
     }
 
     // -----------------------------------------------------------------------
-    //  DecisionRow.Equity — best-by-equity convention
+    //  Candidates in XG's order; the row's equity is its ranking's best
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// <c>match35253054.xg</c> contains at least one decision where XG's
-    /// native rank 0 is not the highest-equity candidate (the same anomaly
-    /// fixture used by the diagram-request sort test). For every such
-    /// decision, <see cref="DecisionRow.Equity"/> must report the
-    /// <em>highest</em> equity in the analysed candidate set, not
-    /// <c>Evals[0].Equity</c>. Pairs raw MoveRecords with DecisionRows
-    /// emitted by <see cref="XgDecisionIterator.Iterate"/> and compares
-    /// against <see cref="XgDecisionIterator.FindBestByEquityIndex"/>.
+    /// <c>match35253054.xg</c> contains decisions where XG's native rank 0 is
+    /// not the highest-equity candidate. A record keeps XG's order — its first
+    /// candidate is XG's rank 0, never re-sorted by equity — and which play is
+    /// best is a ranking's: the row built for the default ranking reports the
+    /// highest equity in the candidate set. Pairs each checker-play record
+    /// with its XG move record and its row, by id.
     /// </summary>
     [Fact]
     [Trait("Category", "FileIO")]
-    public void MoveRow_Equity_UsesHighestEquityCandidate_NotXgNativeRank0()
+    public void CheckerPlay_CandidatesKeepXgsOrder_AndTheRowsEquityIsTheRankingsBest()
     {
         string path = Path.Combine(TestPaths.FixtureFilesDir, "match35253054.xg");
         if (!File.Exists(path))
@@ -553,39 +541,34 @@ public class XgDecisionIteratorTests
 
         var file = XgFileReader.ReadFile(path);
         string sourceFile = Path.GetFileName(path);
-
-        using var rowEnum = XgDecisionIterator
-            .Iterate(file, sourceFile)
-            .Where(r => !r.IsCube)
-            .GetEnumerator();
+        var rowsById = XgDecisionIterator.Iterate(file, sourceFile).ToDictionary(r => r.Id);
+        var moves = new Dictionary<(int, int), MoveRecord>();
+        var context = new MatchContext(file.Records, file.Comments);
+        foreach (var record in file.Records)
+        {
+            context.Update(record);
+            if (record is MoveRecord move)
+                moves[(context.GameNumber, context.MoveNumber)] = move;
+        }
 
         int divergingDecisions = 0;
-
-        foreach (var rec in file.Records.OfType<MoveRecord>())
+        foreach (var play in XgDecisionIterator.IterateDiagramRequests(file, sourceFile).OfType<CheckerPlayDecision>())
         {
-            var analysis = rec.Analysis;
-            if (analysis.MoveCount == 0 || analysis.Evals.Length == 0) continue;
-            if (XgDecisionIterator.IsSentinelOnlyAnalysis(analysis)) continue;
+            var evals = moves[(play.Game!.Value, play.MoveNumber!.Value)].Analysis.Evals;
+            play.Decision.Plays.Select(c => c.Equity).Should().Equal(
+                evals.Take(play.Decision.Plays.Count).Select(e => (double)e.Equity),
+                $"{play.Id}: the candidates keep XG's order");
 
-            rowEnum.MoveNext().Should().BeTrue(
-                $"{sourceFile}: expected a DecisionRow for analysed move");
-            var row = rowEnum.Current;
-
-            int bestIdx = XgDecisionIterator.FindBestByEquityIndex(analysis);
-            double maxEquity = analysis.Evals.Take(analysis.MoveCount).Max(e => e.Equity);
-            double rank0Equity = analysis.Evals[0].Equity;
-
-            row.Equity.Should().BeApproximately(maxEquity, 1e-9,
-                $"{sourceFile} game {row.Game} move {row.MoveNumber}: " +
-                $"DecisionRow.Equity must be the highest equity in the candidate set");
-
-            if (bestIdx != 0 || maxEquity > rank0Equity)
+            double maxEquity = play.Decision.Plays.Max(c => c.Equity);
+            rowsById[play.Id].Equity.Should().Be(maxEquity,
+                $"{play.Id}: the default ranking's best is the highest equity");
+            if (play.Decision.Plays[0].Equity < maxEquity)
                 divergingDecisions++;
         }
 
         divergingDecisions.Should().BeGreaterThan(0,
             $"{sourceFile} must contain at least one decision where XG-native rank 0 " +
-            "disagrees with best-by-equity; otherwise this test passes vacuously.");
+            "is not the highest equity; otherwise this test passes vacuously.");
     }
 
     // -----------------------------------------------------------------------
@@ -641,7 +624,7 @@ public class XgDecisionIteratorTests
         var rows = XgDecisionIterator.Iterate(file, fixtureName).ToList();
 
         rows.Should().NotBeEmpty($"{fixtureName} should yield at least one row");
-        rows.Should().OnlyContain(r => r.IsStandardStart,
+        rows.Should().OnlyContain(r => r.IsStandardStart == true,
             $"{fixtureName} starts every game from the canonical opening; " +
             "every DecisionRow must carry IsStandardStart=true");
     }
@@ -723,21 +706,20 @@ public class XgDecisionIteratorTests
                 Player1 = "Alice",
                 Player2 = "Bob",
             };
+            var standard = new PositionEngine { Points = XgGameBuilder.PointsOf(BoardPosition.Standard) };
+            var game = new GameHeaderRecord { InitialPosition = standard };
             var cube = new CubeRecord
             {
                 ActivePlayer = 1,
                 CubeValue = 0,
-                Position = new PositionEngine
-                {
-                    Points = (sbyte[])BackgammonConstants.StandardOpeningPosition.Clone(),
-                },
+                Position = standard,
                 Analysis = new DoubleActionAnalysis { Level = 1 },
                 Flagged = flagged,
                 CommentIndex = commentIndex,
             };
             var file = new XgFile
             {
-                Records = new List<SaveRecord> { header, cube },
+                Records = new List<SaveRecord> { header, game, cube },
                 Comments = comments,
             };
             return XgDecisionIterator.IterateDiagramRequests(file, sourceFile).Single();
@@ -755,13 +737,104 @@ public class XgDecisionIteratorTests
         plain.Descriptive.Flagged.Should().BeFalse();
         plain.Descriptive.Comment.Should().Be("comment zero");
 
-        // XG's "no comment" sentinel (-1) must map to empty, NOT Comments[0].
-        Build(flagged: false, commentIndex: -1).Descriptive.Comment.Should().BeEmpty(
+        // XG's "no comment" sentinel (-1) is none, NOT Comments[0].
+        Build(flagged: false, commentIndex: -1).Descriptive.Comment.Should().BeNull(
             "CommentIndex -1 is XG's no-comment sentinel and must not alias Comments[0]");
 
-        // An out-of-range index is bounds-guarded to empty.
-        Build(flagged: false, commentIndex: 99).Descriptive.Comment.Should().BeEmpty(
-            "an out-of-range CommentIndex must be bounds-guarded to empty");
+        // An out-of-range index is bounds-guarded to none.
+        Build(flagged: false, commentIndex: 99).Descriptive.Comment.Should().BeNull(
+            "an out-of-range CommentIndex must be bounds-guarded to none");
+    }
+
+    // -----------------------------------------------------------------------
+    //  XG's errors: stored only where the record states no move to derive one
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A match header, a game header at the standard start, and
+    /// <paramref name="decision"/> — records written by hand, since the
+    /// builder records no error for the shapes these tests need.
+    /// </summary>
+    private static XgFile OneDecision(SaveRecord decision)
+    {
+        var standard = new PositionEngine { Points = XgGameBuilder.PointsOf(BoardPosition.Standard) };
+        return new XgFile
+        {
+            Records =
+            [
+                new MatchHeaderRecord { MatchLength = 7, Player1 = "Alice", Player2 = "Bob" },
+                new GameHeaderRecord { InitialPosition = standard },
+                decision,
+            ],
+        };
+    }
+
+    /// <summary>
+    /// A played move XG did not list is stated by its error alone: the record
+    /// has no played candidate to derive one from, so XG's error is stored as
+    /// the unlisted play's (its magnitude), and the player's result is that
+    /// error under any ranking.
+    /// </summary>
+    [Fact]
+    public void CheckerPlay_UnlistedPlayedMove_StoresXgsErrorForIt()
+    {
+        var standard = new PositionEngine { Points = XgGameBuilder.PointsOf(BoardPosition.Standard) };
+        var elsewhere = new PositionEngine { Points = XgGameBuilder.PointsOf(BoardPosition.Nackgammon) };
+        var move = new MoveRecord
+        {
+            InitialPosition = standard,
+            FinalPosition = elsewhere,                  // matches no candidate's resulting position
+            ActivePlayer = 1,
+            Dice = [3, 1],
+            MoveError = -0.125,
+            Analysis = new BestMoveAnalysis
+            {
+                MoveCount = 1,
+                Evals = [new EvalResult { Equity = 0.16f }],
+                Moves = [[7, 4, 5, 4, -1, -1, -1, -1]],   // 8/5 6/5
+                EvalLevels = [new EvalLevel { Level = 2 }],
+                PositionsPlayed = [standard],
+            },
+            RolloutIndices = [.. Enumerable.Repeat(-1, 32)],
+        };
+
+        var play = XgDecisionIterator.IterateDiagramRequests(OneDecision(move), "synthetic.xg")
+            .Should().ContainSingle().Which.Should().BeOfType<CheckerPlayDecision>().Subject;
+
+        play.Decision.UserPlayIndex.Should().BeNull();
+        play.Decision.UnlistedPlayError.Should().Be(0.125);
+        play.Decision.RankedBy(PlayRanking.DepthFirst).PlayerResult.Should().Be(PlayerResult.Unstated(0.125));
+    }
+
+    /// <summary>
+    /// A cube half whose played action the record does not state keeps XG's
+    /// error for it: XG's resignation pane records no doubler action, so its
+    /// doubling error, where XG scored one, is stored as the unstated half's.
+    /// </summary>
+    [Fact]
+    public void CubeDecision_UnstatedHalf_StoresXgsErrorForIt()
+    {
+        var standard = new PositionEngine { Points = XgGameBuilder.PointsOf(BoardPosition.Standard) };
+        var cube = new CubeRecord
+        {
+            ActivePlayer = 1,
+            Doubled = -1,                               // no cube action recorded
+            Taken = -1,
+            Position = standard,
+            Analysis = new DoubleActionAnalysis { Level = 1, EquityNoDouble = 0.2f, EquityDoubleTake = 0.3f },
+            ErrorCube = -0.0625,
+            ErrorTake = -1000.0,
+            RolloutIndex = -1,
+            CommentIndex = -1,
+        };
+
+        var decision = XgDecisionIterator.IterateDiagramRequests(OneDecision(cube), "synthetic.xg")
+            .Should().ContainSingle().Which.Should().BeOfType<CubeDecision>().Subject.Decision;
+
+        decision.UserDoublerAction.Should().BeNull();
+        decision.UnstatedDoublerActionError.Should().Be(0.0625);
+        decision.UserDoubleError.Should().Be(0.0625);
+        decision.UnstatedTakerActionError.Should().BeNull("no double was offered, so no taker decision exists");
     }
 
     // -----------------------------------------------------------------------
@@ -769,11 +842,10 @@ public class XgDecisionIteratorTests
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// On cube decisions, <see cref="DecisionData.CubelessNoDoubleEquity"/> and
-    /// <see cref="DecisionData.CubelessDoubleTakeEquity"/> are sourced from the
-    /// analysis's cubeless evals (<c>EvalNoDouble.Equity</c> /
-    /// <c>EvalDoubleTake.Equity</c>), under the same <c>IsUsable</c> guard the
-    /// cubeful pair uses. Pairs raw cube records with diagram requests
+    /// On cube decisions, <see cref="CubeDecisionData.CubelessNoDoubleEquity"/>
+    /// and <see cref="CubeDecisionData.CubelessDoubleTakeEquity"/> are XG's
+    /// cubeless evals (<c>EvalNoDouble.Equity</c> / <c>EvalDoubleTake.Equity</c>),
+    /// verbatim — no stand-in replaces a value. Pairs raw cube records with diagram requests
     /// sequentially (both surfaces emit one cube decision per
     /// <c>Analysis.Level &gt; 0</c> cube record, in record order) and checks the
     /// wired value against the source field.
@@ -790,11 +862,6 @@ public class XgDecisionIteratorTests
     [Trait("Category", "FileIO")]
     public void DiagramRequests_CubeDecisions_CubelessEquitiesMatchAnalysis()
     {
-        // Mirror of XgDecisionIterator.IsUsable (private): NaN / infinity /
-        // -999 sentinel → 0.0, matching the producer's guard exactly.
-        static double Usable(float v) =>
-            !float.IsNaN(v) && !float.IsInfinity(v) && v > -999f ? v : 0.0;
-
         int nonZero = 0;
         int divergesFromCubeful = 0;
 
@@ -805,7 +872,7 @@ public class XgDecisionIteratorTests
 
             using var cubeData = XgDecisionIterator
                 .IterateDiagramRequests(file, sourceFile)
-                .Where(d => d.Decision.IsCube)
+                .OfType<CubeDecision>()
                 .GetEnumerator();
 
             foreach (var cube in EmissionMirror.CubeDecisions(file, sourceFile))
@@ -815,8 +882,8 @@ public class XgDecisionIteratorTests
                 var analysis = cube.Analysis;
                 var decision = cubeData.Current.Decision;
 
-                double expectedNd = Usable(analysis.EvalNoDouble.Equity);
-                double expectedDt = Usable(analysis.EvalDoubleTake.Equity);
+                double expectedNd = analysis.EvalNoDouble.Equity;
+                double expectedDt = analysis.EvalDoubleTake.Equity;
 
                 decision.CubelessNoDoubleEquity.Should().Be(expectedNd,
                     $"{sourceFile}: CubelessNoDoubleEquity must come from EvalNoDouble.Equity");
@@ -824,7 +891,7 @@ public class XgDecisionIteratorTests
                     $"{sourceFile}: CubelessDoubleTakeEquity must come from EvalDoubleTake.Equity");
 
                 if (expectedNd != 0.0) nonZero++;
-                if (expectedNd != Usable(analysis.EquityNoDouble)) divergesFromCubeful++;
+                if (expectedNd != analysis.EquityNoDouble) divergesFromCubeful++;
             }
         }
 

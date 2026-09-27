@@ -1,3 +1,4 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
@@ -62,7 +63,21 @@ public sealed class XgFileBuilder
         Player2 = player2;
         IsJacoby = jacoby;
         IsBeaver = beaver;
+        Terms = matchLength == 0
+            ? new MoneyTerms
+            {
+                IsJacoby = jacoby,
+                IsBeaver = beaver,
+                CubeLimit = 1 << XgMatchInfo.DefaultCubeLimitExponent,
+            }
+            : new MatchTerms { Length = matchLength };
     }
+
+    /// <summary>
+    /// The session's terms as the header will state them: a money session's
+    /// rules with XG's default cube limit, or the match's length.
+    /// </summary>
+    internal SessionTerms Terms { get; }
 
     /// <summary>
     /// Starts a match of <paramref name="matchLength"/> points between the
@@ -166,7 +181,7 @@ public sealed class XgFileBuilder
         }
 
         sbyte[] position = initialPosition is null
-            ? (sbyte[])BackgammonConstants.StandardOpeningPosition.Clone()
+            ? XgGameBuilder.PointsOf(BoardPosition.Standard)
             : XgGameBuilder.ValidatePosition(initialPosition, nameof(initialPosition));
 
         var game = new XgGameBuilder(this, _games.Count + 1, score1, score2, isCrawford, position);
@@ -184,7 +199,7 @@ public sealed class XgFileBuilder
         var records = new List<SaveRecord>(1 + _games.Sum(g => 1 + g.RecordCount))
         {
             XgRecordFactory.MatchHeader(
-                MatchLength, IsJacoby, IsBeaver, Player1, Player2,
+                Terms, Player1, Player2,
                 eventName: "", date: default, gameId: 0),
         };
         foreach (var game in _games)

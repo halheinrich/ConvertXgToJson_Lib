@@ -1,4 +1,3 @@
-using System.Numerics;
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
@@ -76,13 +75,12 @@ public static class XgpExporter
     /// Writes <paramref name="decision"/> to <paramref name="output"/> as a
     /// complete <c>.xgp</c> file.
     /// </summary>
-    /// <param name="decision">The decision to export. See <see cref="Validate"/> remarks for requirements.</param>
+    /// <param name="decision">
+    /// The decision to export. A record is well-formed by construction — its
+    /// board, cube, session and roll hold BgDataTypes_Lib's rules — so the one
+    /// requirement left is the encoding's own, below.
+    /// </param>
     /// <param name="output">Destination stream; written sequentially, left open.</param>
-    /// <exception cref="ArgumentException">
-    /// Thrown when the decision's position is not a 26-element board, its
-    /// cube size is not a positive power of two, a play decision carries
-    /// dice outside 1–6, or match-play needs are outside 1..MatchLength.
-    /// </exception>
     /// <exception cref="NotSupportedException">
     /// Thrown for a centred cube above 1 (an auto-doubled money position):
     /// the XG record encoding carries cube ownership in the sign of a
@@ -465,18 +463,11 @@ public static class XgpExporter
 
         return new XgFile
         {
-            // Raw wire domain: mh is the un-normalized source header, so
-            // "is money" is read directly off the 99999 sentinel. The
-            // normalized IsMoneyGame predicate (0 = money) deliberately
-            // does NOT apply here — the sentinel is re-emitted verbatim
-            // downstream (CopyMatchHeader), so normalizing then
-            // denormalizing would be pointless ceremony.
+            // The save name reads the source header's terms through the one
+            // header projection; the header itself is re-emitted verbatim
+            // (CopyMatchHeader), sentinel and all.
             Header = XgRecordFactory.FileHeader(BuildSaveName(
-                isMoney: mh.MatchLength >= MatchHeaderRecord.MoneyMatchLengthSentinel,
-                matchLength: mh.MatchLength,
-                score1: gh.Score1,
-                score2: gh.Score2,
-                jacoby: mh.Jacoby)),
+                XgMatchInfo.From(mh).Terms, score1: gh.Score1, score2: gh.Score2)),
             Records = records,
             Rollouts = rollouts,
             Comments = comments,
@@ -619,7 +610,7 @@ public static class XgpExporter
     /// slot. Roles are determinable iff <paramref name="records"/> holds at
     /// least one move/cube record and all of them share one
     /// <c>ActivePlayer</c> sign (<c>&gt;= 0</c> is player 1 — the
-    /// <see cref="MatchContext.PlayerName"/> convention; a cube record's
+    /// <see cref="MatchContext.SeatOf"/> convention; a cube record's
     /// <c>ActivePlayer</c> is the doubler, so a take decision is anchored
     /// to the doubler with no special-casing). When determinable, a role
     /// name outranks the same slot's slot name; when not (a multi-decision
@@ -816,69 +807,51 @@ public static class XgpExporter
     {
         Validate(decision);
 
-        bool isMoney = decision.Descriptive.MatchLength <= 0;
-        int matchLength = decision.Descriptive.MatchLength;
-        int score1 = isMoney ? 0 : matchLength - decision.Position.OnRollNeeds;
-        int score2 = isMoney ? 0 : matchLength - decision.Position.OpponentNeeds;
-        var (jacoby, beaver) = isMoney ? MoneyFlags(decision.Xgid) : (false, false);
-        bool crawfordApplies = !isMoney && decision.Position.IsCrawford;
+        // The on-roll player is written as player 1, so the record's
+        // on-roll-relative facts map onto the header's seats verbatim: the
+        // session's terms are the header's, its standing player 1's first.
+        var session = decision.Session;
+        var terms = session.Match<SessionTerms>(money => money.Terms, match => match.Terms);
+        var (score1, score2, crawfordApplies) = session.Match(
+            money => (money.OnRollScore, money.OpponentScore, false),
+            match => (match.Terms.Length - match.OnRollNeeds, match.Terms.Length - match.OpponentNeeds, match.IsCrawford));
 
-        string player1 = NameOrDefault(decision.Descriptive.OnRollName, "Player 1");
-        string player2 = NameOrDefault(decision.Descriptive.OpponentName, "Player 2");
+        string player1 = decision.Descriptive.OnRollName ?? "Player 1";
+        string player2 = decision.Descriptive.OpponentName ?? "Player 2";
 
-        sbyte[] position = ToPositionEngine(decision.Position.Mop);
+        sbyte[] position = XgGameBuilder.PointsOf(decision.Position.Mop);
         int cubeRaw = EncodeCube(decision.Position.CubeSize, decision.Position.CubeOwner);
 
         var records = new List<SaveRecord>
         {
-            BuildMatchHeader(decision, matchLength, jacoby, beaver, player1, player2),
+            BuildMatchHeader(decision, terms, player1, player2),
             // XG's position-editor pattern: the game "starts" at the saved position.
             XgRecordFactory.GameHeader(position, score1, score2, crawfordApplies, gameNumber: 1),
-            BuildCubeRecord(decision, position, cubeRaw),
+            BuildCubeRecord(position, cubeRaw, decision),
         };
-        if (!decision.Decision.IsCube)
-            records.Add(BuildMoveRecord(decision, position, cubeRaw));
+        if (decision is CheckerPlayDecision checkerPlay)
+            records.Add(BuildMoveRecord(position, cubeRaw, checkerPlay));
 
         return new XgFile
         {
-            Header = XgRecordFactory.FileHeader(
-                BuildSaveName(isMoney, matchLength, score1, score2, jacoby)),
+            Header = XgRecordFactory.FileHeader(BuildSaveName(terms, score1, score2)),
             Records = records,
         };
     }
 
+    /// <summary>
+    /// The one requirement a well-formed record can still fail: the XG
+    /// encoding's own. Everything else the export reads — a 26-cell board, a
+    /// cube that is a positive power of two, a roll of two faces, away scores
+    /// within the match's length — the record holds by construction, so it is
+    /// not checked again here.
+    /// </summary>
     private static void Validate(BgDecisionData decision)
     {
-        if (decision.Position.Mop.Count != 26)
-            throw new ArgumentException(
-                $"Position.Mop must have 26 elements (got {decision.Position.Mop.Count}).", nameof(decision));
-
-        int cubeSize = decision.Position.CubeSize;
-        if (cubeSize < 1 || !BitOperations.IsPow2((uint)cubeSize))
-            throw new ArgumentException(
-                $"Position.CubeSize must be a positive power of two (got {cubeSize}).", nameof(decision));
-        if (cubeSize > 1 && decision.Position.CubeOwner == CubeOwner.Centered)
+        if (decision.Position.CubeSize > 1 && decision.Position.CubeOwner == CubeOwner.Centered)
             throw new NotSupportedException(
                 "A centred cube above 1 (auto-doubled money position) is not representable " +
                 "in the XG record encoding without auto-double bookkeeping; not supported.");
-
-        if (!decision.Decision.IsCube)
-        {
-            var dice = decision.Decision.Dice;
-            if (dice.Count < 2 || dice[0] is < 1 or > 6 || dice[1] is < 1 or > 6)
-                throw new ArgumentException(
-                    "A play decision requires two dice in the range 1–6.", nameof(decision));
-        }
-
-        int matchLength = decision.Descriptive.MatchLength;
-        if (matchLength > 0)
-        {
-            if (decision.Position.OnRollNeeds < 1 || decision.Position.OnRollNeeds > matchLength
-                || decision.Position.OpponentNeeds < 1 || decision.Position.OpponentNeeds > matchLength)
-                throw new ArgumentException(
-                    $"Match-play needs must be within 1..{matchLength} " +
-                    $"(got {decision.Position.OnRollNeeds}/{decision.Position.OpponentNeeds}).", nameof(decision));
-        }
     }
 
     // ------------------------------------------------------------------ //
@@ -888,8 +861,7 @@ public static class XgpExporter
     // ------------------------------------------------------------------ //
 
     private static MatchHeaderRecord BuildMatchHeader(
-        BgDecisionData decision, int matchLength,
-        bool jacoby, bool beaver, string player1, string player2)
+        BgDecisionData decision, SessionTerms terms, string player1, string player2)
     {
         string eventName = decision.Descriptive.Event ?? "";
         DateTime date = decision.Descriptive.Date is { } d
@@ -897,30 +869,29 @@ public static class XgpExporter
             : default;
 
         return XgRecordFactory.MatchHeader(
-            matchLength, jacoby, beaver, player1, player2,
+            terms, player1, player2,
             eventName, date, gameId: DeterministicGameId(decision));
     }
 
     private static CubeRecord BuildCubeRecord(
-        BgDecisionData decision, sbyte[] position, int cubeRaw)
-    {
-        bool isCube = decision.Decision.IsCube;
-        return XgRecordFactory.UnanalysedCubeRecord(
+        sbyte[] position, int cubeRaw, BgDecisionData decision) =>
+        XgRecordFactory.UnanalysedCubeRecord(
             activePlayer: 1,
             position: new PositionEngine { Points = position },
             cubeValueRaw: cubeRaw,
             // Mirrors XG's own pane-state values: -1 for a saved cube
             // problem (DoubleAnalysis fixture), -2 when the position is a
             // play decision and the cube pane is incidental (PlayAnalysis).
-            doubled: isCube ? -1 : -2,
+            doubled: decision.Kind == DecisionKind.Cube ? -1 : -2,
             taken: -1,
             // XG writes "11" as the cube-pane placeholder of a pre-roll
-            // position; a play decision carries its real roll.
-            diceRolled: isCube ? "11" : $"{decision.Decision.Dice[0]}{decision.Decision.Dice[1]}");
-    }
+            // position; a play decision carries its real roll, as rolled.
+            diceRolled: decision is CheckerPlayDecision play
+                ? $"{play.Decision.Dice[0]}{play.Decision.Dice[1]}"
+                : "11");
 
     private static MoveRecord BuildMoveRecord(
-        BgDecisionData decision, sbyte[] position, int cubeRaw) =>
+        sbyte[] position, int cubeRaw, CheckerPlayDecision decision) =>
         XgRecordFactory.UnanalysedMoveRecord(
             activePlayer: 1,
             position: new PositionEngine { Points = position },
@@ -934,23 +905,6 @@ public static class XgpExporter
     // ------------------------------------------------------------------ //
     //  Derivation helpers
     // ------------------------------------------------------------------ //
-
-    private static string NameOrDefault(string name, string fallback) =>
-        string.IsNullOrWhiteSpace(name) ? fallback : name;
-
-    private static sbyte[] ToPositionEngine(IReadOnlyList<int> mop)
-    {
-        // On-roll player is written as player 1, so the on-roll-relative
-        // board maps onto the record position verbatim.
-        var points = new sbyte[26];
-        for (int i = 0; i < 26; i++)
-        {
-            if (mop[i] is < -15 or > 15)
-                throw new ArgumentException($"Position.Mop[{i}] = {mop[i]} is not a valid checker count.");
-            points[i] = (sbyte)mop[i];
-        }
-        return points;
-    }
 
     /// <summary>
     /// Encodes cube size + owner into XG's signed-log2 record field. The
@@ -966,22 +920,6 @@ public static class XgpExporter
         });
 
     /// <summary>
-    /// Recovers the money-game Jacoby/Beaver flags from XGID field 8
-    /// (<c>Jacoby + 2×Beaver</c>) — the only place the pipeline carries
-    /// them. Falls back to XG's defaults (Jacoby on, Beaver off) when the
-    /// decision carries no parseable XGID.
-    /// </summary>
-    private static (bool Jacoby, bool Beaver) MoneyFlags(string xgid)
-    {
-        const string prefix = "XGID=";
-        string body = xgid.StartsWith(prefix, StringComparison.Ordinal) ? xgid[prefix.Length..] : xgid;
-        string[] fields = body.Split(':');
-        if (fields.Length >= 8 && int.TryParse(fields[7], out int cj))
-            return ((cj & 1) != 0, (cj & 2) != 0);
-        return (true, false);
-    }
-
-    /// <summary>
     /// Deterministic stand-in for the random per-save id XG writes:
     /// a CRC32 over the position, dice, and cube encoding. Determinism
     /// keeps exports byte-stable for testing; XG treats the value as opaque.
@@ -991,15 +929,16 @@ public static class XgpExporter
         var bytes = new byte[29];
         for (int i = 0; i < 26; i++)
             bytes[i] = unchecked((byte)decision.Position.Mop[i]);
-        bytes[26] = decision.Decision.IsCube ? (byte)0 : (byte)decision.Decision.Dice[0];
-        bytes[27] = decision.Decision.IsCube ? (byte)0 : (byte)decision.Decision.Dice[1];
+        (bytes[26], bytes[27]) = decision is CheckerPlayDecision play
+            ? ((byte)play.Decision.Dice[0], (byte)play.Decision.Dice[1])
+            : ((byte)0, (byte)0);
         bytes[28] = unchecked((byte)EncodeCube(decision.Position.CubeSize, decision.Position.CubeOwner));
         return unchecked((int)System.IO.Hashing.Crc32.HashToUInt32(bytes));
     }
 
-    private static string BuildSaveName(
-        bool isMoney, int matchLength, int score1, int score2, bool jacoby) =>
-        isMoney
-            ? jacoby ? "Position:  Unlimited Game, Jacoby" : "Position:  Unlimited Game"
-            : $"Position: {matchLength} point match {score1}-{score2}";
+    /// <summary>The save name XG gives a position saved from its editor, for the session's terms and seat scores.</summary>
+    private static string BuildSaveName(SessionTerms terms, int score1, int score2) =>
+        terms.Match(
+            money => money.IsJacoby ? "Position:  Unlimited Game, Jacoby" : "Position:  Unlimited Game",
+            match => $"Position: {match.Length} point match {score1}-{score2}");
 }

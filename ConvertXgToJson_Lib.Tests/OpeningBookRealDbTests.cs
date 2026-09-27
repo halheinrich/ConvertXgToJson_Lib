@@ -74,7 +74,8 @@ public class OpeningBookRealDbTests
             throw new Xunit.Sdk.XunitException($"Expected fixture not present: {xgPath}.");
 
         var file = XgFileReader.ReadFile(xgPath);
-        int matchLength = XgDecisionIterator.ExtractMatchInfo(file)!.MatchLength;
+        int matchLength = XgDecisionIterator.ExtractMatchInfo(file)!.Terms
+            .Match(money => 0, match => match.Length);
         matchLength.Should().Be(9, "the fixture is a 9-point match");
 
         // Game 9's first move record; the game header supplies the score.

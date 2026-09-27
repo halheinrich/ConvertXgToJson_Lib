@@ -1,4 +1,5 @@
 using BgDataTypes_Lib;
+using BgDataTypes_Lib.TestSupport;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests;
@@ -28,49 +29,37 @@ public class XgpExporterTests
     //  Test decisions
     // -----------------------------------------------------------------------
 
-    /// <summary>A mid-game money-play position, on-roll perspective.</summary>
-    private static readonly int[] SampleBoard =
-        [0, -1, 0, 0, 0, 0, 5, 2, 3, 0, 0, 0, -6, 3, 0, 0, 0, -2, 0, -4, -2, 1, 0, 0, 1, 0];
+    /// <summary>A mid-game position, on-roll perspective.</summary>
+    private static readonly BoardPosition SampleBoard = new(
+        [0, -1, 0, 0, 0, 0, 5, 2, 3, 0, 0, 0, -6, 3, 0, 0, 0, -2, 0, -4, -2, 1, 0, 0, 1, 0]);
 
-    private static BgDecisionData MoneyPlayDecision(int[]? board = null) => new()
-    {
-        Id = new XgpDecisionId("export.xgp"),
-        Xgid = "XGID=-a----E-CB----F---bA-db-B-:0:0:1:65:0:0:1:0:10",
-        Position = new PositionData
-        {
-            Mop = board ?? SampleBoard,
-            CubeSize = 1,
-            CubeOwner = CubeOwner.Centered,
-        },
-        Decision = new DecisionData { IsCube = false, Dice = [6, 5] },
-        Descriptive = new DescriptiveData
-        {
-            MatchLength = 0,
-            OnRollName = "Hero",
-            OpponentName = "Villain",
-            Date = new DateOnly(2026, 7, 11),
-        },
-    };
+    /// <summary>
+    /// A checker play at <paramref name="position"/> with <paramref name="dice"/>;
+    /// its one candidate is the pass, valid from every position — the clean
+    /// export writes no analysis, so the candidates never reach the file.
+    /// </summary>
+    private static CheckerPlayDecision PlayAt(PositionData position, int[] dice, string file = "export.xgp",
+        DescriptiveData? descriptive = null) =>
+        TestRecords.CheckerPlay(
+            id: new XgpDecisionId(file),
+            position: position,
+            decision: TestRecords.CheckerPlayData(dice: dice, plays: [TestRecords.Candidate(play: [])]),
+            descriptive: descriptive);
 
-    private static BgDecisionData MatchCubeDecision() => new()
-    {
-        Id = new XgpDecisionId("cube.xgp"),
-        Position = new PositionData
-        {
-            Mop = SampleBoard,
-            OnRollNeeds = 6,
-            OpponentNeeds = 7,
-            CubeSize = 2,
-            CubeOwner = CubeOwner.OnRoll,
-        },
-        Decision = new DecisionData { IsCube = true },
-        Descriptive = new DescriptiveData
-        {
-            MatchLength = 13,
-            OnRollName = "Joe",
-            OpponentName = "Bob",
-        },
-    };
+    private static CubeDecision CubeAt(PositionData position, string file = "cube.xgp", DescriptiveData? descriptive = null) =>
+        TestRecords.Cube(id: new XgpDecisionId(file), position: position, descriptive: descriptive);
+
+    private static BgDecisionData MoneyPlayDecision() => PlayAt(
+        TestRecords.Position(mop: SampleBoard, session: TestRecords.MoneySession(isJacoby: true)),
+        dice: [6, 5],
+        descriptive: TestRecords.Descriptive(
+            onRollName: "Hero", opponentName: "Villain", date: new DateOnly(2026, 7, 11), isStandardStart: null));
+
+    private static BgDecisionData MatchCubeDecision() => CubeAt(
+        TestRecords.Position(
+            mop: SampleBoard, cubeSize: 2, cubeOwner: CubeOwner.OnRoll,
+            session: TestRecords.MatchSession(length: 13, onRollNeeds: 6, opponentNeeds: 7)),
+        descriptive: TestRecords.Descriptive(onRollName: "Joe", opponentName: "Bob", isStandardStart: null));
 
     private static XgFile Export(BgDecisionData decision)
     {
@@ -112,8 +101,9 @@ public class XgpExporterTests
         mh.Player1.Should().Be("Hero", "on-roll player is written as player 1");
         mh.Player2.Should().Be("Villain");
         mh.Player1Ansi.Should().Be("Hero");
-        mh.Jacoby.Should().BeTrue("XGID field 8 carries Jacoby=1");
+        mh.Jacoby.Should().BeTrue("the money session's terms state the Jacoby rule");
         mh.Beaver.Should().BeFalse();
+        mh.CubeLimit.Should().Be(10, "the terms' cube limit, 1024, as XG's exponent");
         mh.Version.Should().Be(30);
         mh.Date.Should().Be(new DateTime(2026, 7, 11, 0, 0, 0, DateTimeKind.Utc));
 
@@ -123,19 +113,19 @@ public class XgpExporterTests
         gh.CrawfordApplies.Should().BeFalse();
         gh.GameNumber.Should().Be(1);
         gh.InProgress.Should().BeTrue();
-        gh.InitialPosition.Points.Select(p => (int)p).Should().Equal(SampleBoard,
+        gh.InitialPosition.ToBoardPosition().Should().Be(SampleBoard,
             "XG's position-editor pattern: the game starts at the saved position");
 
         var cube = file.Records[2].Should().BeOfType<CubeRecord>().Subject;
         cube.ActivePlayer.Should().Be(1);
-        cube.Position.Points.Select(p => (int)p).Should().Equal(SampleBoard);
+        cube.Position.ToBoardPosition().Should().Be(SampleBoard);
         cube.CubeValue.Should().Be(0, "centred 1-cube");
         cube.DiceRolled.Should().Be("65", "a play decision carries its real roll in the cube pane");
 
         var move = file.Records[3].Should().BeOfType<MoveRecord>().Subject;
         move.Dice.Should().Equal(6, 5);
         move.ActivePlayer.Should().Be(1);
-        move.InitialPosition.Points.Select(p => (int)p).Should().Equal(SampleBoard);
+        move.InitialPosition.ToBoardPosition().Should().Be(SampleBoard);
         move.FinalPosition.Points.Should().OnlyContain(p => p == 0, "no play has been made");
     }
 
@@ -149,9 +139,10 @@ public class XgpExporterTests
         mh.MatchLength.Should().Be(13);
         mh.Jacoby.Should().BeFalse("Jacoby is a money-game rule");
         mh.Crawford.Should().BeTrue("the match-play rule flag is on, mirroring XG");
+        mh.CubeLimit.Should().Be(10, "a match's terms state no limit, so the header writes XG's default exponent");
 
         var gh = file.Records[1].Should().BeOfType<GameHeaderRecord>().Subject;
-        gh.Score1.Should().Be(7, "score = matchLength - onRollNeeds");
+        gh.Score1.Should().Be(7, "score = the length less the on-roll player's away score");
         gh.Score2.Should().Be(6);
 
         var cube = file.Records[2].Should().BeOfType<CubeRecord>().Subject;
@@ -162,21 +153,10 @@ public class XgpExporterTests
     [Fact]
     public void CrawfordGame_SetsGameHeaderCrawfordApplies()
     {
-        var decision = new BgDecisionData
-        {
-            Id = new XgpDecisionId("crawford.xgp"),
-            Position = new PositionData
-            {
-                Mop = SampleBoard,
-                OnRollNeeds = 1,
-                OpponentNeeds = 5,
-                CubeSize = 1,
-                CubeOwner = CubeOwner.Centered,
-                IsCrawford = true,
-            },
-            Decision = new DecisionData { IsCube = false, Dice = [3, 1] },
-            Descriptive = new DescriptiveData { MatchLength = 7 },
-        };
+        var decision = PlayAt(
+            TestRecords.Position(mop: SampleBoard,
+                session: TestRecords.MatchSession(length: 7, onRollNeeds: 1, opponentNeeds: 5, isCrawford: true)),
+            dice: [3, 1], file: "crawford.xgp");
 
         var file = Export(decision);
         file.Records[1].Should().BeOfType<GameHeaderRecord>()
@@ -190,49 +170,66 @@ public class XgpExporterTests
     [InlineData(CubeOwner.Opponent, 8, -3)]
     public void CubeEncoding_IsSignedLog2(CubeOwner owner, int size, int expectedRaw)
     {
-        var decision = new BgDecisionData
-        {
-            Id = new XgpDecisionId("cube-enc.xgp"),
-            Position = new PositionData { Mop = SampleBoard, OnRollNeeds = 5, OpponentNeeds = 5, CubeSize = size, CubeOwner = owner },
-            Decision = new DecisionData { IsCube = true },
-            Descriptive = new DescriptiveData { MatchLength = 11 },
-        };
+        var decision = CubeAt(TestRecords.Position(
+            mop: SampleBoard, cubeSize: size, cubeOwner: owner,
+            session: TestRecords.MatchSession(length: 11, onRollNeeds: 5, opponentNeeds: 5)), file: "cube-enc.xgp");
 
         Export(decision).Records[2].Should().BeOfType<CubeRecord>()
             .Which.CubeValue.Should().Be(expectedRaw);
     }
 
-    [Fact]
-    public void MoneyFlags_DefaultToJacobyWhenNoXgid()
+    /// <summary>
+    /// A money session's terms are written as the header's: its Jacoby and
+    /// beaver rules, and its cube limit as XG's exponent — the inverse of the
+    /// reader's projection, so each round-trips (the XGID the exporter once
+    /// parsed them from is derived now, and carries nothing a record lacks).
+    /// </summary>
+    [Theory]
+    [InlineData(true, false, 1024, 10)]
+    [InlineData(false, true, 64, 6)]
+    [InlineData(true, true, 8, 3)]
+    public void MoneyTerms_AreWrittenAsTheHeaders(bool jacoby, bool beaver, int cubeLimit, int exponent)
     {
-        var decision = new BgDecisionData
-        {
-            Id = new XgpDecisionId("no-xgid.xgp"),
-            Position = new PositionData { Mop = SampleBoard, CubeSize = 1, CubeOwner = CubeOwner.Centered },
-            Decision = new DecisionData { IsCube = true },
-            Descriptive = new DescriptiveData { MatchLength = 0 },
-        };
+        var decision = CubeAt(TestRecords.Position(
+            mop: SampleBoard,
+            session: TestRecords.MoneySession(isJacoby: jacoby, isBeaver: beaver, cubeLimit: cubeLimit)), file: "terms.xgp");
 
-        var mh = Export(decision).Records[0].Should().BeOfType<MatchHeaderRecord>().Subject;
-        mh.Jacoby.Should().BeTrue("XG's money default");
-        mh.Beaver.Should().BeFalse();
+        var file = Export(decision);
+        var mh = file.Records[0].Should().BeOfType<MatchHeaderRecord>().Subject;
+        mh.MatchLength.Should().Be(MatchHeaderRecord.MoneyMatchLengthSentinel);
+        mh.Jacoby.Should().Be(jacoby);
+        mh.Beaver.Should().Be(beaver);
+        mh.CubeLimit.Should().Be(exponent);
+        XgMatchInfo.From(mh).Terms.Should().Be(((MoneySession)decision.Session).Terms, "the reader reads back the terms written");
     }
 
+    /// <summary>
+    /// A money session's scores are the game header's, the player on roll's
+    /// as player 1's — the session's standing, never the zeros a money
+    /// stand-in once wrote.
+    /// </summary>
     [Fact]
-    public void MoneyFlags_ParseBeaverFromXgidField8()
+    public void MoneyScores_AreWrittenAsTheGameHeaders()
     {
-        var decision = new BgDecisionData
-        {
-            Id = new XgpDecisionId("beaver.xgp"),
-            Xgid = "XGID=-a----E-CB----F---bA-db-B-:0:0:1:00:0:0:3:0:10",
-            Position = new PositionData { Mop = SampleBoard, CubeSize = 1, CubeOwner = CubeOwner.Centered },
-            Decision = new DecisionData { IsCube = true },
-            Descriptive = new DescriptiveData { MatchLength = 0 },
-        };
+        var decision = CubeAt(TestRecords.Position(
+            mop: SampleBoard, session: TestRecords.MoneySession(onRollScore: 3, opponentScore: 1)), file: "scores.xgp");
+
+        var gh = Export(decision).Records[1].Should().BeOfType<GameHeaderRecord>().Subject;
+        gh.Score1.Should().Be(3);
+        gh.Score2.Should().Be(1);
+        gh.CrawfordApplies.Should().BeFalse();
+    }
+
+    /// <summary>A record that names no player is written with XG's default names.</summary>
+    [Fact]
+    public void UnnamedPlayers_AreWrittenAsXgsDefaults()
+    {
+        var decision = CubeAt(TestRecords.Position(mop: SampleBoard), file: "unnamed.xgp",
+            descriptive: TestRecords.Descriptive(onRollName: null, opponentName: null, isStandardStart: null));
 
         var mh = Export(decision).Records[0].Should().BeOfType<MatchHeaderRecord>().Subject;
-        mh.Jacoby.Should().BeTrue();
-        mh.Beaver.Should().BeTrue("XGID field 8 = 3 = Jacoby + 2×Beaver");
+        mh.Player1.Should().Be("Player 1");
+        mh.Player2.Should().Be("Player 2");
     }
 
     // -----------------------------------------------------------------------
@@ -331,91 +328,34 @@ public class XgpExporterTests
     [Fact]
     public void Export_EdgePositions_RoundTripThroughReader()
     {
-        // Checkers on both bars and men borne off (board sums below 15/side).
-        int[] barsAndBearoff =
-            [0, -2, 0, 0, 0, 0, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -3, -4, 0, 2, 0, 0, 0, 2];
+        // A checker on the on-roll bar and men borne off (fewer than 15 a side).
+        var barsAndBearoff = new BoardPosition(
+            [0, -2, 0, 0, 0, 0, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -3, -4, 0, 2, 0, 0, 0, 2]);
 
-        var decision = new BgDecisionData
-        {
-            Id = new XgpDecisionId("edge.xgp"),
-            Position = new PositionData { Mop = barsAndBearoff, CubeSize = 1, CubeOwner = CubeOwner.Centered },
-            Decision = new DecisionData { IsCube = false, Dice = [2, 2] },
-            Descriptive = new DescriptiveData { MatchLength = 0 },
-        };
+        var decision = PlayAt(TestRecords.Position(mop: barsAndBearoff), dice: [2, 2], file: "edge.xgp");
 
         var file = Export(decision);
         file.Records[2].Should().BeOfType<CubeRecord>()
-            .Which.Position.Points.Select(p => (int)p).Should().Equal(barsAndBearoff);
+            .Which.Position.ToBoardPosition().Should().Be(barsAndBearoff);
     }
 
     // -----------------------------------------------------------------------
-    //  Validation
+    //  Validation — the one requirement a well-formed record can fail
     // -----------------------------------------------------------------------
 
-    private static BgDecisionData WithPosition(PositionData position, bool isCube = true, int matchLength = 0) => new()
-    {
-        Id = new XgpDecisionId("invalid.xgp"),
-        Position = position,
-        Decision = new DecisionData { IsCube = isCube, Dice = [6, 5] },
-        Descriptive = new DescriptiveData { MatchLength = matchLength },
-    };
-
-    [Fact]
-    public void Export_Throws_OnWrongBoardLength()
-    {
-        var act = () => XgpExporter.ToBytes(WithPosition(new PositionData { Mop = new int[25] }));
-        act.Should().Throw<ArgumentException>().WithMessage("*26 elements*");
-    }
-
-    [Fact]
-    public void Export_Throws_OnNonPowerOfTwoCube()
-    {
-        var act = () => XgpExporter.ToBytes(WithPosition(
-            new PositionData { Mop = SampleBoard, CubeSize = 3, CubeOwner = CubeOwner.OnRoll }));
-        act.Should().Throw<ArgumentException>().WithMessage("*power of two*");
-    }
-
+    /// <summary>
+    /// A record is well-formed by construction — its board, cube, roll and
+    /// session keep BgDataTypes_Lib's rules — so the export checks none of
+    /// them again. What remains is the XG encoding's own limit: a centred cube
+    /// above 1 (an auto-doubled money position) has no representation.
+    /// </summary>
     [Fact]
     public void Export_Throws_OnCentredCubeAboveOne()
     {
-        var act = () => XgpExporter.ToBytes(WithPosition(
-            new PositionData { Mop = SampleBoard, CubeSize = 2, CubeOwner = CubeOwner.Centered }));
-        act.Should().Throw<NotSupportedException>().WithMessage("*centred cube*");
-    }
+        var decision = CubeAt(TestRecords.Position(
+            mop: SampleBoard, cubeSize: 2, cubeOwner: CubeOwner.Centered, session: TestRecords.MoneySession()));
 
-    [Theory]
-    [InlineData(0, 5)]
-    [InlineData(7, 5)]
-    [InlineData(5, 0)]
-    public void Export_Throws_OnInvalidDice(int d1, int d2)
-    {
-        var decision = new BgDecisionData
-        {
-            Id = new XgpDecisionId("bad-dice.xgp"),
-            Position = new PositionData { Mop = SampleBoard, CubeSize = 1, CubeOwner = CubeOwner.Centered },
-            Decision = new DecisionData { IsCube = false, Dice = [d1, d2] },
-            Descriptive = new DescriptiveData { MatchLength = 0 },
-        };
-        var act = () => XgpExporter.ToBytes(decision);
-        act.Should().Throw<ArgumentException>().WithMessage("*dice*");
-    }
-
-    [Theory]
-    [InlineData(0, 3)]
-    [InlineData(8, 3)]
-    [InlineData(3, 0)]
-    public void Export_Throws_OnNeedsOutsideMatchLength(int onRollNeeds, int opponentNeeds)
-    {
-        var act = () => XgpExporter.ToBytes(WithPosition(
-            new PositionData
-            {
-                Mop = SampleBoard,
-                OnRollNeeds = onRollNeeds,
-                OpponentNeeds = opponentNeeds,
-                CubeSize = 1,
-                CubeOwner = CubeOwner.Centered,
-            },
-            matchLength: 7));
-        act.Should().Throw<ArgumentException>().WithMessage("*needs*");
+        FluentActions.Invoking(() => XgpExporter.ToBytes(decision))
+            .Should().Throw<NotSupportedException>().WithMessage("*centred cube*");
     }
 }

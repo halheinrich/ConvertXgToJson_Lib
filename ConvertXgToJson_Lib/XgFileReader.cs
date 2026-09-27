@@ -280,13 +280,13 @@ public static class XgFileReader
         if (data == null || data.Length < SaveRecordParser.RecordSize)
             yield break;
 
-        // Parse MatchInfo from the first record if it is a MatchHeaderRecord.
-        int matchLength = 0;
-        if (data[8] == (byte)RecordType.HeaderMatch)
-        {
-            state.MatchInfo = XgMatchInfo.From(SaveRecordParser.ReadMatchHeaderRecord(data));
-            matchLength = state.MatchInfo.MatchLength;
-        }
+        // The match header is the first record; each game's standing is read
+        // against its terms, so a file without one has no game to read.
+        if (data[8] != (byte)RecordType.HeaderMatch)
+            throw new InvalidDataException(
+                $"XG file '{path}' does not begin with a match header — cannot read its games' standings.");
+        var matchInfo = XgMatchInfo.From(SaveRecordParser.ReadMatchHeaderRecord(data));
+        state.MatchInfo = matchInfo;
 
         int stride = SaveRecordParser.RecordSize;
 
@@ -301,7 +301,7 @@ public static class XgFileReader
                 continue;
 
             state.GameInfo = null;
-            var gameInfo = XgGameInfo.From(SaveRecordParser.ReadGameHeaderRecord(data, offset), matchLength);
+            var gameInfo = XgGameInfo.From(SaveRecordParser.ReadGameHeaderRecord(data, offset), matchInfo.Terms);
             state.GameInfo = gameInfo;
             yield return gameInfo;
         }

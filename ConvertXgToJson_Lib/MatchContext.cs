@@ -1,105 +1,70 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
 
+/// <summary>
+/// The decision walk's state as it advances record by record — the match's
+/// metadata, the current game's, the cube and the game and move counters —
+/// and the reads the record builders share: a decision's session, the
+/// players' names and a decision's comment.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The session is built, never oriented here.</b> The match's terms come
+/// from <see cref="XgMatchInfo.From"/> and each game's standing from
+/// <see cref="XgGameInfo.From"/>, the two header projections the file reader
+/// shares; a decision's session is those two turned to the seat on roll by
+/// <see cref="Session.Create"/>, BgDataTypes_Lib's one orientation rule
+/// (<see cref="SessionFor"/>). So no score, away score, Crawford flag or
+/// Jacoby rule is restated here, and money has no stand-in: a money session
+/// states its rules, a match its length (halheinrich/backgammon#273).
+/// </para>
+/// <para>
+/// <b>None recorded is <see langword="null"/>.</b> A name or comment XG
+/// records as empty is read as none (<see cref="NameOf"/>,
+/// <see cref="CommentAt"/>), the one spelling of "none" a record accepts.
+/// </para>
+/// </remarks>
 internal sealed class MatchContext
 {
-    public string? SourceFile { get; }
-    public int MatchLength { get; private set; }
-    public int Score1 { get; private set; }
-    public int Score2 { get; private set; }
-
-    // Three semantic bools replacing the overloaded CrawfordJacoby int.
-    // IsCrawford applies in match play only; IsJacoby / IsBeaver in money
-    // games only. The XGID wire-format int that folds them back together
-    // lives in XgidCrawfordJacobyField below.
-    public bool IsCrawford { get; private set; }
-    public bool IsJacoby { get; }
-    public bool IsBeaver { get; }
-
-    /// <summary>
-    /// True for an unlimited (money) session. Deliberately a local property
-    /// rather than an inherited <see cref="BgDataTypes_Lib.IMatchInfo"/>
-    /// default: this type keeps the player names private behind
-    /// <see cref="PlayerName"/>, so implementing that contract would widen the
-    /// surface purely to inherit this one member. The derivation is kept
-    /// identical to <see cref="BgDataTypes_Lib.IMatchInfo.IsMoneyGame"/>, which
-    /// remains the rule's definition — valid here for the same reason it is
-    /// there: the 99999 sentinel is normalized away in the constructor.
-    /// </summary>
-    public bool IsMoneyGame => MatchLength == 0;
-
-    public int CubeValue { get; private set; } = 1;
-    public int CubePosition { get; private set; }
-    public int GameNumber { get; private set; }
-    public int MoveNumber { get; private set; }
-    public int MaxCubeLimit { get; private set; } = 6;
-
-    /// <summary>
-    /// True when the current game began from the canonical opening position.
-    /// Set per-game from <see cref="GameHeaderRecord.InitialPosition"/>; consumers
-    /// downstream gate move-number filtering on this so non-standard starts
-    /// (problem positions, Bg960, etc.) don't get filtered by 1-based move
-    /// numbers that no longer correspond to a real game opening.
-    /// </summary>
-    public bool IsStandardStart { get; private set; }
-
-    private string _player1 = "Player 1";
-    private string _player2 = "Player 2";
-
     // File-level comment table (temp.xgc), keyed by each record's CommentIndex.
-    // Held here alongside the other per-file metadata (player names, match
-    // length) so the comment join — and its bounds guard — lives in one place.
+    // Held here alongside the other per-file metadata so the comment join —
+    // and its bounds guard — lives in one place.
     private readonly List<string> _comments;
 
-    public MatchContext(List<SaveRecord> records, string? sourceFile, List<string> comments)
+    public MatchContext(List<SaveRecord> records, List<string> comments)
     {
-        SourceFile = sourceFile;
         _comments = comments;
         if (records.Count == 0 || records[0] is not MatchHeaderRecord hm)
             throw new InvalidDataException("XG file must begin with a MatchHeaderRecord.");
-        _player1 = hm.Player1;
-        _player2 = hm.Player2;
-        MatchLength = hm.MatchLength >= MatchHeaderRecord.MoneyMatchLengthSentinel ? 0 : hm.MatchLength;
-        IsJacoby = IsMoneyGame && hm.Jacoby;
-        IsBeaver = IsMoneyGame && hm.Beaver;
-        MaxCubeLimit = hm.CubeLimit > 0 ? hm.CubeLimit : 6;
+        MatchInfo = XgMatchInfo.From(hm);
     }
 
-    /// <summary>
-    /// The Jacoby fact as it is stamped onto a decision record's
-    /// <see cref="BgDataTypes_Lib.PositionData.IsJacoby"/>: the fact itself
-    /// for a money session, <see langword="null"/> for match play.
-    ///
-    /// <para>
-    /// The <see langword="null"/> is deliberate, not a shrug. Jacoby is
-    /// meaningless off money, so a match record does not pose the question —
-    /// and a stamped <c>false</c> would answer it anyway, asserting "the
-    /// Jacoby rule was not in force" about a game the rule cannot apply to.
-    /// Which kind of record it is stays the away-scores pair's job, the
-    /// single source of that truth; this member only carries the fact where
-    /// the fact exists. Consumers ignore it on match records either way
-    /// (SPEC-stats-identity.md §1, amended 2026-08-20;
-    /// halheinrich/backgammon#120).
-    /// </para>
-    ///
-    /// <para>
-    /// Derived here rather than at each stamping site so the money-only rule
-    /// keeps one home, beside <see cref="IsJacoby"/> and
-    /// <see cref="XgidCrawfordJacobyField"/>.
-    /// </para>
-    /// </summary>
-    public bool? JacobyStamp => IsMoneyGame ? IsJacoby : null;
+    /// <summary>The match's metadata: the players and the terms (<see cref="XgMatchInfo.From"/>).</summary>
+    public XgMatchInfo MatchInfo { get; }
 
     /// <summary>
-    /// XGID field 8: match play encodes Crawford as 1/0; money games encode
-    /// Jacoby + 2×Beaver. Collocated here so the wire-format knowledge stays
-    /// with the XG binary semantics; XgidEncoder consumes this unchanged.
+    /// The current game's metadata — its standing and whether it starts from
+    /// the standard position (<see cref="XgGameInfo.From"/>);
+    /// <see langword="null"/> before the first game header.
     /// </summary>
-    public int XgidCrawfordJacobyField =>
-        !IsMoneyGame
-            ? (IsCrawford ? 1 : 0)
-            : (IsJacoby ? 1 : 0) + (IsBeaver ? 2 : 0);
+    public XgGameInfo? GameInfo { get; private set; }
+
+    /// <summary>Whether the current game is a match's Crawford game — its standing's fact.</summary>
+    public bool IsCrawford => GameInfo?.Standing is MatchStanding { IsCrawford: true };
+
+    /// <summary>The cube's face value (1, 2, 4, …) as the walk has advanced it.</summary>
+    public int CubeValue { get; private set; } = 1;
+
+    /// <summary>The cube's owner in XG's raw sign convention: +1 player 1, −1 player 2, 0 centred.</summary>
+    public int CubePosition { get; private set; }
+
+    /// <summary>The 1-based number of the current game within the file.</summary>
+    public int GameNumber { get; private set; }
+
+    /// <summary>The 1-based number of the last move record within the current game.</summary>
+    public int MoveNumber { get; private set; }
 
     public void Update(SaveRecord record)
     {
@@ -108,10 +73,7 @@ internal sealed class MatchContext
             case GameHeaderRecord gh:
                 GameNumber++;
                 MoveNumber = 0;
-                Score1 = gh.Score1;
-                Score2 = gh.Score2;
-                IsCrawford = !IsMoneyGame && gh.CrawfordApplies;
-                IsStandardStart = BackgammonConstants.IsStandardOpeningPosition(gh.InitialPosition);
+                GameInfo = XgGameInfo.From(gh, MatchInfo.Terms);
                 CubeValue = 1;
                 CubePosition = 0;
                 break;
@@ -133,40 +95,61 @@ internal sealed class MatchContext
         }
     }
 
-    public string PlayerName(int activePlayer) =>
-        activePlayer >= 0 ? _player1 : _player2;
+    /// <summary>
+    /// The seat of the player a record's <c>ActivePlayer</c> names: player 1
+    /// for a sign of 0 or more, player 2 otherwise — XG's convention, stated
+    /// once here.
+    /// </summary>
+    public static Seat SeatOf(int activePlayer) => activePlayer >= 0 ? Seat.Player1 : Seat.Player2;
+
+    /// <summary>
+    /// The session of a decision taken from <paramref name="onRoll"/>: the
+    /// match's terms and the current game's standing, turned to that seat by
+    /// <see cref="Session.Create"/>.
+    /// </summary>
+    /// <exception cref="InvalidDataException">Thrown when no game header precedes the decision.</exception>
+    public Session SessionFor(Seat onRoll)
+    {
+        var game = GameInfo
+            ?? throw new InvalidDataException("A decision record precedes its game's header.");
+        return Session.Create(MatchInfo.Terms, game.Standing, onRoll);
+    }
+
+    /// <summary>
+    /// The name of the player in <paramref name="seat"/>, or
+    /// <see langword="null"/> when the header records none (an empty or
+    /// white-space name).
+    /// </summary>
+    public string? NameOf(Seat seat) =>
+        Recorded(seat == Seat.Player1 ? MatchInfo.Player1 : MatchInfo.Player2);
 
     /// <summary>
     /// Resolves a record's <c>CommentIndex</c> against the file's comment table
-    /// and returns the decision's comment <b>as plain text</b>. XG's "no
-    /// comment" sentinel is <c>-1</c> (the same convention the match header's
-    /// comment indices use); that, and any out-of-range index, map to
-    /// <see cref="string.Empty"/> rather than indexing the table — so a missing
-    /// comment never aliases <c>Comments[0]</c>.
+    /// and returns the decision's comment <b>as plain text</b>, or
+    /// <see langword="null"/> when there is none. XG's "no comment" sentinel is
+    /// <c>-1</c> (the same convention the match header's comment indices use);
+    /// that and any out-of-range index are none rather than an index into the
+    /// table — so a missing comment never aliases <c>Comments[0]</c> — and so
+    /// is a comment whose text is empty.
     /// </summary>
     /// <remarks>
     /// XG stores its comments as RTF documents, and the stamp path is where
     /// that stops being the consumer's problem: this is the one conversion
-    /// site in the library (halheinrich/backgammon#233). It is here rather
-    /// than at the two <c>DescriptiveData.Comment</c> stamps in
-    /// <see cref="XgDecisionIterator"/> because those are two sites and this
-    /// is one, and because every caller of this method is such a stamp — the
-    /// resolution and the rendering answer the same question, "what note does
-    /// this decision carry?". The conversion itself belongs to
+    /// site in the library (halheinrich/backgammon#233). It sits beside the
+    /// index resolution because the resolution and the rendering answer the
+    /// same question, "what note does this decision carry?", and its one
+    /// caller is the <c>DescriptiveData.Comment</c> stamp both record kinds
+    /// share in <see cref="XgDecisionIterator"/>. The conversion itself belongs to
     /// <see cref="RtfPlainText"/>, whose doc is the one statement of the
     /// contract. The comment <i>table</i> is untouched: <c>XgFile.Comments</c>,
     /// the reader, the writer and the <c>.xgp</c> slice export all still carry
     /// XG's bytes verbatim, so a round trip reproduces them.
     /// </remarks>
-    public string CommentAt(int commentIndex) =>
+    public string? CommentAt(int commentIndex) =>
         commentIndex >= 0 && commentIndex < _comments.Count
-            ? RtfPlainText.Extract(_comments[commentIndex])
-            : string.Empty;
+            ? Recorded(RtfPlainText.Extract(_comments[commentIndex]))
+            : null;
 
-    /// <summary>
-    /// Returns the "away" score (points needed to win) from the perspective of
-    /// <paramref name="activePlayer"/>. Returns 0 for money games.
-    /// </summary>
-    public int NeedsFor(int activePlayer) =>
-        BackgammonConstants.AwayScore(MatchLength, activePlayer >= 0 ? Score1 : Score2);
+    /// <summary>XG's text as a record states it: <see langword="null"/> for empty or white-space text.</summary>
+    private static string? Recorded(string text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }

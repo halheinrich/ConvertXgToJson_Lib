@@ -1,5 +1,6 @@
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Tests.Helpers;
 using Microsoft.Extensions.Logging;
 
 namespace ConvertXgToJson_Lib.Tests;
@@ -30,7 +31,7 @@ public class XgDecisionIteratorIllegalPlayTests
         var rows = XgDecisionIterator.Iterate(file, "synthetic.xg", logger: logger).ToList();
 
         rows.Should().HaveCount(2, "the two legal moves emit; the illegal one is skipped");
-        rows.Select(r => r.MoveNumber).Should().Equal(new[] { 1, 3 },
+        rows.Select(r => r.MoveNumber).Should().Equal(new int?[] { 1, 3 },
             "the skipped illegal play is move 2 — the surrounding moves keep their numbers");
     }
 
@@ -96,28 +97,4 @@ public class XgDecisionIteratorIllegalPlayTests
 
     /// <summary>8/5 6/5 in the mover's numbering — legal from the opening for either side.</summary>
     private static Play MakeFivePoint() => Play.Create(new Move(8, 5), new Move(6, 5));
-
-    /// <summary>
-    /// Minimal <see cref="ILogger"/> that captures the level and fully
-    /// formatted message of each entry — enough to assert the illegal-play
-    /// warning carries file / game / move / roll context.
-    /// </summary>
-    private sealed class CapturingLogger : ILogger
-    {
-        public readonly List<(LogLevel Level, string Message)> Entries = [];
-
-        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-            => Entries.Add((logLevel, formatter(state, exception)));
-
-        private sealed class NullScope : IDisposable
-        {
-            public static readonly NullScope Instance = new();
-            public void Dispose() { }
-        }
-    }
 }

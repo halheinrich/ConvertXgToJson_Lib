@@ -5,10 +5,11 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <summary>
 /// Tests for the producer-side <see cref="DecisionId"/> stamping on
 /// <see cref="DecisionRow.Id"/> and <see cref="BgDecisionData.Id"/>. Covers
-/// the four stamp sites (<c>BuildMoveRow</c>, <c>BuildMoveDiagramRequest</c>,
-/// <c>BuildCubeRows</c>, <c>BuildCubeDiagramRequests</c>) via end-to-end
+/// the two record builders (a row takes its record's id) via end-to-end
 /// iteration and the format-dispatch helper directly via
-/// <c>InternalsVisibleTo</c>.
+/// <c>InternalsVisibleTo</c>. A row's and a record's game and move number are
+/// derived from the id (halheinrich/backgammon#124), so the agreement pins
+/// below read the id's coordinates back through them.
 ///
 /// <para>
 /// Producer contract under test:
@@ -84,10 +85,10 @@ public class XgDecisionIdStampingTests
                 xgId.MoveNumber.Should().Be(row.MoveNumber,
                     $"{sourceFile} row [{rowsChecked}]: Id.MoveNumber must match emitted DecisionRow.MoveNumber " +
                     "(cube path uses ctx.MoveNumber + 1; Id must reflect the emitted value)");
-                xgId.IsCube.Should().Be(row.IsCube,
-                    $"{sourceFile} row [{rowsChecked}]: Id.IsCube must match DecisionRow.IsCube");
+                xgId.IsCube.Should().Be(row.Kind == DecisionKind.Cube,
+                    $"{sourceFile} row [{rowsChecked}]: Id.IsCube must match DecisionRow.Kind");
 
-                if (row.IsCube) cubeRowsChecked++;
+                if (row.Kind == DecisionKind.Cube) cubeRowsChecked++;
                 rowsChecked++;
             }
         }
@@ -228,7 +229,7 @@ public class XgDecisionIdStampingTests
             string sourceFile = Path.GetFileName(path);
             var file = XgFileReader.ReadFile(path);
 
-            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile).Where(r => r.IsCube))
+            foreach (var row in XgDecisionIterator.Iterate(file, sourceFile).Where(r => r.Kind == DecisionKind.Cube))
             {
                 var xgId = row.Id.Should().BeOfType<XgDecisionId>().Subject;
                 xgId.MoveNumber.Should().Be(row.MoveNumber,
@@ -273,6 +274,42 @@ public class XgDecisionIdStampingTests
         var xgpId = firstRow.Id.Should().BeOfType<XgpDecisionId>().Subject;
         xgpId.Filename.Should().Be(fixtureName,
             "XgpDecisionId.Filename must round-trip the bare filename verbatim, including spaces and extension");
+    }
+
+    // -----------------------------------------------------------------------
+    //  A standalone position states no game, move or standard start
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A standalone position belongs to no game (halheinrich/backgammon#124):
+    /// a decision read from an <c>.xgp</c> carries an
+    /// <see cref="XgpDecisionId"/>, so it states no game, no move number and no
+    /// standard start — never a stamped 1, nor a <c>false</c> standing for "not
+    /// applicable" — on both surfaces. The same records read as an <c>.xg</c>
+    /// do state them: the start is read off the id, so the two cannot differ.
+    /// </summary>
+    [Fact]
+    public void StandalonePosition_StatesNoGameMoveOrStandardStart()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame().Play(XgPlayer.Player1, new DiceRoll(3, 1), Play.Create(new Move(8, 5), new Move(6, 5)));
+        var file = builder.Build();
+
+        var standalone = XgDecisionIterator.IterateDiagramRequests(file, "position.xgp").Single();
+        standalone.Id.Should().BeOfType<XgpDecisionId>();
+        standalone.Game.Should().BeNull();
+        standalone.MoveNumber.Should().BeNull();
+        standalone.Descriptive.IsStandardStart.Should().BeNull();
+
+        var row = XgDecisionIterator.Iterate(file, "position.xgp").Single();
+        row.Game.Should().BeNull();
+        row.MoveNumber.Should().BeNull();
+        row.IsStandardStart.Should().BeNull();
+
+        var inAGame = XgDecisionIterator.IterateDiagramRequests(file, "match.xg").Single();
+        inAGame.Game.Should().Be(1);
+        inAGame.MoveNumber.Should().Be(1);
+        inAGame.Descriptive.IsStandardStart.Should().BeTrue();
     }
 
     // -----------------------------------------------------------------------

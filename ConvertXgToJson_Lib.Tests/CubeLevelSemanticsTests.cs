@@ -33,8 +33,8 @@ public class CubeLevelSemanticsTests
     private static List<DecisionRow> Rows(XgFile file) =>
         XgDecisionIterator.Iterate(file, Xg).ToList();
 
-    private static List<BgDecisionData> Requests(XgFile file) =>
-        XgDecisionIterator.IterateDiagramRequests(file, Xg).ToList();
+    private static List<CubeDecision> Requests(XgFile file) =>
+        XgDecisionIterator.IterateDiagramRequests(file, Xg).Cast<CubeDecision>().ToList();
 
     // -----------------------------------------------------------------------
     //  Divergence, both directions — the label follows what ran
@@ -61,10 +61,8 @@ public class CubeLevelSemanticsTests
         row.AnalysisLevel.Should().Be(AnalysisLevel.Ply2);
 
         var req = Requests(file).Should().ContainSingle().Subject;
-        req.Decision.CubeDepth.Should().Be("2-ply");
-        req.Decision.CubeAnalysisMode.Should().Be(AnalysisMode.Evaluation);
-        req.Decision.CubeAnalysisLevel.Should().Be(AnalysisLevel.Ply2);
-        req.Decision.CubeDepthRank.Should().Be(20);
+        req.Decision.AnalysisMode.Should().Be(AnalysisMode.Evaluation);
+        req.Decision.AnalysisLevel.Should().Be(AnalysisLevel.Ply2, "the record states the level that ran");
     }
 
     /// <summary>
@@ -88,10 +86,8 @@ public class CubeLevelSemanticsTests
         row.AnalysisLevel.Should().Be(AnalysisLevel.Ply5);
 
         var req = Requests(file).Should().ContainSingle().Subject;
-        req.Decision.CubeDepth.Should().Be("5-ply");
-        req.Decision.CubeAnalysisMode.Should().Be(AnalysisMode.Evaluation);
-        req.Decision.CubeAnalysisLevel.Should().Be(AnalysisLevel.Ply5);
-        req.Decision.CubeDepthRank.Should().Be(50);
+        req.Decision.AnalysisMode.Should().Be(AnalysisMode.Evaluation);
+        req.Decision.AnalysisLevel.Should().Be(AnalysisLevel.Ply5, "the record states the level that ran");
     }
 
     /// <summary>
@@ -266,7 +262,7 @@ public class CubeLevelSemanticsTests
 
         var file = XgFileReader.ReadFile(path);
         var cubeRows = XgDecisionIterator.Iterate(file, Path.GetFileName(path))
-            .Where(r => r.IsCube)
+            .Where(r => r.Kind == DecisionKind.Cube)
             .Take(2)
             .ToList();
 

@@ -17,8 +17,8 @@ namespace ConvertXgToJson_Lib.Tests;
 ///     workaround</b>. Source play was illegal, XG forces the next
 ///     position rather than refusing to load and emits this as the
 ///     lone "candidate." Without the iterator skip, this used to
-///     reach <see cref="Parsing.AfterBoardBuilder.ComputeAfterBoard"/>
-///     and throw <see cref="IndexOutOfRangeException"/> on
+///     reach the since-retired after-board builder and throw
+///     <see cref="IndexOutOfRangeException"/> on
 ///     <c>board[from + 1] = board[-99]</c>.
 ///   </description></item>
 ///   <item><description>
@@ -100,8 +100,8 @@ public class XgDecisionIteratorSentinelTests
     /// tournament file that contains at least one illegal-play workaround
     /// emission. Before the iterator-level skip, running
     /// <see cref="XgDecisionIterator.Iterate"/> on this file threw
-    /// <see cref="IndexOutOfRangeException"/> from
-    /// <see cref="Parsing.AfterBoardBuilder.ComputeAfterBoard"/>.
+    /// <see cref="IndexOutOfRangeException"/> from the since-retired
+    /// after-board builder.
     /// </summary>
     [Fact]
     public void Iterate_AchimMuellerSF_DoesNotThrow()
@@ -172,10 +172,12 @@ public class XgDecisionIteratorSentinelTests
     /// synthetic non-sentinel test move (24/23) is plausible without the
     /// test having to model a full game position.
     /// </summary>
+    /// <summary>A checker of each side — a decision position — the mover's on 24.</summary>
     private static int[] OneCheckerOn24()
     {
         var pts = new int[26];
         pts[24] = 1;
+        pts[1] = -1;
         return pts;
     }
 

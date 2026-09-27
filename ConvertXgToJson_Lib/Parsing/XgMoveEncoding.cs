@@ -35,17 +35,15 @@ internal enum SentinelKind
 ///
 /// <para>
 /// Single source of the XG sentinel vocabulary and the point-index resolution
-/// shared by <see cref="XgMoveTranslator"/> (encoding →
-/// <see cref="BgDataTypes_Lib.Play"/>) and <see cref="AfterBoardBuilder"/>
-/// (encoding → after-board). The sentinel <i>values</i> (<see cref="Terminator"/>,
+/// read by <see cref="XgMoveTranslator"/> (encoding →
+/// <see cref="BgDataTypes_Lib.Play"/>), the decision iterator (which skips
+/// the sentinels at its boundary) and <see cref="XgGameBuilder"/> (which
+/// writes the encoding). The sentinel <i>values</i> (<see cref="Terminator"/>,
 /// <see cref="IllegalPlayMarker"/>, the <c>(0, 0)</c> dance pair, the
-/// <see cref="Bar"/> point) are single-sourced here. The control flow each
-/// consumer wraps around those values is intentionally <i>not</i> shared:
-/// <see cref="XgMoveTranslator"/> deliberately renders a dance rather than
-/// breaking on it, <see cref="AfterBoardBuilder"/> treats a dance as a board
-/// no-op, and the decision iterator skips both illegal plays and dances at its
-/// boundary. Centralize the recognition of the values, not the decisions about
-/// them.
+/// <see cref="Bar"/> point) are single-sourced here; the decisions about them
+/// stay with their readers. Centralize the recognition of the values, not the
+/// decisions about them. What a translated play reaches is BgDataTypes_Lib's
+/// play rule's, never decoded here.
 /// </para>
 /// </summary>
 internal static class XgMoveEncoding

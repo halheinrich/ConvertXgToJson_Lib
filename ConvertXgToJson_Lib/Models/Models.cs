@@ -183,6 +183,36 @@ internal sealed class PositionEngine
 {
     /// <summary>Raw signed-byte values, indices 0-25.</summary>
     public sbyte[] Points { get; init; } = new sbyte[26];
+
+    /// <summary>
+    /// The position as a <see cref="BgDataTypes_Lib.BoardPosition"/>, in the
+    /// frame the record stores it in — the ecosystem's one "same position"
+    /// and its one flip, so nothing here compares or turns the raw array.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the array is not a position: not 26 cells, or counts
+    /// <see cref="BgDataTypes_Lib.BoardPosition"/> refuses.
+    /// </exception>
+    public BgDataTypes_Lib.BoardPosition ToBoardPosition()
+    {
+        Span<int> counts = stackalloc int[Points.Length];
+        for (int i = 0; i < Points.Length; i++)
+            counts[i] = Points[i];
+        return new BgDataTypes_Lib.BoardPosition(counts);
+    }
+
+    /// <summary>
+    /// The non-throwing form of <see cref="ToBoardPosition"/>: false, with
+    /// <paramref name="position"/> the empty board, when the array is not a
+    /// position.
+    /// </summary>
+    public bool TryToBoardPosition(out BgDataTypes_Lib.BoardPosition position)
+    {
+        Span<int> counts = stackalloc int[Points.Length];
+        for (int i = 0; i < Points.Length; i++)
+            counts[i] = Points[i];
+        return BgDataTypes_Lib.BoardPosition.TryCreate(counts, out position);
+    }
 }
 
 /// <summary>
@@ -216,12 +246,12 @@ internal sealed class EvalResult
 }
 
 /// <summary>
-/// Evaluation level descriptor (4 bytes). <see cref="Level"/> uses XG's
-/// level taxonomy: 1–7 = N-ply (11 = 2-ply, 12 = "3-ply Red"),
-/// 1000/1001/1002 =
-/// XG Roller / + / ++, 999/998 = Book V1/V2, 100 = rollout sentinel,
-/// −100 = never analysed. <c>XgDecisionIterator.ResolveDepthInfo</c> is the
-/// single projection of this taxonomy into labels / ranks / depth classes.
+/// Evaluation level descriptor (4 bytes). <see cref="Level"/> is XG's
+/// PLAYERLEVEL code: 0–6 = an N-ply evaluation as N − 1 (1 and 11 both
+/// 2-ply, 12 = "3-ply Red"), 1000/1001/1002 = XG Roller / + / ++,
+/// 999/998 = Book V1/V2, 100 = rollout sentinel, −100 = never analysed.
+/// <see cref="XgDepthFacts.OfLevel"/> is the one decoding of this code space
+/// into the typed depth facts a record states.
 /// </summary>
 internal sealed class EvalLevel
 {

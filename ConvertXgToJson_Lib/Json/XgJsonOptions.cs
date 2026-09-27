@@ -74,6 +74,7 @@ internal static class XgJsonOptions
         new JsonStringEnumConverter<AnalysisMode>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
         new JsonStringEnumConverter<CubeAction>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
         new JsonStringEnumConverter<CubeOwner>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+        new JsonStringEnumConverter<SessionKind>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
 
         // (2) The XG-native enums stay integer-tolerant, and that is a
         // documented safety rather than an oversight: they mirror fields of a

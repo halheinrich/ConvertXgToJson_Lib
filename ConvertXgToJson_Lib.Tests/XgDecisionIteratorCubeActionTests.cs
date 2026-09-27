@@ -5,8 +5,8 @@ namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
 /// Pins the played cube action <see cref="XgDecisionIterator.IterateDiagramRequests"/>
-/// stamps onto <see cref="DecisionData.UserDoublerAction"/> /
-/// <see cref="DecisionData.UserTakerAction"/> from the raw
+/// stamps onto <see cref="CubeDecisionData.UserDoublerAction"/> /
+/// <see cref="CubeDecisionData.UserTakerAction"/> from the raw
 /// <c>CubeRecord.Doubled</c> / <c>Taken</c> pane state.
 ///
 /// <para>
@@ -33,16 +33,14 @@ public class XgDecisionIteratorCubeActionTests
     /// are stamped at <c>MoveNumber + 1</c>, matching the raw record's
     /// position in the game.
     /// </summary>
-    private static DecisionData CubeDecisionAt(int game, int moveNumber, string? path = null)
+    private static CubeDecisionData CubeDecisionAt(int game, int moveNumber, string? path = null)
     {
         path ??= Path.Combine(TestPaths.FixtureFilesDir, FixtureName);
         string sourceFile = Path.GetFileName(path);
         var decision = XgDecisionIterator
             .IterateDiagramRequests(XgFileReader.ReadFile(path), sourceFile)
-            .SingleOrDefault(d =>
-                d.Decision.IsCube &&
-                d.Descriptive.Game == game &&
-                d.Descriptive.MoveNumber == moveNumber);
+            .OfType<CubeDecision>()
+            .SingleOrDefault(d => d.Game == game && d.MoveNumber == moveNumber);
 
         decision.Should().NotBeNull(
             $"{sourceFile} should yield an analysed cube decision at g{game}:m{moveNumber}");
@@ -127,15 +125,18 @@ public class XgDecisionIteratorCubeActionTests
 
     /// <summary>
     /// The same record also carries <c>ErrorCube</c>'s −1000 not-analysed
-    /// sentinel. Pinned separately from the stamp above: the two agree here
-    /// by coincidence, and this documents that the action mapping is keyed
-    /// off the pane state rather than off the error's presence.
+    /// sentinel, so neither half states an unstated-action error either.
+    /// Pinned separately from the stamp above: the two agree here by
+    /// coincidence, and this documents that the action mapping is keyed off
+    /// the pane state rather than off the error's presence.
     /// </summary>
     [Fact]
     public void ResignationPane_CarriesTheNotAnalysedErrorSentinel()
     {
         var decision = CubeDecisionAt(game: 2, moveNumber: 65, TestPaths.AchimMuellerSeqXg);
 
+        decision.UnstatedDoublerActionError.Should().BeNull();
+        decision.UnstatedTakerActionError.Should().BeNull();
         decision.UserDoubleError.Should().BeNull();
         decision.UserTakeError.Should().BeNull();
     }
@@ -147,9 +148,9 @@ public class XgDecisionIteratorCubeActionTests
     /// <summary>
     /// Across the whole .xg corpus: each half stays inside its own action
     /// domain, and the cross-half producer contract holds — a recorded taker
-    /// response implies the doubler doubled. <c>DecisionData</c> guards the
-    /// halves individually but leaves the cross-half rule to the producer,
-    /// so this is the only place it is checked.
+    /// response implies the doubler doubled. <see cref="CubeDecisionData"/>
+    /// guards the halves individually but leaves the cross-half rule to the
+    /// producer, so this is the only place it is checked.
     /// </summary>
     [Fact]
     public void CubeActions_StayInTheirHalvesAndHonourTheCrossHalfContract()
@@ -159,11 +160,11 @@ public class XgDecisionIteratorCubeActionTests
             string sourceFile = Path.GetFileName(path);
             var cubes = XgDecisionIterator
                 .IterateDiagramRequests(XgFileReader.ReadFile(path), sourceFile)
-                .Where(d => d.Decision.IsCube);
+                .OfType<CubeDecision>();
 
             foreach (var d in cubes)
             {
-                string where = $"{sourceFile} g{d.Descriptive.Game}:m{d.Descriptive.MoveNumber}";
+                string where = $"{sourceFile} g{d.Game}:m{d.MoveNumber}";
 
                 if (d.Decision.UserDoublerAction is { } doubler)
                     doubler.Should().BeOneOf([CubeAction.NoDouble, CubeAction.Double], where);
@@ -193,35 +194,12 @@ public class XgDecisionIteratorCubeActionTests
             string sourceFile = Path.GetFileName(path);
             var scored = XgDecisionIterator
                 .IterateDiagramRequests(XgFileReader.ReadFile(path), sourceFile)
-                .Where(d => d.Decision.IsCube && d.Decision.UserTakeError is not null);
+                .OfType<CubeDecision>()
+                .Where(d => d.Decision.UserTakeError is not null);
 
             foreach (var d in scored)
                 d.Decision.UserDoublerAction.Should().Be(CubeAction.Double,
-                    $"{sourceFile} g{d.Descriptive.Game}:m{d.Descriptive.MoveNumber}");
-        }
-    }
-
-    /// <summary>
-    /// Both halves are cube-only, like every other cube field on
-    /// <c>DecisionData</c>: a checker-play decision leaves them null.
-    /// </summary>
-    [Fact]
-    public void PlayDecisions_CarryNeitherHalf()
-    {
-        foreach (var path in TestPaths.XgFiles)
-        {
-            string sourceFile = Path.GetFileName(path);
-            var plays = XgDecisionIterator
-                .IterateDiagramRequests(XgFileReader.ReadFile(path), sourceFile)
-                .Where(d => !d.Decision.IsCube);
-
-            foreach (var d in plays)
-            {
-                d.Decision.UserDoublerAction.Should().BeNull(
-                    $"{sourceFile} g{d.Descriptive.Game}:m{d.Descriptive.MoveNumber}");
-                d.Decision.UserTakerAction.Should().BeNull(
-                    $"{sourceFile} g{d.Descriptive.Game}:m{d.Descriptive.MoveNumber}");
-            }
+                    $"{sourceFile} g{d.Game}:m{d.MoveNumber}");
         }
     }
 }

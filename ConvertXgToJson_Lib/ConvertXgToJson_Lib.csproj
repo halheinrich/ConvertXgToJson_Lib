@@ -26,6 +26,5 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib\BgDataTypes_Lib.csproj" />
-    <ProjectReference Include="..\..\BgMoveGen\BgMoveGen\BgMoveGen.csproj" />
   </ItemGroup>
 </Project>

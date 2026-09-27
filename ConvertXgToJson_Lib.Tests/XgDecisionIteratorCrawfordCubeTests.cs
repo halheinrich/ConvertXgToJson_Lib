@@ -9,8 +9,8 @@ namespace ConvertXgToJson_Lib.Tests;
 /// writes and analyses such panes — the rule is the game's, not the
 /// format's — so the converter drops them at the one dispatch site both
 /// surfaces share (<c>XgDecisionIterator.AdmitsCubeDecision</c>), before
-/// either builder runs; the wire types would refuse the record otherwise
-/// (BgDataTypes_Lib's <c>CrawfordRule</c>). The synthetic pair below is the
+/// either builder runs; the record would refuse it otherwise (a
+/// <see cref="CubeDecision"/> refuses a Crawford position). The synthetic pair below is the
 /// gating coverage; the fixture the issue measured is pinned local-only.
 /// </summary>
 [Collection("FileIO")]
@@ -42,7 +42,7 @@ public class XgDecisionIteratorCrawfordCubeTests
         var rows = XgDecisionIterator.Iterate(CubeThenPlay(isCrawford: true), Xg).ToList();
 
         var row = rows.Should().ContainSingle().Subject;
-        row.IsCube.Should().BeFalse();
+        row.Kind.Should().Be(DecisionKind.CheckerPlay);
         row.IsCrawford.Should().BeTrue();
         row.MoveNumber.Should().Be(1,
             "dropping the cube pane does not renumber the play that follows it");
@@ -56,15 +56,15 @@ public class XgDecisionIteratorCrawfordCubeTests
             .ToList();
 
         var request = requests.Should().ContainSingle().Subject;
-        request.Decision.IsCube.Should().BeFalse();
-        request.Position.IsCrawford.Should().BeTrue();
-        request.Descriptive.MoveNumber.Should().Be(1);
+        request.Kind.Should().Be(DecisionKind.CheckerPlay);
+        request.Session.Should().BeOfType<MatchSession>().Which.IsCrawford.Should().BeTrue();
+        request.MoveNumber.Should().Be(1);
     }
 
     /// <summary>
     /// The control: the same game without the flag emits its cube on both
     /// surfaces, numbered as it always was — the cube and the play that
-    /// follows it share move number 1, told apart by <c>IsCube</c>.
+    /// follows it share move number 1, told apart by their kind.
     /// </summary>
     [Fact]
     public void BothSurfaces_NonCrawfordGame_EmitTheCube()
@@ -74,11 +74,11 @@ public class XgDecisionIteratorCrawfordCubeTests
         var rows = XgDecisionIterator.Iterate(file, Xg).ToList();
         var requests = XgDecisionIterator.IterateDiagramRequests(file, Xg).ToList();
 
-        rows.Select(r => (r.IsCube, r.MoveNumber))
-            .Should().Equal((true, 1), (false, 1));
-        requests.Select(r => (r.Decision.IsCube, r.Descriptive.MoveNumber))
-            .Should().Equal((true, 1), (false, 1));
-        rows.Should().OnlyContain(r => !r.IsCrawford);
+        rows.Select(r => (r.Kind, r.MoveNumber))
+            .Should().Equal((DecisionKind.Cube, 1), (DecisionKind.CheckerPlay, 1));
+        requests.Select(r => (r.Kind, r.MoveNumber))
+            .Should().Equal((DecisionKind.Cube, 1), (DecisionKind.CheckerPlay, 1));
+        rows.Should().OnlyContain(r => r.IsCrawford == false);
     }
 
     /// <summary>
@@ -91,13 +91,13 @@ public class XgDecisionIteratorCrawfordCubeTests
     {
         var seen = new List<IDecisionFilterData>();
         var callbacks = new XgIteratorCallbacks(
-            StopGameAfter: row => { seen.Add(row); return row.IsCube; });
+            StopGameAfter: row => { seen.Add(row); return row.Kind == DecisionKind.Cube; });
 
         var rows = XgDecisionIterator
             .Iterate(CubeThenPlay(isCrawford: true), Xg, callbacks: callbacks)
             .ToList();
 
-        rows.Should().ContainSingle().Which.IsCube.Should().BeFalse();
+        rows.Should().ContainSingle().Which.Kind.Should().Be(DecisionKind.CheckerPlay);
         seen.Should().Equal(rows);
     }
 
@@ -130,15 +130,15 @@ public class XgDecisionIteratorCrawfordCubeTests
         var rows = XgDecisionIterator.Iterate(file, source).ToList();
         var requests = XgDecisionIterator.IterateDiagramRequests(file, source).ToList();
 
-        var crawfordRows = rows.Where(r => r.IsCrawford).ToList();
+        var crawfordRows = rows.Where(r => r.IsCrawford == true).ToList();
         crawfordRows.Should().HaveCount(37,
             "the issue measured 38 Crawford decisions, exactly one of them the cube pane");
-        crawfordRows.Should().OnlyContain(r => !r.IsCube && r.Game == 3);
-        rows.Should().NotContain(r => r.Game == 3 && r.MoveNumber == 41 && r.IsCube,
+        crawfordRows.Should().OnlyContain(r => r.Kind == DecisionKind.CheckerPlay && r.Game == 3);
+        rows.Should().NotContain(r => r.Game == 3 && r.MoveNumber == 41 && r.Kind == DecisionKind.Cube,
             "g3:m41:cube is the decision the quiz served");
 
-        requests.Where(r => r.Position.IsCrawford).Should().HaveCount(37);
-        requests.Should().OnlyContain(r => !(r.Position.IsCrawford && r.Decision.IsCube));
+        requests.Where(r => r.Session is MatchSession { IsCrawford: true }).Should().HaveCount(37);
+        requests.Where(r => r.Session is MatchSession { IsCrawford: true } && r.Kind == DecisionKind.Cube).Should().BeEmpty();
         requests.Count.Should().Be(rows.Count, "both surfaces drop the same pane");
     }
 }

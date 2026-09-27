@@ -4,20 +4,19 @@ using ConvertXgToJson_Lib;
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
-/// Pins the Jacoby fact <see cref="XgDecisionIterator.IterateDiagramRequests"/>
-/// stamps onto <see cref="PositionData.IsJacoby"/> at both construction sites
-/// (checker plays and cube decisions), and the consequence that motivates it:
-/// a money record read from a real file now derives a
-/// <see cref="ProblemKey"/>.
+/// Pins the session <see cref="XgDecisionIterator.IterateDiagramRequests"/>
+/// builds for both decision kinds from the match header's terms — a money
+/// session's Jacoby rule above all — and the consequence that motivates it: a
+/// money record read from a real file keys (<see cref="ProblemKey.From"/>),
+/// its key spelling the rule.
 ///
 /// <para>
-/// Before the stamp every money record left <c>IsJacoby</c> at its
-/// <see langword="null"/> default, which is <see cref="ProblemKey"/>'s
-/// no-key rung — so <see cref="ProblemKey.TryDerive"/> failed on every
-/// money decision this converter produced, silently: dedupe passed the item
-/// through unmerged and stats never recorded it. The
-/// <c>DerivesAProblemKey</c> tests below are the ones that would have failed
-/// before the stamp; the fixtures are unchanged.
+/// Money versus match is the session's kind (halheinrich/backgammon#273):
+/// a money record states its rules in its <see cref="MoneyTerms"/>, so there
+/// is no unknown rule for the key to fall on, and a match record states no
+/// Jacoby fact at all. Before halheinrich/backgammon#120 every money record
+/// left the rule unknown and fell on the key's no-key rung, silently; the
+/// session kinds removed that rung with the state it handled.
 /// </para>
 ///
 /// <para>
@@ -36,9 +35,9 @@ public class XgDecisionIteratorJacobyStampTests
 
     /// <summary>
     /// Reads a named fixture through the real converter path and returns
-    /// every decision it yields, asserting that both kinds are present —
-    /// the two <see cref="PositionData"/> construction sites are separate
-    /// code, so a fixture carrying only one kind would leave one unproven.
+    /// every decision it yields, asserting that both kinds are present — the
+    /// two record kinds are built by separate code, so a fixture carrying only
+    /// one kind would leave one unproven.
     /// </summary>
     private static List<BgDecisionData> ReadBothKinds(string fixtureName)
     {
@@ -47,97 +46,77 @@ public class XgDecisionIteratorJacobyStampTests
             .IterateDiagramRequests(XgFileReader.ReadFile(path), fixtureName)
             .ToList();
 
-        decisions.Should().Contain(d => !d.Decision.IsCube,
-            $"{fixtureName} must exercise the checker-play stamping site");
-        decisions.Should().Contain(d => d.Decision.IsCube,
-            $"{fixtureName} must exercise the cube-decision stamping site");
+        decisions.Should().Contain(d => d.Kind == DecisionKind.CheckerPlay,
+            $"{fixtureName} must exercise the checker-play builder");
+        decisions.Should().Contain(d => d.Kind == DecisionKind.Cube,
+            $"{fixtureName} must exercise the cube-decision builder");
         return decisions;
     }
 
     // -----------------------------------------------------------------------
-    //  The stamp
+    //  The session
     // -----------------------------------------------------------------------
 
-    [Fact]
-    public void MoneyRecord_JacobyOn_StampsTrue_OnBothDecisionKinds()
+    [Theory]
+    [InlineData(MoneyJacobyOnFixture, true)]
+    [InlineData(MoneyJacobyOffFixture, false)]
+    public void MoneyRecord_StatesTheHeadersJacobyRule_OnBothDecisionKinds(string fixtureName, bool jacoby)
     {
-        var decisions = ReadBothKinds(MoneyJacobyOnFixture);
+        var decisions = ReadBothKinds(fixtureName);
 
-        decisions.Should().OnlyContain(d => d.Position.IsJacoby == true,
-            "the file's match header has the Jacoby rule in force, and the fact " +
-            "is stamped from the match context rather than left unknown");
-        decisions.Should().OnlyContain(
-            d => d.Position.OnRollNeeds == 0 && d.Position.OpponentNeeds == 0,
-            "the away-scores pair — not IsJacoby — is what says this is a money game");
-    }
-
-    [Fact]
-    public void MoneyRecord_JacobyOff_StampsFalse_OnBothDecisionKinds()
-    {
-        var decisions = ReadBothKinds(MoneyJacobyOffFixture);
-
-        decisions.Should().OnlyContain(d => d.Position.IsJacoby == false,
-            "Jacoby off is a fact the record carries, distinct from null's " +
-            "'the producer did not supply it'");
+        decisions.Should().OnlyContain(d => d.Session is MoneySession,
+            "XG's money-sentinel length is read as money terms");
+        decisions.Should().OnlyContain(d => ((MoneySession)d.Session).Terms.IsJacoby == jacoby,
+            "the rule is the match header's, carried on every decision's money terms");
     }
 
     /// <summary>
-    /// A match record poses no Jacoby question, so it asserts no answer.
-    /// <see langword="null"/> here is the ruled wire form (leg 2 of
-    /// halheinrich/backgammon#120): consumers ignore the member on match
-    /// records either way, so the choice is about the wire's honesty, and a
-    /// stamped <c>false</c> would claim the rule was not in force in a game
-    /// it cannot apply to.
+    /// A match record poses no Jacoby question, so it states no answer: its
+    /// session is a match, whose terms are its length alone.
     /// </summary>
     [Fact]
-    public void MatchRecord_CarriesNoJacobyFact_OnBothDecisionKinds()
+    public void MatchRecord_IsAMatchSession_OnBothDecisionKinds()
     {
         var decisions = ReadBothKinds(MatchFixture);
 
-        decisions.Should().OnlyContain(d => d.Position.IsJacoby == null,
-            "Jacoby is meaningless off money, so a match record answers nothing");
+        decisions.Should().OnlyContain(d => d.Session is MatchSession
+            && ((MatchSession)d.Session).Terms.Length == 5);
     }
 
     // -----------------------------------------------------------------------
-    //  The point of the stamp — money records key again
+    //  The point of the rule — money records key, spelling it
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// The regression this leg exists to close. Every money decision the
-    /// converter produced used to fall on the no-key rung; now each derives,
-    /// and the money key spells the fact in its score field.
+    /// Every money decision keys, and the money key spells the rule in its
+    /// score field.
     /// </summary>
     [Theory]
     [InlineData(MoneyJacobyOnFixture, "/0a0j/")]
     [InlineData(MoneyJacobyOffFixture, "/0a0nj/")]
-    public void MoneyRecord_DerivesAProblemKey_SpellingTheJacobyFact(
-        string fixtureName, string expectedScoreField)
+    public void MoneyRecord_KeysSpellingTheJacobyRule(string fixtureName, string expectedScoreField)
     {
         foreach (var decision in ReadBothKinds(fixtureName))
         {
-            ProblemKey.TryDerive(decision, out var key).Should().BeTrue(
-                "a money record whose Jacoby fact is stamped is no longer on " +
-                "ProblemKey's no-key rung ({0})", decision.Id);
-            key!.ToString().Should().Contain(expectedScoreField,
+            var key = ProblemKey.From(decision);
+            key.ToString().Should().Contain(expectedScoreField,
                 "the money key's score field carries the Jacoby token");
-            key.IsCubeDecision.Should().Be(decision.Decision.IsCube);
+            key.IsCubeDecision.Should().Be(decision.Kind == DecisionKind.Cube);
         }
     }
 
     /// <summary>
-    /// The match side is untouched by the amendment: match keys stay
-    /// byte-identical, carrying no Jacoby token at all.
+    /// Match keys carry no Jacoby token at all: their score field is the
+    /// away-scores pair.
     /// </summary>
     [Fact]
-    public void MatchRecord_StillDerivesAProblemKey_WithNoJacobyToken()
+    public void MatchRecord_KeysWithNoJacobyToken()
     {
         foreach (var decision in ReadBothKinds(MatchFixture))
         {
-            ProblemKey.TryDerive(decision, out var key).Should().BeTrue(
-                "a match record derives as it always did ({0})", decision.Id);
-            key!.ToString().Should().NotContain("0a0",
-                "a match key's score field is the away-scores pair, never money");
-            key.ToString().Should().NotContain("nj");
+            var key = ProblemKey.From(decision).ToString();
+            key.Should().NotContain("0a0", "a match key's score field is the away-scores pair, never money");
+            key.Should().NotContain("nj");
         }
     }
 }

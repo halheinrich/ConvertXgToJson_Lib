@@ -542,7 +542,7 @@ public sealed class XgGameBuilder
 
     /// <summary>
     /// XG's PLAYERLEVEL code for an N-ply evaluation is <c>N − 1</c>
-    /// (0 = 1-ply … 6 = 7-ply); <c>XgDecisionIterator.LevelInfo</c> is the
+    /// (0 = 1-ply … 6 = 7-ply); <see cref="XgDepthFacts.OfLevel"/> is the
     /// decode direction.
     /// </summary>
     private static short ToLevelCode(int ply) => (short)(ply - 1);
@@ -569,12 +569,10 @@ public sealed class XgGameBuilder
         if (play.Count > MoveListSlots / 2)
             throw new ArgumentException($"A play holds at most {MoveListSlots / 2} moves.", paramName);
 
-        int[] moverPov = new int[BoardSize];
-        for (int i = 0; i < BoardSize; i++)
-            moverPov[i] = _position[i];
-        if (moverSign < 0)
-            moverPov = BackgammonConstants.Flip(moverPov);
-        var board = BoardState.FromMop(moverPov);
+        // The tracked position is in the player-1 frame; the mover's view is
+        // BoardPosition's one flip of it for player 2.
+        var stored = new PositionEngine { Points = _position }.ToBoardPosition();
+        var board = new BoardState(moverSign < 0 ? stored.Flipped() : stored);
 
         var encoded = TerminatorFilled();
         for (int i = 0; i < play.Count; i++)
@@ -586,11 +584,17 @@ public sealed class XgGameBuilder
             encoded[2 * i + 1] = move.ToPt == 0 ? XgMoveEncoding.Terminator : (sbyte)(Math.Abs(move.ToPt) - 1);
         }
 
-        var after = new sbyte[BoardSize];
-        var afterMoverPov = moverSign < 0 ? BackgammonConstants.Flip(board.Points) : board.Points;
+        var reached = board.ToPosition();
+        return (PointsOf(moverSign < 0 ? reached.Flipped() : reached), encoded);
+    }
+
+    /// <summary>A position as XG's signed-byte array, in whatever frame it is stated.</summary>
+    internal static sbyte[] PointsOf(BoardPosition position)
+    {
+        var points = new sbyte[BoardSize];
         for (int i = 0; i < BoardSize; i++)
-            after[i] = (sbyte)afterMoverPov[i];
-        return (after, encoded);
+            points[i] = (sbyte)position[i];
+        return points;
     }
 
     private static void ValidateMove(BoardState board, Move move, string paramName)

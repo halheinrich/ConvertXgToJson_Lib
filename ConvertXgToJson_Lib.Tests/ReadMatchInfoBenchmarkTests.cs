@@ -1,4 +1,4 @@
-﻿// ReadMatchInfoBenchmarkTests.cs
+// ReadMatchInfoBenchmarkTests.cs
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
 using System.Diagnostics;
@@ -90,8 +90,8 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
                 $"Player1 mismatch in {Path.GetFileName(path)}");
             fast!.Player2.Should().Be(full!.Player2,
                 $"Player2 mismatch in {Path.GetFileName(path)}");
-            fast!.MatchLength.Should().Be(full!.MatchLength,
-                $"MatchLength mismatch in {Path.GetFileName(path)}");
+            fast!.Terms.Should().Be(full!.Terms,
+                $"terms mismatch in {Path.GetFileName(path)}");
         }
     }
     /// <summary>
@@ -195,12 +195,8 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
 
             for (int i = 0; i < fastInfos.Count; i++)
             {
-                fastInfos[i].Away1.Should().Be(fullInfos[i].Away1,
-                    $"Away1 mismatch game {i + 1} in {Path.GetFileName(path)}");
-                fastInfos[i].Away2.Should().Be(fullInfos[i].Away2,
-                    $"Away2 mismatch game {i + 1} in {Path.GetFileName(path)}");
-                fastInfos[i].IsCrawfordGame.Should().Be(fullInfos[i].IsCrawfordGame,
-                    $"IsCrawfordGame mismatch game {i + 1} in {Path.GetFileName(path)}");
+                fastInfos[i].Standing.Should().Be(fullInfos[i].Standing,
+                    $"standing mismatch game {i + 1} in {Path.GetFileName(path)}");
                 fastInfos[i].IsStandardStart.Should().Be(fullInfos[i].IsStandardStart,
                     $"IsStandardStart mismatch game {i + 1} in {Path.GetFileName(path)}");
             }

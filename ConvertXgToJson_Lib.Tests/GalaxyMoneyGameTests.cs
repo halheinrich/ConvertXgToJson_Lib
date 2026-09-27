@@ -1,3 +1,4 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
@@ -128,7 +129,7 @@ public class GalaxyMoneyGameTests
         header.IsMoneyMatch.Should().BeTrue(
             "a detected Galaxy money game forces IsMoneyMatch true");
 
-        XgFileReader.ReadMatchInfo(path)!.MatchLength.Should().Be(0,
-            "the ReadMatchInfo fast path normalizes the 99999 sentinel to 0");
+        XgFileReader.ReadMatchInfo(path)!.Terms.Should().BeOfType<MoneyTerms>(
+            "the ReadMatchInfo fast path reads the 99999 sentinel as money terms");
     }
 }

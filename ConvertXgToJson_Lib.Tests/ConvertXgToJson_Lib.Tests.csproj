@@ -21,6 +21,10 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib\BgDataTypes_Lib.csproj" />
+    <!-- The producer's record builders (TestRecords): the one way a test
+         builds a record, so no test here restates the records' construction
+         (BgDataTypes_Lib INSTRUCTIONS.md, "The test-support project"). -->
+    <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib.TestSupport\BgDataTypes_Lib.TestSupport.csproj" />
     <ProjectReference Include="..\ConvertXgToJson_Lib\ConvertXgToJson_Lib.csproj" />
   </ItemGroup>
   <ItemGroup>
