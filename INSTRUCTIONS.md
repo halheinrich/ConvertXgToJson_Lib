@@ -22,8 +22,16 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 
 ## Depends on
 
-* **BgDataTypes_Lib** — record types produced by this library: `DecisionRow`, `BgDecisionData`, `PositionData`, `DecisionData`, `DescriptiveData`, `PlayCandidate`, `CubeOwner`. The `Move` / `Play` value types also live here, so non-move-gen consumers can use them without dragging in the generator.
-* **BgMoveGen** — `MoveNotationFormatter` for rendering candidate plays as standard backgammon notation. `XgMoveTranslator` is the producer-side bridge between XG's raw `sbyte[]` move encoding and the shared `Play` primitive.
+* **BgDataTypes_Lib** — the records this library produces and everything
+  they derive: the two decision kinds (`CheckerPlayDecision`,
+  `CubeDecision`) and their categories, the session kinds built through
+  `Session.Create` from the header types' `SessionTerms` and
+  `GameStanding`, `DecisionRow` (a record's projection for a
+  `PlayRanking`), `BoardPosition` / `BoardState` (the one "same position",
+  the one flip, the one play rule) and `Move` / `Play`, spelt by
+  `Play.ToNotation()`. The test project also references
+  `BgDataTypes_Lib.TestSupport`, whose `TestRecords` builds the records a
+  test needs by hand.
 
 ## Layout
 
@@ -40,8 +48,8 @@ and `Directory.Packages.props` (Central Package Management — no inline
   record alignment), `RichGameHeaderParser`, `SaveRecordParser` (the six
   record variants, and `UnknownRecord` for a code it does not know),
   `RolloutContextParser`, `CommentParser`, `XgMoveEncoding` (the
-  candidate-move byte encoding and its non-play sentinels),
-  `AfterBoardBuilder` (resulting positions), and `OpeningBookParser`.
+  candidate-move byte encoding and its non-play sentinels), and
+  `OpeningBookParser`.
 - **The record model** — `Models/Models.cs`: `SaveRecord` and its
   variants, `RolloutContext`, `RichGameHeader`, the analysis and eval
   carriers and their enums, all internal (see "Record model is internal");
@@ -61,15 +69,17 @@ and `Directory.Packages.props` (Central Package Management — no inline
   share; and the intent-level value types they take, `XgPlayer`,
   `XgCubeEquities`, `XgPlayCandidate`.
 - **Decision iteration** — `XgDecisionIterator`: the two surfaces
-  (`DecisionRow` rows and `BgDecisionData` records) over one walk, the
-  depth taxonomy, the emission rules. With it `DepthAbbreviationFormat`
-  (the one spelling of the trial-bearing depth abbreviations),
-  `MatchContext` (score, cube and Crawford state as the walk advances, and
-  the one comment-conversion site), `RtfPlainText` (the one reduction of
-  XG's RTF comment to the text a reader sees), `XgIteratorState` /
-  `XgIteratorCallbacks` / `XgIteratorOptions`, the public metadata DTOs
-  `XgMatchInfo` / `XgGameInfo`, `XgMoveTranslator` (XG move bytes to the
-  shared `Play`), `XgidEncoder`, and `BackgammonConstants`.
+  (`BgDecisionData` records, and `DecisionRow` rows built from them for a
+  ranking) over one walk, and the emission rules. With it `XgDepthFacts`
+  (XG's level codes, rollout contexts and book stamps decoded into the
+  typed depth facts a record stores), `MatchContext` (the header metadata,
+  the cube and the counters as the walk advances; a decision's session,
+  names and comment), `RtfPlainText` (the one reduction of XG's RTF
+  comment to the text a reader sees), `XgIteratorState` /
+  `XgIteratorCallbacks` / `XgIteratorOptions`, the public header types
+  `XgMatchInfo` / `XgGameInfo` (the terms and the standing, read at the
+  parse boundary), and `XgMoveTranslator` (XG move bytes to the shared
+  `Play`).
 - **Opening book** — `OpeningBook` (load, keyed lookup, the selection
   policy), `OpeningBookEntry`, `OpeningBookKey`.
 - **JSON** — `Json/`: `XgJsonOptions` (the shipped options and the two
@@ -82,9 +92,11 @@ behaviour area (parsers, writers, builders, the iterator's facets, the
 opening book, JSON). `Golden/` holds the embedded pre-change `ToJson`
 captures that `JsonContractTests` pins as the document's byte contract;
 `Helpers/` the shared builders and mirrors (`BinaryBuilder`, the
-`ResolverPaths` options trio, `EmissionMirror`). Gating tests synthesize
-their files through the builders; corpus and fixture tests read the
-umbrella's `TestData/` through `TestPaths` — see "TestData" below.
+`ResolverPaths` options trio, `EmissionMirror`, `CapturingLogger`). Gating
+tests synthesize their files through the builders; corpus and fixture tests
+read the umbrella's `TestData/` through `TestPaths` — see "TestData" below.
+`XgCorpusAgreementTests` measures the converter against XG's own numbers
+over the local corpus (see "Measured against XG" under XgDecisionIterator).
 
 ## Architecture
 
@@ -142,7 +154,9 @@ Entry points:
   the `MatchHeaderRecord`. Used when a caller only needs match metadata.
 * `ReadGameHeaders` — fast path. Reads the first zlib stream and yields
   `XgGameInfo` entries; populates `XgIteratorState.MatchInfo` before the
-  first yield. To stop early, the consumer breaks out of the foreach;
+  first yield. A stream whose first record is not the match header is
+  refused as `InvalidDataException`: a game's standing is read under the
+  match's terms, so there is no game header to yield without one. To stop early, the consumer breaks out of the foreach;
   disposing the enumerator stops further yields. There is no imperative
   skip flag.
 * `ToJson` / `WriteJsonAsync` / `ReadJson` — the JSON document, through
@@ -160,6 +174,50 @@ Entry points:
   as `JsonException`. The converter claims the abstract `SaveRecord` alone,
   so the concrete record inside it resolves to the same options' object
   contract — no derived options object exists (halheinrich/backgammon#178).
+
+### The header types (XgMatchInfo / XgGameInfo)
+
+The public metadata a match header and a game header state, projected at
+the parse boundary (`XgMatchInfo.From`, `XgGameInfo.From`, the one
+projection each) and handed to the state, the callbacks and the fast
+paths:
+
+* `XgMatchInfo` — `Player1` and `Player2` as XG stores them, and `Terms`,
+  a `SessionTerms`: `MoneyTerms` (the Jacoby and beaver rules and the cube
+  limit) when the header's length is XG's money sentinel 99999 — Galaxy's
+  money games included, see Pitfalls — else `MatchTerms` (the length). The
+  sentinel is never surfaced as a length.
+* `XgGameInfo` — `IsStandardStart` (the game's initial position is
+  `BoardPosition.Standard`) and `Standing`, a `GameStanding`:
+  `MoneyStanding` (the scores) under money terms, `MatchStanding` (each
+  player's away score, and whether the game is the Crawford game) under
+  match terms.
+
+A decision's `Session` is the two turned to the player on roll, through
+`Session.Create(terms, standing, onRoll)` — `MatchContext.SessionFor`, the
+one construction. Both types are serialized through this library's JSON
+options, under BgDataTypes_Lib's absence rule: every member is required on
+the wire, a document missing one or stating null for one is a
+`JsonException`, and each kinded member is read through BgDataTypes_Lib's
+one dispatch (its `"Kind"`, under the options' naming policy). The members
+have internal setters, so code outside this library never assembles one.
+
+**The Max Cube field.** XG's match header states a maximum cube value as
+an exponent (`MatchHeaderRecord.CubeLimit`). It is read with the header
+and stays on the parsed record, which the writers copy through, so a round
+trip and a slice reproduce it. For money terms it is the limit:
+`MoneyTerms.CubeLimit` is the power of two the exponent spells, and an
+exponent that spells none (outside 0–30) is refused as
+`InvalidDataException`. For a match it is read and states nothing on the
+terms: `MatchTerms` carries no cube limit, no match is refused for its
+value, and the value is neither derived from nor checked against the
+match's length (Hal's ruling on halheinrich/backgammon#273, 2026-09-27).
+Whether a match's Max Cube is a rule of its own is open
+(halheinrich/backgammon#289). XG typically writes 10 (a limit of 1024),
+but its files hold other values too: every match header of the 2026-09-27
+`xg`/`xgp` corpus states 10, and the fixture files hold matches stating 3
+and 4. `MetadataContractTests` pins that a match header reads whatever its
+Max Cube, with no limit on its terms.
 
 ### Writing (XgFileWriter / XgpExporter)
 
@@ -222,10 +280,17 @@ hold only the consumer-level decision record (JSON-sourced). Emits a
 at the saved position, XG's position-editor pattern) + cube record, plus a
 move record carrying the dice when the decision is a play. Analysis blocks
 hold XG's own never-analysed sentinels (`Level = -100`, errors `-1000`).
-XG re-analyzes on import. Money games recover Jacoby/Beaver from XGID
-field 8 when the decision carries an XGID, else default to XG's money
-defaults (Jacoby on, Beaver off). On-roll player is normalized to
-player 1. Output is byte-deterministic — no timestamps or random ids.
+XG re-analyzes on import. The on-roll player is normalized to player 1,
+so the record's session maps onto the header verbatim: its terms are
+written by `XgRecordFactory.MatchHeader` — money terms as XG's
+money-sentinel length with their Jacoby and beaver rules and their cube
+limit as the Max Cube exponent, a match's as its length with XG's default
+exponent (the terms state no limit to write) — and its standing as the game
+header's scores, a money session's scores included (the clean path once
+parsed the rules back out of the stored XGID and wrote a money session's
+scores as 0). A record is well-formed by construction, so the one check
+left is the encoding's own: a centred cube above 1 is refused (see
+Pitfalls). Output is byte-deterministic — no timestamps or random ids.
 Clean exports **self-identify** via the match header's Location fields
 (`"ConvertXgToJson_Lib"`) — Location is the ecosystem's producer
 fingerprint (Galaxy writes `"BackgammonGalaxy"` there and
@@ -263,7 +328,7 @@ error, and the Xgp-vs-Xg routing stays with the caller). An optional
 slot-based pair (`Player1Name`/`Player2Name`) renames by header slot;
 the role-based pair (`OnRollName`/`OpponentName`) renames by decision
 role, resolved by the exporter from the exported records' `ActivePlayer`
-sign (`>= 0` is player 1 — the `MatchContext.PlayerName` convention; a
+sign (`>= 0` is player 1 — the `MatchContext.SeatOf` convention; a
 cube record's `ActivePlayer` is the doubler, so a take decision anchors
 to the doubler with no special-casing). Roles are determinable iff the
 exported records hold at least one move/cube record and all share one
@@ -333,7 +398,7 @@ the returned `XgGameBuilder` records decisions in play order:
   equities and the played actions, and the played actions map onto the
   `Doubled`/`Taken` pane state (the inverse of the iterator's
   UserDoublerAction mapping). `ply` is what *ran* (the provenance of the
-  equities and the emitted depth label); the optional `requestedPly`
+  equities and the depth facts the record states); the optional `requestedPly`
   synthesizes XG's ordinary requested ≠ ran governor shape (see "Level
   semantics" above), stamped on the pane pair and the record-level
   play-time stamp alike; null means the request matches `ply`.
@@ -369,66 +434,129 @@ cube pane, the signed-log2 cube encoding, the producer fingerprint.
 `XgpExporter`'s clean-position path and the builder must keep sharing it.
 
 Two level-code facts live here: XG's PLAYERLEVEL code for an N-ply
-evaluation is **N − 1** (`ToLevelCode`; `LevelInfo` is the decode
-direction), and because the iterator gates analysed cubes on `Level > 0`, a
+evaluation is **N − 1** (`ToLevelCode`; `XgDepthFacts.OfLevel` is the
+decode direction), and because the iterator gates analysed cubes on `Level > 0`, a
 1-ply cube pane (level 0) is downstream-indistinguishable from an
 unanalysed one — `CubeDecision` therefore refuses `ply: 1` (min 2) rather
 than synthesize a decision that silently never emits.
 
 ### XgDecisionIterator
 
-Two iteration surfaces over the same underlying record stream:
+Two iteration surfaces over one walk of the record stream:
 
-* `Iterate` yields flat `DecisionRow` records (one per play or cube decision,
-  CSV-shaped).
-* `IterateDiagramRequests` yields `BgDecisionData` records. Cube decisions
-  yield exactly **one** `BgDecisionData` per decision (see "Cube decisions"
-  below for the producer-perspective contract).
+* `IterateDiagramRequests` yields the `BgDecisionData` records — one
+  `CheckerPlayDecision` or `CubeDecision` per analysed decision. A cube
+  decision is one record, from the doubler's side (see "Cube decisions"
+  below).
+* `Iterate` yields each as a flat `DecisionRow`, built from its record by
+  `DecisionRow.From(record, ranking)` for the options' ranking (see "The
+  ranking" below). A row and its record therefore cannot disagree: the row
+  and record constructions this iterator once kept side by side, and the
+  agreement pin that held them together, are gone.
 
-**A Crawford game's cube pane is not a decision and is not emitted**
-(halheinrich/backgammon#201). Doubling is prohibited in the Crawford game,
-so the cube pane XG writes there — and does analyse; the corpus carries
-such panes, so this is a format fact the converter drops, not an anomaly,
-and no log line marks it — describes no decision. The rule is stated once,
-at the one dispatch site both surfaces share: `AdmitsCubeDecision(ctx)`
-sits beside `IsAnalysed(cube)` in `IterateAnalysedDecisions`, and a cube
-record reaches `BuildCubeRows` / `BuildCubeDiagramRequests` only when both
-hold. The rule's owner is the wire type — `DecisionRow` and
-`BgDecisionData` both refuse to construct a Crawford cube (BgDataTypes_Lib's
-`CrawfordRule`) — and the predicate is what keeps the walk from reaching
-that guard; the builders' `IsCrawford = ctx.IsCrawford` stamps stay and are
-now always false on a built cube. Nothing else moves: a cube's id and
-`MoveNumber` read `ctx.MoveNumber + 1` without incrementing the counter, so
-the plays after a dropped pane number as before, and the stop callbacks see
-only emitted rows.
+**A record states what XG stores** (halheinrich/backgammon#273: no stored
+copy of a derivable value; the boundary is BgDataTypes_Lib's "Stored or
+derived" table). It states the board (on-roll frame), the cube and its
+owner, the session (the match header's terms and the game's standing,
+turned to the player on roll by `Session.Create`), the roll as rolled, the
+candidates in XG's order — each its play, its typed depth facts, its
+equity and probabilities — the played candidate, the played cube actions,
+and XG's error only where the record states no move to derive it from
+(`UnlistedPlayError` for a play XG did not list, the `Unstated*ActionError`
+of a cube half whose action is not recorded), with the names, comment,
+flag and standard start. Everything those determine BgDataTypes_Lib
+derives, so nothing here produces it: the XGID, the pip counts, the
+after-boards, the notation, the depth label, abbreviation and rank, the
+best play and each play's error under a ranking, the loss probabilities,
+the error of a stated cube action. The copies this library kept of those
+are retired — the second copy of the play rule (`AfterBoardBuilder`), the
+XGID encoder, the label/abbreviation/rank projection (`LevelInfo`'s text
+and ranks, `InnerLevelToken`, `DepthAbbreviationFormat`),
+`BackgammonConstants` (the standard layout and the flip, which
+`BoardPosition` owns, and the money stand-in's away-score rule), and the
+BgMoveGen reference behind the old notation formatter.
 
-**Rows and records are parallel enumerations of the same facts, kept
-agreeing by a pin.** The two surfaces share one walk (`IterateCore` →
-`IterateAnalysedDecisions`) but assemble their output at four separate
-sites — `BuildMoveRow` / `BuildCubeRows` for the row, `BuildMoveDiagramRequest`
-/ `BuildCubeDiagramRequests` for the record — each spelling out the same
-`MatchContext` facts field by field. That is a second enumeration nothing
-checks, and it goes stale silently: a fact stamped on one construction and not
-the other is invisible until a consumer notices the hole. It happened — the
-row sites never stamped `IsJacoby` after the row gained the member
-(`halheinrich/backgammon#121`), while the record sites had carried it since
-`halheinrich/backgammon#120`; every row from a real money file rendered the
-honest-unknown bare `money` (`halheinrich/backgammon#144`). Pinned by
-`XgDecisionIteratorRowRecordAgreementTests`: `IDecisionFilterData` — the
-interface both types implement — enumerates the shared facts, so the compiler
-keeps that list current, and the pin requires the row and record built from
-one iteration of one fixture to agree on every one of them. A completeness
-check intersects the two types' member names and fails on any shared name not
-pinned, so a fact added to both types must join the agreement before it can
-drift. **When adding a fact to one construction, add it to its sibling in the
-same change.**
+**Candidates keep XG's order.** `CheckerPlayDecisionData.Plays[0]` is XG's
+own rank 0; the equity sort `3f1920d` introduced is gone. Which play is
+best, the order a consumer shows, each play's error and whether it is
+scored are a ranking's (SPEC-scoring §2a: "Where both keys are equal, the
+analyser's order stands"), derived by `RankedBy(ranking)`. The played
+candidate is found by resulting position: the candidate whose
+`PositionsPlayed` XG stores equal to its `FinalPosition`, compared as
+`BoardPosition`s; none matches when the move was unlisted or not made.
 
-Every emitted `DecisionRow` / `BgDecisionData` is stamped with a
-`BgDataTypes_Lib.DecisionId` in its `Id` field. The stamp is built by the
-internal `BuildDecisionId(sourceFile, game, moveNumber, isCube)` helper
-called from each of the four `Build*` sites (`BuildMoveRow`,
-`BuildMoveDiagramRequest`, `BuildCubeRows`, `BuildCubeDiagramRequests`).
-Extension dispatch is case-insensitive invariant:
+**One known stand-in: `ProbOfOpponentErrorJustifyingDouble = 0`.** XG
+stores no such value, so the record's claim that it is stored is a
+producer-model gap (Hal's ruling on halheinrich/backgammon#273,
+2026-09-27). The 0 every converted record has carried stays at its one
+site as temporary arc debt, until BgDataTypes_Lib's next leg removes the
+field; it is not derived here (the figure is booked as
+halheinrich/backgammon#288).
+
+**What is not a record.** The emission rules sit at the one dispatch both
+surfaces share (`IterateAnalysedDecisions`), so the two can never disagree
+about which source decisions become records:
+
+* **Unanalysed panes** — a move record without a move count and an
+  evaluation (`IsAnalysed(MoveRecord)`), a cube pane whose `Level` is not
+  above 0 (`IsAnalysed(CubeRecord)`; see "Level semantics").
+* **A Crawford game's cube pane** (halheinrich/backgammon#201). Doubling is
+  prohibited in the Crawford game, so the cube pane XG writes there — and
+  does analyse; the corpus carries such panes, so this is a format fact the
+  converter drops, not an anomaly, and no log line marks it — describes no
+  decision (`AdmitsCubeDecision(ctx)`). The rule's owner is the record type
+  (a `CubeDecision` refuses a Crawford position); the predicate keeps the
+  walk from reaching that guard. A cube's id reads `ctx.MoveNumber + 1`
+  without incrementing the counter, so the plays after a dropped pane
+  number as before, and the stop callbacks see only emitted decisions.
+* **A position that is not a decision** — a side has borne off all its
+  checkers (Hal's ruling of 2026-09-27, halheinrich/backgammon#273).
+  Legitimate XG/XGP data, simply not a decision in the record model:
+  passed by silently, as ordinary filtering — no warning, no log line —
+  for both kinds. The rule is `PositionData.IsDecisionPosition`'s, asked,
+  never restated: for a cube as the last clause of the cube emission gate
+  (`IsCubeDecision`, of the stored position, since the answer does not
+  depend on the frame), for a play first in `ReadCheckerPlay`.
+* **XG's two non-play sentinels** — the illegal-play marker, skipped with
+  a warning naming the file, game, move and roll, and the dance, skipped
+  silently (see Pitfalls).
+* **A move record that states no roll** (`StatesRoll`).
+* **A corrupt candidate** — a candidate invalid from its own position,
+  which the record would refuse (Hal's ruling of 2026-09-25 on invalid
+  plays, applied to stored candidates). `ReadCheckerPlay` tests every
+  candidate with `BoardState.TryApplyPlay` — the non-throwing door to the
+  same play rule the record's own check runs — on a **fresh board per
+  candidate**, since the method applies a valid play and turns the board,
+  so a shared one would test later candidates from the wrong position. The
+  decision is skipped the way the illegal-play marker is, with a warning:
+  `Corrupt candidate in {SourceFile}, game {Game}, move {MoveNumber},
+  roll {Roll}: invalid from the decision's position: {InvalidCandidates}`,
+  the last listing each invalid candidate by its 1-based number and its
+  notation (`candidate 2 (13/12)`). The rest of the file still emits.
+
+Nothing is caught to find any of these, and nothing else is caught or
+skipped: any other refusal from BgDataTypes_Lib fails loud. For an `.xgp`
+every rule acts upstream of the single-decision policy, so a play skipped
+for any reason never suppresses the file's analysed cube.
+
+**The ranking.** `XgIteratorOptions.Ranking` (a `PlayRanking`,
+`PlayRanking.Equity` by default — SPEC-scoring §2a: "Apps without the
+setting use the default") is the ranking the walk judges decisions under.
+`Iterate` builds every row for it, and the post-yield callbacks of both
+surfaces see each decision through a view built for it — the row itself on
+the row surface, `record.ViewFor(ranking)` on the record surface, where the
+record itself does not depend on the ranking. It sits on the options
+because the options are the iterator's configuration of how rows are
+built; an undefined value is refused when the options are made, by
+construction and by `with` alike. `XgDecisionIteratorRankingTests` pins
+each half.
+
+Every record — and so every row — is stamped with a
+`BgDataTypes_Lib.DecisionId` in its `Id` field, built by the internal
+`BuildDecisionId(sourceFile, game, moveNumber, isCube)` helper the two
+record builders call. A record's and a row's game and move number are
+derived from it (halheinrich/backgammon#124). Extension dispatch is
+case-insensitive invariant:
 
 * `.xg` and `.json` → `XgDecisionId(Filename, Game, MoveNumber, IsCube)`
   — the multi-decision tuple shape. `.json` is treated as an
@@ -445,18 +573,22 @@ Extension dispatch is case-insensitive invariant:
   decision per `.xgp`: it always writes a cube pane alongside the move
   pane, and a position saved after the dice were rolled can carry analysis
   in both. What makes the bare filename a valid key is the iterator's
-  emission policy — an `.xgp` yields **at most one** decision: the analysed
-  checker-play if there is one, else the analysed cube. The move pane exists
-  only because dice were rolled, so dice in the file mean the saved decision
-  is the play; the cube pane is XG's incidental. Depth is not compared. A
-  curated cube problem is a pre-roll position and carries no move pane at
-  all.
+  emission policy — an `.xgp` yields **at most one** decision: the
+  checker play if the walk built one, else the analysed cube. The move pane
+  exists only because dice were rolled, so dice in the file mean the saved
+  decision is the play; the cube pane is XG's incidental. Depth is not
+  compared. A curated cube problem is a pre-roll position and carries no
+  move pane at all.
 
-Cube emissions stamp with `ctx.MoveNumber + 1` so the Id's `MoveNumber`
-agrees with the emitted `DecisionRow.MoveNumber` /
-`DescriptiveData.MoveNumber`, not the raw underlying counter. The
-contract is that the Id's coordinate tuple matches the emitted row's
-published fields, record-for-record.
+**A standalone position states no game, move or standard start**
+(halheinrich/backgammon#124): a decision with an `XgpDecisionId` has no
+game or move number, and its `DescriptiveData.IsStandardStart` is `null` —
+read off the id at the one site both kinds share, so the record, which
+holds the two to agreement, never sees them differ.
+
+Cube decisions stamp `ctx.MoveNumber + 1`, so a cube decision numbers as
+the move its turn goes on to play: the cube and the play that follows
+share a move number, told apart by their kind.
 
 `IterateXgDirectory` (internal) is the directory-level walk: it
 enumerates both `*.xg` (match files) and `*.xgp` (position files) —
@@ -473,176 +605,110 @@ the public `EnumerateXgFormatFiles` + `Iterate` /
 skip-and-log error handling and filter callbacks this producer
 deliberately doesn't own).
 
-Both surfaces report the "best play" as the **highest-equity** candidate in
-`analysis.Evals[]`, not XG-native rank 0. `BgDecisionData.Plays[0]`,
-`DecisionRow.Equity`, and `PlayOutcomeData.AfterBestBoard` all key off this
-convention. XG's stored ranking is not always strict equity-descending, so
-rank 0 and best-by-equity disagree on a subset of decisions. Use
-`FindBestByEquityIndex(analysis)` to locate the best candidate when adding
-code that reads from `analysis.Evals`, `analysis.Moves`,
-`analysis.PositionsPlayed`, or `analysis.EvalLevels`. All four arrays
-are rank-coupled with the same index.
+**Depth: the typed facts.** A candidate's and a cube analysis's depth is
+stored as typed facts — the `AnalysisMode` × `AnalysisLevel` pair, the
+rollout trial count, the book edition, an unrecognized level's raw code —
+and BgDataTypes_Lib derives the label, abbreviation and rank from them (its
+internal `DepthTaxonomy`, to which the rank grid and the text grammar moved
+unchanged). `XgDepthFacts` is what stays here: the one decoding of XG's
+PLAYERLEVEL codes, rollout contexts and book stamps into the facts. Its
+class doc is the statement of the table; in short:
 
-**Depth resolution.** `ResolveDepthInfo` is the single source of a
-candidate's analysis depth, projecting one XG level (plus optional rollout
-context, plus an optional resolved `OpeningBookEntry`) into five parallel
-forms: the human `Label`, a compact `Abbreviation`, an ordinal `Rank`
-(higher = deeper), and the `AnalysisMode` × `AnalysisLevel` pair — the
-machine-usable two-axis taxonomy behind depth filtering (BgDataTypes_Lib
-owns the enums; this producer stamps them). The `LevelInfo` switch is the
-taxonomy — one table, read by the checker side and the cube side alike, so
-everything below governs cube depth ordering identically:
+| XG code | Facts |
+|---|---|
+| `0` | Evaluation, `Ply1` |
+| `1`, `11` | Evaluation, `Ply2` |
+| `12` | Evaluation, `Ply3Red` |
+| `2` | Evaluation, `Ply3` |
+| `1000` | Evaluation, `XgRoller` |
+| `3` | Evaluation, `Ply4` |
+| `1001` | Evaluation, `XgRollerPlus` |
+| `4`, `5`, `6` | Evaluation, `Ply5`, `Ply6`, `Ply7` |
+| `1002` | Evaluation, `XgRollerPlusPlus` |
+| `998` / `999` | BookRollout, level `Unknown`, edition `V2` / `V1` |
+| `100` | Rollout, level `Unknown` (no context) |
+| *anything else* | mode and level `Unknown`, the raw code |
 
-| XG code | Label | Level | Rank |
-|---|---|---|---|
-| `0` | 1-ply | `Ply1` | 10 |
-| `1`, `11` | 2-ply | `Ply2` | 20 |
-| `12` | 3-ply Red | `Ply3Red` | 25 |
-| `2` | 3-ply | `Ply3` | 30 |
-| `1000` | XG Roller | `XgRoller` | 35 |
-| `3` | 4-ply | `Ply4` | 40 |
-| `1001` | XG Roller+ | `XgRollerPlus` | 45 |
-| `4` | 5-ply | `Ply5` | 50 |
-| `5` | 6-ply | `Ply6` | 60 |
-| `6` | 7-ply | `Ply7` | 70 |
-| `1002` | XG Roller++ | `XgRollerPlusPlus` | 75 |
-| `999`/`998` | Book V1/V2 | `Unknown` | 99 |
-| `100` | Rollout (no context) | `Unknown` | 100 |
-| *anything else* | `level-{N}` | `Unknown` | 0 |
+Codes `1` and `11` share one arm: code 11 was identified as plain 2-ply by
+XG's own display (user-ruled 2026-08-28, halheinrich/backgammon#160). XG
+level `12` is its own `Ply3Red`, and the evaluation order — XG's menu
+order, the ply and XG Roller families interleaved — is `AnalysisLevel`'s
+contractual declaration order (ruled 2026-08-28). Note the book order: 999
+is the *older* V1 book, 998 the V2 one.
 
-Every row above `999/998` is `Evaluation`; the book codes are
-`BookRollout`, the `100` sentinel `Rollout`, the fallback `Unknown`. Note
-the book order: 999 is the *older* V1 book, 998 the V2 one. Codes `1` and
-`11` share one switch arm — code 11 was identified as plain 2-ply by XG's
-own display over the three code-11 rows of the `3-ply Red` fixture
-(user-ruled 2026-08-28, halheinrich/backgammon#160; an earlier conditional
-3-ply-Red identification, inferred only from 11 sitting next to 12 in the
-code space, was superseded by that observation the same day). XG's display
-draws no distinction from plain 2-ply, so 11 takes code 1's exact tuple
-rather than an `AnalysisLevel` member of its own.
+A **rollout** (a valid `rolloutIndex`) states `Rollout`, its inner
+evaluation level and its trial count (`GamesRolled`; a count of 0 is none
+recorded). The inner level is the **first** phase's (`Level1`) when a first
+phase exists, otherwise the second phase's (`Level2`), which then plays
+throughout — the user's ruling on halheinrich/backgammon#251: the first
+phase is the strength the user set, a later cheaper phase is an economy, so
+XG's "First 2 moves: 4-ply … Remaining moves: XG Roller" is a 4-ply
+rollout. Whether a first phase exists is `LevelCut > 0` (the number of
+moves it covers); no branch tests a *level* for "set" — level 0 is 1-ply —
+and `LevelTrunc` (truncation) is not a depth input. An inner code that is
+not an evaluation level states its raw code with the level `Unknown`.
+Trial counts are a fact, never part of the pair.
 
-**The evaluation order is XG's own menu order, and the two families
-interleave** — 3-ply Red below 3-ply, XG Roller between 3-ply and 4-ply,
-XG Roller+ between 4-ply and 5-ply, XG Roller++ above 7-ply. They are not
-two blocks. That is the user's ruling of 2026-08-28 on the authority of
-XG's menu, the same order `AnalysisLevel` declares contractually
-(BgDataTypes_Lib), amended the same day to give `Ply3Red` its own member
-rather than collapsing XG level `12` onto `Ply3`. The rank values are a
-decade grid — a full N-ply ranks 10×N, an interleaved level takes the
-midpoint — which restates the old flat scale's "leave room for future
-depths" intent now that a contiguous ply block is impossible. **Only the
-ordering is meaningful**: downstream consumers compare ranks with each
-other, never against a constant, and none may start. (The producer's own
-corpus invariant does map absolute ranks to tiers — it pins this table
-against itself rather than consuming a record.) `DepthResolutionTests.ResolveDepthInfo_Rank_StrictlyIncreasesAlongRuledRigorOrder`
-pins the whole sequence, and its sibling pins that every ranked
-`AnalysisLevel` member holds a position in it — a new enum member fails
-there rather than slipping in unranked. The mode distinguishes a book hit
-from an unrecognised level where rank 0 could not — that separation is
-deliberate. The rollout
-branch (valid `rolloutIndex`) names the rollout by its inner evaluation
-level — the **first** leg phase's (`Level1`) when a first phase exists,
-otherwise the second phase's (`Level2`), which then plays throughout. The
-user's ruling on halheinrich/backgammon#251: the first phase is the
-strength the user set, a later cheaper phase is an economy, so XG's
-"First 2 moves: 4-ply … Remaining moves: XG Roller" is a 4-ply rollout (it
-once read `1001p1296` — the second phase, spelt by ply arithmetic over a
-Roller code). Whether a first phase exists is `LevelCut > 0`: `LevelCut`
-is the number of moves the first phase covers — measured, that rollout
-stores 2, and the eleven fixture rollouts storing `Level1 = 0` beside a
-3-ply `Level2` store 0 and are 3-ply rollouts. No branch tests a *level*
-for `> 0` — level 0 is 1-ply, not "unset" — and `LevelTrunc` (truncation,
-not a phase) is not a depth input. The inner level is decoded once through
-`LevelInfo`, and label, abbreviation token, rank and level all come from
-that one projection: `Rollout` + the inner level's `AnalysisLevel` (a ply
-member or a Roller member), rank **100 + the inner level's rank** on the
-same interleaved grid (3-ply rollout 130, XG Roller rollout 135, 4-ply
-140 …, every rollout above Book's 99). An unrecognised inner code degrades
-as it does anywhere — level `Unknown`, rank 100, its raw `level-{code}`
-spelling (defensive — real rollouts always carry a recognised inner
-level). Trial count lives only in `Label`/`Abbreviation`, never the pair —
-it is not a taxonomy axis. The two trial-bearing abbreviations — this
-rollout form and the book form below — share one owner,
-`DepthAbbreviationFormat`, and a shape (level token, separator, trial
-count) whose token comes from one owner, `InnerLevelToken` (the ply digit,
-or the Roller abbreviation for a Roller-family level — `Rp1296`, never a
-number), but **not a separator**: the rollout form joins with `p`
-(`3p1296`), the book form with `_` behind its `B` prefix (`B4_12960`).
-They differ by the user's ruling of 2026-09-16 on the scope of
-halheinrich/backgammon#232 (halheinrich/backgammon#240) — the underscore
-was asked for on the *book* labels, and the rollout form keeps the
-ply-marked spelling it always had. Both separators and the prefix are
-spelled in the owner and nowhere else, and
-`DepthResolutionTests.DepthAbbreviationFormat_SpellsBothTrialBearingForms`
-is the one test that writes the forms out (every other abbreviation
-assertion composes through the owner). Rank and pair are projections of
-the *same* resolution; the corpus invariant
-`IterateDiagramRequests_DepthPairAndRank_AgreeTierWiseForEveryCandidate`
-pins that they never land in different tiers.
-
-The book branch (see "Book enrichment" below) fires when the caller
-resolved a V2-book-stamped candidate to a *rollout* entry: label
-`"Book V2: {trials} trials. {moves-level label}"`, abbreviation in the
-book form of the depth-abbreviation grammar over the moves-level token and
-the trial count (the token, from `InnerLevelToken` — the rollout form's
-token owner too — is the ply digit, or the Roller abbreviation for a
-Roller-family level), pair
-`BookRollout` + the entry's `RolloutMovesLevel` mapped through the same
-`LevelInfo` switch (the book's stored levels use the same PLAYERLEVEL code
-space — one decoding site). **Rank stays 99 under enrichment, ruled
-2026-08-28** — the producer holds `DepthRank` semantics stable whether or
-not the book database was available, so the rank answers "what does the
-file record?", not "what was ultimately computed?".
-
-That ruling *re-affirms* the earlier stance and retires the standing
-"revisit if the diagram layer sorts by depth" clause — its trigger has
-fired. BackgammonDiagram_Lib now does sort candidates by depth
-(`DiagramRenderer` orders by `DepthRank` descending), and the observed
-consequence is the intended one: **a book hit sorts below an explicit
-rollout (99 < 100+) and above every evaluation (99 > 75)**. That reads
-truthfully — a cached rollout whose parameters the file no longer carries
-is worth less than a rollout the file does carry, and more than any
-evaluation. Promoting enriched ranks to the recovered rollout's depth
-would make a book hit indistinguishable from the rollout it was cached
-from, losing the distinction for no gain. Closed, not deferred.
-
-The pair is stamped at all four emission sites from the same resolution
-that produces the label: `BuildMoveRow` → `DecisionRow.AnalysisMode` /
-`AnalysisLevel` (best-by-equity candidate), `BuildCubeRows` → the same
-row members (cube analysis), `BuildMoveDiagramRequest` → per-candidate
-`PlayCandidate.AnalysisMode`/`AnalysisLevel`, `BuildCubeDiagramRequests`
-→ `DecisionData.CubeAnalysisMode`/`CubeAnalysisLevel`.
-`BgDecisionData.AnalysisMode`/`AnalysisLevel` (the `IDecisionFilterData`
-members) derive via `BestPlayIndex`, which the sorted `Plays` list makes
-index 0 — the best-by-equity candidate, converging with the CSV surface's
-best-by-equity resolution. That convergence is pinned twice: within the
-diagram surface
-(`IterateDiagramRequests_InterfaceDepthPair_MatchesBestByEquityCandidate`)
-and across surfaces paired by `DecisionId`
-(`DepthPair_CsvAndDiagramSurfaces_AgreePairedById`).
+A cube analysis's depth resolves from `Level` — the level that produced
+its stored equities — never the `LevelRequest` setting
+(halheinrich/backgammon#161; see "Level semantics").
 
 **Book enrichment.** `Iterate` / `IterateDiagramRequests` accept an
 optional `XgIteratorOptions` whose `OpeningBook` member carries a loaded
 book database (locating the `.ob` on disk is app configuration — this lib
 takes the instance). For each V2-book-stamped (998) checker-play
 candidate, `LookupBookEntry` builds the session-1-proven key —
-`PositionsPlayed[i]` + decision context through the `OpeningBookKey`
-factories — and hands the selected entry to `ResolveDepthInfo`; every
+`PositionsPlayed[i]` + the decision's session through the `OpeningBookKey`
+factories; it misses for player-2 movers (see Pitfalls) — and hands the selected entry to `XgDepthFacts.Resolve`; every
 candidate resolves its own entry (a decision's candidates enrich to
-*different* rollouts). Enrichment is strictly additive: it changes labels
-and levels, never which decisions or candidates are emitted. Degradation
-to the bare `"Book V1"`/`"Book V2"` label with `BookRollout` + `Unknown`
-happens on: no book supplied, a V1 stamp (999 — the V2 database wasn't
-its source), a lookup miss, a context outside the proven keying (cube not
-centred at 1, away score < 1), a rollout-backed entry being absent — and
-notably on a **Roller++-evaluation-backed hit**: fixture (a) proves XG
-stamps 998 even when the book's best entry for that position is its
-Roller++ baseline (Level 1002, zero trials), so there is no cached
-rollout to recover and the fall-through is correct, not a bug. Cube rows
-never look up: no book-stamped cube decision exists anywhere in the
-fixture corpus (438 files / 23,736 cube records scanned — zero 998/999 in
-cube `Level` or `LevelRequest`), so the cube-row keying convention
-remains unproven and cube book stamps degrade by design.
+*different* rollouts). A rollout entry enriches the hit: it states the
+entry's rollout moves level and trial count beside its edition. The rank
+stays the book's whatever the enrichment (BgDataTypes_Lib's grid ranks
+every book hit 99, ruled 2026-08-28: the rank answers "what does the file
+record?"). Enrichment is strictly additive: it changes facts, never which
+decisions or candidates are emitted. The bare book facts
+(`BookRollout`, level `Unknown`, the edition) stand on: no book supplied,
+a V1 stamp (999 — the V2 database wasn't its source), a lookup miss, a
+context outside the proven keying (cube not centred at 1), a rollout-backed
+entry being absent — and notably on a **Roller++-evaluation-backed hit**:
+fixture (a) proves XG stamps 998 even when the book's best entry for that
+position is its Roller++ baseline (Level 1002, zero trials), so there is
+no cached rollout to recover and the fall-through is correct, not a bug.
+Cube decisions never look up: no book-stamped cube decision exists
+anywhere in the fixture corpus (438 files / 23,736 cube records scanned —
+zero 998/999 in cube `Level` or `LevelRequest`), so the cube keying
+convention remains unproven and cube book stamps state the bare facts by
+design.
+
+**Measured against XG.** `XgCorpusAgreementTests` walks the umbrella's
+local `TestData/xg/` and `TestData/xgp/` and holds the converter to XG's
+own numbers; the corpus is gitignored, so it gates nothing and passes
+vacuously on an empty corpus. It pins invariants, never a count:
+
+* every analysed decision builds a record, is passed by as not a decision,
+  or is skipped for a corrupt candidate, with the warning naming it —
+  nothing else fails;
+* each candidate's derived after-board is XG's stored resulting position
+  for it, and the player's is XG's position after the played move — XG
+  stores both in the mover's frame, so each is compared turned
+  (`BoardPosition.Flipped`), for either seat (see "Board format");
+* XG's recorded error for the player's move is the played candidate's
+  error under depth first, save where the depth-first best is an
+  opening-book candidate XG's recorded analysis evidently did not rank (the
+  umbrella's measurement on halheinrich/backgammon#282);
+* XG's cube errors are the scoring policy's errors of the stated actions,
+  within `1e-4` (a few of XG's are rounded to the fourth decimal);
+* read as the `.xgp` it is, a position file emits the play its walk built,
+  else its cube.
+
+Measured 2026-09-27 over the 571-file corpus of that day (378 `.xg`, 193
+`.xgp`): 54,991 analysed decisions, all built (37,269 plays, 17,722 cubes),
+none passed by, none skipped; candidate after-boards 282,183/282,183 and
+player after-boards 37,240/37,240 equal to XG's; the player's error
+37,217/37,240 under depth first (equity: 35,832), the 23 exceptions all
+opening moves (moves 2–4) whose depth-first best is a book candidate; cube
+errors 17,357/17,357 (doubler) and 851/851 (taker). Dated evidence, not
+pins.
 
 Supporting helpers:
 
@@ -652,12 +718,10 @@ Supporting helpers:
   explicitly; `Iterate` / `IterateDiagramRequests` translate `null` into
   a thrown `InvalidDataException` at the iteration boundary rather than
   silently emitting decisions against a default-constructed header.
-* `ToBoard` — converts a position to the 26-element board array from the
-  on-roll player's perspective (see "Board format" below).
-* `FlipPosition` — flips the position to bottom-player perspective for XGID
-  encoding.
+* `OnRollBoard` — a record's stored position seen from the player on
+  roll, as a `BoardPosition` (see "Board format").
 * `CubeValueActual` — internal static helper, called from `MatchContext`
-  and `XgDecisionIterator`'s cube-row / cube-diagram builders.
+  and the cube builder.
 
 ### Level semantics: `LevelRequest` vs `Level`
 
@@ -674,21 +738,20 @@ pins; nothing gating depends on them.
 `DoubleActionAnalysis.LevelRequest` is a *setting*: the analysis level
 the user asked XG to run. `DoubleActionAnalysis.Level` is *provenance*:
 the level whose evaluation actually produced the pane's stored numbers —
-the three cubeful `Equity*` scalars and the eval vectors. A depth label
-describes the emitted equities, so it must resolve from `Level` — the
-gate's question ("did anything run at all?") and the label's question
+the three cubeful `Equity*` scalars and the eval vectors. A record's depth
+facts describe the stored equities, so they must resolve from `Level` —
+the gate's question ("did anything run at all?") and the depth's question
 ("what ran?") are both provenance questions, and only `Level` answers
 them. Consumers today:
 
 * `Analysis.Level` → the `IsAnalysed(CubeRecord)` emission gate
-  (`Level > 0`) **and** the two cube depth-label sites (`BuildCubeRows` /
-  `BuildCubeDiagramRequests` pass `evalLevel: (short)analysis.Level` to
-  `ResolveDepthInfo`) — matching the checker side, which labels from what
-  ran (`BuildMoveRow` resolves `analysis.EvalLevels[bestIdx].Level`, the
-  per-candidate ran level).
+  (`Level > 0`) **and** the cube's depth facts (`BuildCube` resolves
+  `XgDepthFacts.Resolve(analysis.Level, …)`) — matching the checker side,
+  where each candidate states the facts of what ran for it
+  (`analysis.EvalLevels[i].Level`).
 * `Analysis.LevelRequest` → **nothing**. Until the
   halheinrich/backgammon#161 fix the two cube label sites read it, so
-  59% of analysed cube rows named a level that did not run; labelling
+  59% of analysed cube rows named a level that did not run; resolving
   from `Level` was the ruling, and `CubeLevelSemanticsTests` pins both
   divergence directions plus the gate. (`BestMoveAnalysis.Level`, the
   move pane's own header-level field, is likewise read by nothing.)
@@ -725,7 +788,7 @@ every one has `LevelRequest == 0`, zero in all three cubeful equities,
 all-zero eval vectors in `EvalNoDouble` / `EvalDoubleTake`,
 `IsBeaver == -100` (the never-analysed sentinel), and `-1/-1` in the
 record-level pair — the `Doubled == -2` incidental pane XG writes
-beside every checker play (`gobetzu-XG Roller++ 2026-07-21.xg` cube #1
+beside every checker play (`gobetzu-XG Roller++ 2026-07-21.xg` cube record 1
 is the type specimen). The `Level > 0` gate excludes exactly these;
 what it discards is structurally empty, not shallow analysis. (This
 re-measures and upholds the halheinrich/backgammon#132 ruling booked
@@ -814,12 +877,14 @@ rollouts + XG's own Roller++ baseline). `TryGetEntry` (internal, like the
 whole keyed-lookup surface — the key needs the internal record position
 convention, so the public intent is `XgIteratorOptions.OpeningBook`
 enrichment, never direct lookup) returns the most rigorous entry. The
-policy is this library's, not a prediction of XG's display: entry-level
-rank first (rollout > Roller++, via the `ResolveDepthInfo` rank taxonomy —
-the SSOT for level ordering), then rollout moves-level rank, cube-level
-rank, trials, analysis date, file position (import-append: later wins).
-XG's tooltip has been read on two keys where rollout depths compete and
-it went one way each — deeper on `ajhhBG0407.xg` g9 m1, shallower on
+policy is this library's, not a prediction of XG's display: rollout
+entries before evaluations, then the entry's level, its rollout moves
+level and its rollout cube level, each compared by the `AnalysisLevel` its
+code decodes to (`XgDepthFacts.OfLevel`; the enum's declaration order is
+the contractual rigor order, and an unrecognized code orders below every
+level), then trials, analysis date, file position (import-append: later
+wins). XG's tooltip has been read on two keys where rollout depths compete
+and it went one way each — deeper on `ajhhBG0407.xg` g9 m1, shallower on
 `match26212229.xg` g3 m2 — so no parity claim is made; the class doc
 records both cases and the halheinrich/backgammon#203 ruling that the
 deeper entry stands. `GetEntries` returns all matches best-first.
@@ -854,8 +919,11 @@ Optional predicate record supplied at call time to
 * `StopMatchAfter(IDecisionFilterData) → bool` — fires after each yielded
   decision. True = advance to the next match.
 
-Both `DecisionRow` and `BgDecisionData` implement `IDecisionFilterData`,
-so the post-yield predicates work uniformly across both iterator surfaces.
+The post-yield predicates see each decision under the options' ranking
+(see "The ranking"): on `Iterate` the row itself, which is an
+`IDecisionFilterData`; on `IterateDiagramRequests` the record's
+`ViewFor(ranking)` — a record is not itself a filter view, since which play
+is best, and each play's error, are a ranking's.
 
 ### XgIteratorOptions
 
@@ -863,41 +931,53 @@ Optional producer configuration record supplied at call time to
 `Iterate` / `IterateDiagramRequests` (and the internal directory walks) —
 the third leg of the iterator's parameter pattern: `XgIteratorState`
 observes, `XgIteratorCallbacks` controls iteration, `XgIteratorOptions`
-configures how rows are built. One member today:
+configures how rows are built. Two members:
 
 * `OpeningBook` — a loaded book database for depth enrichment (see "Book
-  enrichment" above). Null = no enrichment; book hits degrade gracefully.
+  enrichment" above). Null = no enrichment; book hits state their bare
+  book facts.
+* `Ranking` — the `PlayRanking` rows are built for and the post-yield
+  callbacks judge under (see "The ranking" above). `PlayRanking.Equity` by
+  default; an undefined value is refused when the options are made.
 
-Members are caller-loaded resources, not per-decision knobs; null (or a
-null member) always means "default behaviour".
+Null options mean the defaults. A positional construction names the book
+first, so `new XgIteratorOptions(book)` still reads as before.
 
 ### XgMoveTranslator
 
 Internal static helper that converts the 8-element `sbyte[]` move
 encoding XG stores in `BestMoveAnalysis.Moves[i]` into a
-`BgDataTypes_Lib.Play`. Hits are pre-encoded into
-`BgDataTypes_Lib.Move.ToPt`'s sign so
-`BgMoveGen.MoveNotationFormatter.Format(Play)` can render notation
-without seeing a board. The translator also performs the
-on-roll-board mutation (sending hit blots to the bar). Its output is
-consumed once per candidate by `BuildMoveDiagramRequest` and feeds
-both `PlayCandidate.MoveNotation` (rendered) and `PlayCandidate.Play`
-(structural). One producer call per candidate; one scratch-board
-mutation. Point-index decoding (`from == 24` bar entry, `to < 0`
-bear off including XG overshoot encodings) is shared with
-`Parsing/AfterBoardBuilder` via `Parsing/XgMoveEncoding`. The
-`from == -1` terminator is loop control kept by each consumer. The
-`(0, 0)` "dance" sentinel is
-**not** recognized at this layer; sentinel-only emission is gated
-upstream — see Pitfalls.
+`BgDataTypes_Lib.Play`: `Translate(moves, board)`, against the decision's
+board in the mover's frame. XG's encoding carries no hit mark, so the
+translator reads each hit off the board — a move landing on an opposing
+blot of the starting position negates its `ToPt`, and that point stops
+counting as a blot for the rest of the play. That is the whole of its
+board reading: it does not apply the play, and the caller's board is only
+read. XG's stored encodings are kept as they are, multi-die moves included
+(halheinrich/backgammon#277).
+
+Everything else about a play is the `Play`'s own: its notation
+(`Play.ToNotation()` — this library renders none), its validity from a
+position (BgDataTypes_Lib's play rule, which the iterator asks of every
+candidate — see "What is not a record"), and its equality, whose one
+statement is the doc on `Play` (halheinrich/backgammon#278). Point-index
+decoding (`from == 24` bar entry, `to < 0` bear off including XG overshoot
+encodings) lives in `Parsing/XgMoveEncoding`; the `from == -1` terminator
+is loop control. The `(0, 0)` dance sentinel is **not** recognized at this
+layer; sentinel-only analyses are skipped upstream — see Pitfalls.
 
 ### MatchContext
 
-Internal class tracking match and game state during iteration. Exposes
-match-length / score / cube state, plus `NeedsFor(activePlayer)`,
-`PlayerName(activePlayer)`, `CommentAt(commentIndex)` (see "Comment text"),
-and the `XgidCrawfordJacobyField` wire-format helper consumed by
-`XgidEncoder`.
+Internal class tracking match and game state during iteration: the
+match's `XgMatchInfo`, the current game's `XgGameInfo` (with the
+standing's Crawford flag as `IsCrawford`), the cube value and position,
+and the game and move counters, advanced by `Update(record)`. What a
+record states about the players is asked of it: `SeatOf(activePlayer)`
+(XG's sign convention, the one place it is read), `SessionFor(onRoll)` —
+the header's terms and the game's standing through `Session.Create`,
+refused as `InvalidDataException` before any game header — `NameOf(seat)`
+and `CommentAt(commentIndex)` (see "Comment text"), each of which states
+no text (null) where XG records only empty or white-space text.
 
 ### Comment text
 
@@ -909,8 +989,10 @@ verbatim and must never inspect its format (SPEC-quiz-view.md §4, the
 before this existed (halheinrich/backgammon#233).
 
 The conversion happens in **one place**: `MatchContext.CommentAt`, which
-both `DescriptiveData.Comment` stamp sites in `XgDecisionIterator` (the play
-and the cube) already go through. `RtfPlainText` owns the conversion itself
+the one `DescriptiveData.Comment` stamp in `XgDecisionIterator` — shared by
+the play and the cube — goes through. An index out of the table (XG's `-1`
+is "no comment") and a comment whose text is empty or white space both
+state no comment: null. `RtfPlainText` owns the conversion itself
 — a pure string-to-string mapping with no dependency on the walk — and
 **its XML doc is the one statement of the contract**, not restated here.
 The shape of it: a comment that does not open with `{\rtf` is plain text and
@@ -928,49 +1010,47 @@ The comment **table** is untouched by all of this: `XgFile.Comments`,
 XG's bytes verbatim, so a round trip reproduces them. Only the stamp path
 converts.
 
-### BackgammonConstants
-
-Shared backgammon constants and stateless helpers.
-
-* `StandardOpeningPosition` — `internal static readonly sbyte[26]` holding
-  the standard starting position in the canonical 26-point layout.
-* `IsStandardOpeningPosition` — comparison helper against that constant.
-* `Flip<T>` — single source of the perspective flip: mirror index `i`
-  with `25 - i`, negate every value. Generic (`T : INumber<T>`) so it
-  serves both `sbyte` position arrays and `int` board arrays.
-* `AwayScore` — single source of the away-score rule
-  (`matchLength - score`, 0 for money games).
-
 ### Board format
 
-26-element array from the **on-roll player's** perspective throughout the
-pipeline (matches `BgDataTypes_Lib.PositionData.Mop`):
+A record's board is a `BgDataTypes_Lib.BoardPosition` from the **on-roll
+player's** perspective (`PositionData.Mop`). `BoardPosition` owns the
+layout, the standard start (`BoardPosition.Standard`) and the flip
+(`Flipped`); its doc is their one statement, so none is restated or kept
+here. XG stores positions as 26-cell `sbyte` arrays (`PositionEngine`,
+turned into a `BoardPosition` by `ToBoardPosition`), in two frames:
 
-* `[0]` = opponent's bar (≤ 0)
-* `[1–24]` = points 1–24
-* `[25]` = on-roll player's bar (≥ 0)
-* Positive = on-roll player; negative = opponent.
+* `InitialPosition` — of a move record and a cube record alike — is in
+  **player 1's frame**. `OnRollBoard` turns it to the player on roll: as
+  stored for player 1, flipped for player 2.
+* `PositionsPlayed` (each candidate's resulting position) and
+  `FinalPosition` (the position after the played move) are in the
+  **mover's frame**. A record's derived after-board is in the next mover's
+  frame, so it is XG's stored position flipped, for either seat —
+  measured on every candidate and every played move of the 2026-09-27
+  corpus (see "Measured against XG").
 
-### XGID encoding
-
-XGIDs are always normalized to **bottom-player** perspective. The iterator
-applies `FlipPosition` before handing the position to `XgidEncoder` — this is
-a separate convention from the on-roll-relative board layout above.
+The XGID, the pip counts and the after-boards are BgDataTypes_Lib's
+derivations from the record; this library encodes none of them.
 
 ### Cube decisions
 
-Both `Iterate` and `IterateDiagramRequests` emit exactly **one** row per
-cube decision — a single `DecisionRow` or `BgDecisionData` carrying the
-doubler's board (no flip). Cube-side equity and error fields
-(`analysis.EquityNoDouble`, `analysis.EquityDoubleTake`, `cube.ErrorCube`,
-`cube.ErrorTake`) are written from the doubler's perspective; there is
-no second taker-perspective row. Which cube panes are decisions at all is
-decided upstream of both builders — an analysed pane in a non-Crawford
-game; see the emission rule under "XgDecisionIterator".
+A cube decision is exactly **one** record — one `CubeDecision`, and so one
+row — carrying the doubler's board (no flip); there is no second
+taker-perspective record. Its stored equities (`EquityNoDouble`,
+`EquityDoubleTake`, the cubeless eval equities) and probabilities are the
+doubler's, verbatim. XG's errors of the stated actions (`cube.ErrorCube`,
+`cube.ErrorTake`) are not stored: BgDataTypes_Lib's scoring policy derives
+the error of a stated action from the equities, and `XgCorpusAgreementTests`
+holds the two to XG's own. XG's error of a half is stored only where the
+record states no action of that half to derive it from
+(`UnstatedDoublerActionError`; `UnstatedTakerActionError` only once a
+double was offered). Which cube panes are decisions at all is decided
+upstream of the builder — an analysed pane, in a non-Crawford game, of a
+decision position; see "What is not a record".
 
-`IterateDiagramRequests` also stamps the **played** cube action onto
-`DecisionData.UserDoublerAction` / `UserTakerAction`, mapped from the raw
-`CubeRecord.Doubled` / `Taken` pane state. `Doubled` is a pane-state field,
+Each record also stamps the **played** cube action onto
+`CubeDecisionData.UserDoublerAction` / `UserTakerAction`, mapped from the
+raw `CubeRecord.Doubled` / `Taken` pane state. `Doubled` is a pane-state field,
 not a flag — only `1` (doubled) and `0` (no double) record a played action:
 
 | `Doubled` | `Taken`    | Doubler    | Taker  |
@@ -982,7 +1062,7 @@ not a flag — only `1` (doubled) and `0` (no double) record a played action:
 | `-1`/`-2` | (any)      | *null*     | *null* |
 
 `-2` is the incidental cube pane beside a checker play (never analysed, so
-it never reaches a row); `-1` is the pane XG writes where a game ended with
+it never reaches a record); `-1` is the pane XG writes where a game ended with
 no cube action taken — every analysed `-1` record in the corpus is the last
 record of its game, followed by a footer whose `Termination` is ≥ 100
 (by resignation), and it is also what `XgpExporter` writes for a curated
@@ -1010,8 +1090,10 @@ match files:
 * `IsAnalysed` is gated on the analysis-level field, not on error presence.
 * Error fields are treated as present when `> -999.0` (anything above the
   sentinel).
-* `UserPlayError`, `UserDoubleError`, `UserTakeError` are populated from the
-  raw XG fields with sentinel guards.
+* `UnlistedPlayError`, `UnstatedDoublerActionError` and
+  `UnstatedTakerActionError` are read from the raw XG fields behind that
+  guard, and only where the record states no move to derive the error
+  from; the error of a stated move is derived (see "Cube decisions").
 * `PlayCandidate` win / gammon / backgammon probabilities are populated from
   `EvalResult`.
 
@@ -1231,7 +1313,8 @@ public static class XgDecisionIterator
 }
 
 public sealed record XgIteratorOptions(
-    OpeningBook? OpeningBook = null);
+    OpeningBook? OpeningBook = null,
+    PlayRanking  Ranking     = PlayRanking.Equity);   // undefined refused
 
 public sealed class OpeningBook
 {
@@ -1263,8 +1346,20 @@ public sealed record XgIteratorCallbacks(
     Func<IDecisionFilterData, bool>?  StopGameAfter  = null,
     Func<IDecisionFilterData, bool>?  StopMatchAfter = null);
 
-public sealed class XgMatchInfo { /* match-level metadata */ }
-public sealed class XgGameInfo  { /* game-level metadata  */ }
+// The header types (see "The header types" under Architecture). Every
+// member is required on the wire and never null; built only by this library.
+public sealed class XgMatchInfo : IMatchInfo
+{
+    public string       Player1 { get; }
+    public string       Player2 { get; }
+    public SessionTerms Terms   { get; }   // MoneyTerms or MatchTerms
+}
+
+public sealed class XgGameInfo : IGameInfo
+{
+    public bool         IsStandardStart { get; }
+    public GameStanding Standing        { get; }   // MoneyStanding or MatchStanding
+}
 ```
 
 Produces types defined in `BgDataTypes_Lib`; see that subproject's
@@ -1272,12 +1367,17 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 
 ## Pitfalls
 
-* **Two perspectives, don't confuse them.** The board array is always
-  on-roll-relative. The XGID is always bottom-player-relative. `FlipPosition`
-  converts between them and is applied only at the XGID encoding boundary.
+* **XG's files use two frames; the record uses one.** A record's board is
+  on-roll-relative. XG stores a decision's starting position in player 1's
+  frame, but each candidate's resulting position and the position after
+  the move in the *mover's* frame (see "Board format"). `OnRollBoard` turns
+  only the starting position; a derived after-board is compared with XG's
+  stored one turned (`BoardPosition.Flipped`), for either seat. The XGID is
+  BgDataTypes_Lib's derivation, not a frame this library handles.
 * **Cube and play decisions are 1:1 with emitted rows.** Both `Iterate`
   and `IterateDiagramRequests` produce exactly one `DecisionRow` /
-  `BgDecisionData` per analyzed decision. For cube decisions this is
+  `BgDecisionData` per decision they emit, and the same decisions: a row
+  is its record's projection. For cube decisions this is
   the doubler's board (no flip); there is no second taker-perspective
   row. Consumers may safely count one row per decision.
 * **A Crawford game's cube pane is not a decision and is not emitted.**
@@ -1308,8 +1408,8 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `FixtureFiles/Opening 32 65 64 31 65.xgp`).
 * **On a cube record, `Level == 0` means *unanalysed*, not "1-ply."** The
   gate above is `Analysis.Level > 0`, and the `> 0` is deliberate — not an
-  off-by-one. Code `0` is a legitimate level in the `LevelInfo` taxonomy
-  (1-ply), so `>= 0` looks like the more correct spelling; it is not. Ruled
+  off-by-one. Code `0` is a legitimate level in XG's code space
+  (`XgDepthFacts.OfLevel`: 1-ply), so `>= 0` looks like the more correct spelling; it is not. Ruled
   2026-08-28 (halheinrich/backgammon#132): XG never runs a 1-ply cube
   analysis, so on the cube side a zero `Level` is the default-valued,
   never-analysed pane. Corpus-verified over 553 local files — **23,049** cube
@@ -1326,10 +1426,11 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   the checker side, where 1-ply *is* a real analysis level that files do
   carry — which is why `IsAnalysed(MoveRecord)` gates structurally
   (`MoveCount` / `Evals`) instead of on a level at all.
-* **`BuildMoveDiagramRequest` returns `null` on three conditions:**
-  `analysis.MoveCount == 0`, `analysis.Evals.Length == 0`, or `dice == 0`.
-  The iterator's call site gates emission on the non-null return; preserve
-  this null-check when refactoring the move-diagram path.
+* **`ReadCheckerPlay` returns `null` for every move record that is not a
+  record** — a position that is not a decision, a sentinel, no roll, a
+  corrupt candidate (see "What is not a record"); the dispatch emits only a
+  non-null result. Keep each rule there, ahead of `BuildCheckerPlay`, so
+  the two surfaces cannot disagree about which plays become records.
 * **`StopGameAfter` / `StopMatchAfter` fire *after* the yield.** The
   consumer sees the just-yielded row, *then* the predicate runs on the
   producer's next `MoveNext`. To suppress a row entirely (skip the game
@@ -1345,8 +1446,8 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   synchronously at the call site when `sourceFile` is null — before
   any deferred enumeration begins. This is the LINQ-style two-method
   pattern: the public surface validates and delegates to
-  `IterateCore` / `IterateDiagramRequestsCore`, whose signatures carry
-  the non-nullable post-validation invariant. Required because every
+  `IterateCore`, whose signature carries the non-nullable
+  post-validation invariant. Required because every
   yielded row carries a `DecisionId` stamped from `sourceFile`. The
   public parameter remains typed `string?` for source-compat with
   method-group conversions in `XgFilter_Lib.FilteredDecisionIterator`
@@ -1357,9 +1458,9 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   is caller-contract and fires immediately. Unsupported source-file
   extensions (anything other than `.xg`, `.xgp`, or `.json`) throw
   `InvalidOperationException` from `BuildDecisionId` on first stamp;
-  that path is deferred (it fires during enumeration, when a candidate
-  reaches a `Build*` site) and is enforced per-record rather than at
-  the API boundary.
+  that path is deferred (it fires during enumeration, when a decision
+  reaches one of the two record builders) and is enforced per-record
+  rather than at the API boundary.
 * **Iteration throws on malformed match headers.** Both `Iterate` and
   `IterateDiagramRequests` throw `InvalidDataException` when
   `ExtractMatchInfo` returns `null` — files without a readable match
@@ -1384,16 +1485,12 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   encoding. Neither is of interest downstream — there is no real
   candidate to evaluate — and feeding either to leaf computation has
   historically produced an `IndexOutOfRangeException` (the `(-100, -100)`
-  case in `AfterBoardBuilder.ComputeAfterBoard`) or a "1/1" notation
+  case, in the since-retired after-board builder) or a "1/1" notation
   glitch (the `(0, 0)` case in `XgMoveTranslator.Translate`). Both surfaces
-  (`Iterate` and `IterateDiagramRequests`) gate emission through
-  `IsSentinelOnlyAnalysis` so neither leaf ever sees a sentinel. The
-  existing `(0, 0)` no-op branch in `AfterBoardBuilder` is retained for
-  defense in depth; it is unreachable on the standard iterator path but
-  still exercised by `AfterBoardBuilderTests`. Do not add a `(-100, -100)`
-  branch to either leaf. The encapsulation principle is that sentinel
-  semantics belong with the iterator that decides what to emit, not with
-  the leaf that operates on the resulting move encoding.
+  gate emission in `ReadCheckerPlay` (`ClassifySentinelAnalysis`), so the
+  translator never sees a sentinel. Do not add a sentinel branch to the
+  translator: sentinel semantics belong with the iterator that decides
+  what to emit, not with the leaf that operates on the move encoding.
 * **The record model is internal by design; the builder is the only
   synthesis path.** Do not re-publicize a record type to unblock a caller —
   the caller's need is a missing intent on `XgFileBuilder` (or, for tests
@@ -1512,14 +1609,14 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `99999` (XG's canonical money sentinel) and sets `IsMoneyMatch = true`
   on the `MatchHeaderRecord`. Past the parser a Galaxy money game is
   indistinguishable from a native XG money game: one money representation
-  on the record, normalized to `0` downstream by the existing
-  `>= 99999 ? 0` checks in `XgMatchInfo.From` and `MatchContext`. One
+  on the record, read as money terms by `XgMatchInfo.From` (a length at or
+  above the sentinel), the one reading. One
   consequence for consumers: `MatchHeaderRecord.IsMoneyMatch` is *not*
   the raw XG byte — it is that byte OR'd with Galaxy detection.
 * **Two opening books, and the level codes read "backwards": 999 = Book V1,
   998 = Book V2.** XG 1's `OpeningBook.db` (V1) stamps level 999; XG 2's
   `OpeningBookV2.ob` (V2) stamps 998 — the *lower* code is the *newer*
-  book. `LevelInfo` once had the labels reversed; the spec's PLAYERLEVEL
+  book. The depth decoding once had the labels reversed; the spec's PLAYERLEVEL
   table and the fixture corpus (ajhh openings are 998 = V2 hits) are the
   ground truth. Only the V2 database is parsed (`OpeningBook`); V1 is
   deliberately unsupported.
@@ -1533,7 +1630,17 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   away pair; the `ForMatchPlay` / `ForMoneyPlay` factories encapsulate
   exactly these two traps. The eval vector, by contrast, is from the
   *mover's* perspective (XG copies it into the `.xg` pane verbatim on a
-  book hit — pinned bitwise by `RealDb_FixtureA_…`).
+  book hit — pinned bitwise by `RealDb_FixtureA_…`). **Measured
+  2026-09-27, not changed here: the key misses for player-2 movers.** The
+  keying was proven on player-1 movers only, and XG stores each
+  candidate's resulting position in the mover's frame for either seat (see
+  "Board format"), so a player-2 mover's key needs the flip too. Over the
+  corpus's centred-cube V2-book-stamped candidates, the key as built hits
+  216 of 3,574 player-2 candidates (6 with an entry's evaluation
+  bit-identical to the pane's); flipped for either mover it would hit
+  3,571 (3,513 bit-identical), with player-1 movers unchanged (3,684 of
+  3,688 either way). A player-2 mover's book hit therefore states its bare
+  book facts today.
 * **A book entry's equity slot is cubeful and score-contexted; the
   tooltip's cubeless number is derived.** The same resulting position
   stores wildly different equities under different away scores (+0.377 at
@@ -1544,7 +1651,7 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   slots. Don't compare equities across score contexts, and don't read the
   slot as cubeless (the `EvalResult.Equity` doc is written for cube
   panes).
-* **Book enrichment changes labels and levels, never emission — and a 998
+* **Book enrichment changes depth facts, never emission — and a 998
   stamp is not always rollout-backed.** The optional
   `XgIteratorOptions.OpeningBook` threading is strictly additive: with and
   without a book, the same decisions and candidates are emitted (pinned by
@@ -1554,8 +1661,8 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   its five 998-stamped candidates resolve to the book's **Roller++
   evaluation baseline** entries (Level 1002, zero trials): XG stamps 998
   whenever the book supplied the pane numbers, rollout or not. Those hits
-  deliberately stay at the bare "Book V2" label with
-  `BookRollout` + `Unknown` — there is no cached rollout to recover. Do
+  deliberately state the bare book facts (`BookRollout`, level `Unknown`,
+  edition V2) — there is no cached rollout to recover. Do
   not "fix" that degradation, and never read `RolloutMovesLevel` /
   `Trials` off an entry without gating on `IsRollout` (evaluation entries
   store zeros there — a zero moves level would decode as a bogus
@@ -1568,11 +1675,10 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   carry a book code (998/999) in `Level` or `LevelRequest`, against 3,817
   book-stamped checker-play candidates. With nothing to pin a cube-row
   key against, a book-stamped cube resolves to `BookRollout` + `Unknown`
-  by design (`BuildCubeRows` / `BuildCubeDiagramRequests` pass no entry).
-  If a book-stamped cube decision ever surfaces, pin the key against it
-  before wiring cube enrichment — `ResolveDepthInfo` would also need to
-  select `RolloutCubeLevel` rather than `RolloutMovesLevel` for that
-  path.
+  by design (`BuildCube` passes no entry). If a book-stamped cube
+  decision ever surfaces, pin the key against it before wiring cube
+  enrichment — `XgDepthFacts.Resolve` would also need to select
+  `RolloutCubeLevel` rather than `RolloutMovesLevel` for that path.
 * **Book selection: deeper rollout levels beat more games — by this
   library's policy, which is not XG's display rule.** One key commonly
   holds several entries (5,113 keys with more than one rollout, 2,099 of
@@ -1630,7 +1736,7 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   revisit only when such a caller exists. Feasibility notes preserved:
   eval vectors and per-candidate probabilities/equities are all in
   `BgDecisionData`; after-boards recomputable; the sbyte move encoding
-  invertible; static levels invert exactly via the `LevelInfo` taxonomy;
+  invertible; static levels invert exactly via `XgDepthFacts.OfLevel`;
   rollout contexts are the one unrecoverable piece (level 1002 with
   `RolloutIndex = -1` is XG-legal per the `DoubleAnalysis.xgp` fixture,
   unverified for move panes).
