@@ -270,9 +270,10 @@ public static class XgDecisionIterator
     /// <b>What is not a record.</b> The emission rules sit here, at the one
     /// dispatch both surfaces share, so the two can never disagree about which
     /// source decisions become records: an unanalysed move or cube pane; a
-    /// Crawford game's cube pane (<see cref="AdmitsCubeDecision"/>); and, in
-    /// <see cref="ReadCheckerPlay"/>, XG's two non-play sentinels and a move
-    /// record that states no roll.
+    /// Crawford game's cube pane (<see cref="AdmitsCubeDecision"/>); a
+    /// position that is not a decision, for either kind; and, in
+    /// <see cref="ReadCheckerPlay"/>, XG's two non-play sentinels and a checker
+    /// play holding a candidate invalid from its own position.
     /// </para>
     /// </summary>
     private static IEnumerable<T> IterateAnalysedDecisions<T>(
@@ -419,10 +420,19 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// The checker-play record of an analysed move record, or
-    /// <see langword="null"/> when the source decision builds none. Two
+    /// <see langword="null"/> when the source decision builds none. Four
     /// kinds of analysed move build no record, each passed by without
     /// catching anything:
     /// <list type="bullet">
+    ///   <item><description>
+    ///     <b>Not a decision position</b> — a side has borne off all its
+    ///     checkers (Hal's ruling of 2026-09-27, halheinrich/backgammon#273).
+    ///     Legitimate XG data, simply not a decision in the record model:
+    ///     passed by silently, as ordinary filtering, as a cube decision's is
+    ///     (<see cref="IsCubeDecision"/>). The rule is
+    ///     <see cref="PositionData.IsDecisionPosition"/>'s, asked here and not
+    ///     restated.
+    ///   </description></item>
     ///   <item><description>
     ///     <b>A non-play sentinel</b> — XG's illegal-play marker, skipped with
     ///     a warning, or a dance, skipped silently (see
@@ -432,6 +442,17 @@ public static class XgDecisionIterator
     ///     <b>No roll</b> — a move record whose dice are both 0 poses no
     ///     checker-play decision.
     ///   </description></item>
+    ///   <item><description>
+    ///     <b>A corrupt candidate</b> — a candidate invalid from the decision's
+    ///     own position, which the record would refuse (Hal's ruling of
+    ///     2026-09-25 on invalid plays, applied to stored candidates). Found
+    ///     with <see cref="BoardState.TryApplyPlay"/>, the non-throwing door
+    ///     to the same play rule the record's check runs, on a fresh board per
+    ///     candidate — the method applies a valid play, so a shared board would
+    ///     test later candidates from the wrong position. The decision is
+    ///     skipped the way an illegal-play marker is, with a warning naming the
+    ///     file, game, move, roll and every invalid candidate.
+    ///   </description></item>
     /// </list>
     /// Any other refusal from BgDataTypes_Lib is not caught: it fails loud.
     /// </summary>
@@ -439,6 +460,10 @@ public static class XgDecisionIterator
         MoveRecord move, MatchContext ctx, string sourceFile, List<RolloutContext> rollouts,
         OpeningBook? book, ILogger logger)
     {
+        var board = OnRollBoard(move.InitialPosition, move.ActivePlayer);
+        if (!PositionData.IsDecisionPosition(board))
+            return null;
+
         // Skip XG's non-play sentinels before they reach the translator:
         // an illegal-play marker historically crashed the leaves, a dance
         // rendered as "1/1" garbage. Illegal plays are worth a contextual
@@ -457,8 +482,17 @@ public static class XgDecisionIterator
         if (!StatesRoll(move))
             return null;
 
-        var board = OnRollBoard(move.InitialPosition, move.ActivePlayer);
         var plays = CandidatePlays(move.Analysis, board);
+        var invalid = InvalidCandidates(board, plays);
+        if (invalid.Count > 0)
+        {
+            logger.LogWarning(
+                "Corrupt candidate in {SourceFile}, game {Game}, move {MoveNumber}, roll {Roll}: invalid from the decision's position: {InvalidCandidates}",
+                sourceFile, ctx.GameNumber, ctx.MoveNumber, DiceToInt(move.Dice),
+                string.Join("; ", invalid.Select(i => $"candidate {i + 1} ({plays[i].ToNotation()})")));
+            return null;
+        }
+
         return BuildCheckerPlay(move, ctx, sourceFile, board, plays, rollouts, book);
     }
 
@@ -480,6 +514,19 @@ public static class XgDecisionIterator
     /// <summary>The number of candidates an analysis carries: the slots with a move encoding and an evaluation, within its move count.</summary>
     private static int CandidateCount(BestMoveAnalysis analysis) =>
         Math.Min(analysis.MoveCount, Math.Min(analysis.Evals.Length, analysis.Moves.Length));
+
+    /// <summary>
+    /// The indices of the candidates invalid from <paramref name="board"/>,
+    /// each tested by <see cref="BoardState.TryApplyPlay"/> on a fresh board.
+    /// </summary>
+    private static List<int> InvalidCandidates(BoardPosition board, List<Play> plays)
+    {
+        var invalid = new List<int>();
+        for (int i = 0; i < plays.Count; i++)
+            if (!new BoardState(board).TryApplyPlay(plays[i]))
+                invalid.Add(i);
+        return invalid;
+    }
 
     /// <summary>
     /// Builds the checker-play record: the position, the session and the
@@ -1069,14 +1116,21 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// The cube emission gate the dispatch applies: the record is a decision
-    /// when it is analysed and the game admits one. Internal-not-private for
-    /// the same reason as <see cref="IsSentinelOnlyAnalysis"/>: test code that pairs raw
+    /// when it is analysed, the game admits one, and its position is a
+    /// decision position — a side that has borne off all its checkers ends the
+    /// game, so no decision is made (Hal's ruling of 2026-09-27,
+    /// halheinrich/backgammon#273). That last is ordinary filtering, passed by
+    /// silently, and the rule is <see cref="PositionData.IsDecisionPosition"/>'s,
+    /// asked of the stored position — its answer does not depend on the frame
+    /// — and not restated. Internal-not-private for the same reason as
+    /// <see cref="IsSentinelOnlyAnalysis"/>: test code that pairs raw
     /// <c>CubeRecord</c>s with iterator output mirrors the emission filter
     /// through this predicate, driving a <see cref="MatchContext"/> record
     /// by record as the walk does, rather than re-implementing any part.
     /// </summary>
     internal static bool IsCubeDecision(CubeRecord cube, MatchContext ctx) =>
-        IsAnalysed(cube) && AdmitsCubeDecision(ctx);
+        IsAnalysed(cube) && AdmitsCubeDecision(ctx)
+        && PositionData.IsDecisionPosition(cube.Position.ToBoardPosition());
 
     /// <summary>
     /// Whether a move record states a roll: a move record whose dice are both
