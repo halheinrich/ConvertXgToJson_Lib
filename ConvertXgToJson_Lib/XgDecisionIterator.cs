@@ -1018,9 +1018,11 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// Whether a move record carries an analysis at all: a move count and an
-    /// evaluation. The first of the move emission rules the dispatch applies.
+    /// evaluation. The first of the move emission rules the dispatch applies;
+    /// internal-not-private for the same reason as
+    /// <see cref="IsSentinelOnlyAnalysis"/>.
     /// </summary>
-    private static bool IsAnalysed(MoveRecord move) =>
+    internal static bool IsAnalysed(MoveRecord move) =>
         move.Analysis.MoveCount > 0 && move.Analysis.Evals.Length > 0;
 
     /// <summary>
@@ -1129,15 +1131,24 @@ public static class XgDecisionIterator
     /// by record as the walk does, rather than re-implementing any part.
     /// </summary>
     internal static bool IsCubeDecision(CubeRecord cube, MatchContext ctx) =>
-        IsAnalysed(cube) && AdmitsCubeDecision(ctx)
-        && PositionData.IsDecisionPosition(cube.Position.ToBoardPosition());
+        IsAnalysedCubePane(cube, ctx) && PositionData.IsDecisionPosition(cube.Position.ToBoardPosition());
+
+    /// <summary>
+    /// The cube panes the walk takes up as analysed decisions, before asking
+    /// whether their position is one: analysed, in a game that admits a cube
+    /// decision. Internal-not-private for the corpus mirror, which counts the
+    /// not-a-decision outcome over exactly these.
+    /// </summary>
+    internal static bool IsAnalysedCubePane(CubeRecord cube, MatchContext ctx) =>
+        IsAnalysed(cube) && AdmitsCubeDecision(ctx);
 
     /// <summary>
     /// Whether a move record states a roll: a move record whose dice are both
     /// 0 poses no checker-play decision. One of the move emission rules
-    /// <see cref="ReadCheckerPlay"/> applies.
+    /// <see cref="ReadCheckerPlay"/> applies; internal-not-private for the
+    /// corpus mirror, as <see cref="IsSentinelOnlyAnalysis"/> is.
     /// </summary>
-    private static bool StatesRoll(MoveRecord move) => DiceToInt(move.Dice) != 0;
+    internal static bool StatesRoll(MoveRecord move) => DiceToInt(move.Dice) != 0;
 
     /// <summary>XG's roll as a two-digit number in rolled order — the form the warnings name it by; 0 for no roll.</summary>
     private static int DiceToInt(int[] dice) =>
