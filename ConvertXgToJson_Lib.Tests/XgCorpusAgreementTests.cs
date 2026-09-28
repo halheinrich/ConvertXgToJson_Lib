@@ -21,9 +21,18 @@ namespace ConvertXgToJson_Lib.Tests;
 ///     naming it. Nothing else fails.
 ///   </description></item>
 ///   <item><description>
-///     <b>The after-boards are XG's.</b> Each candidate's derived after-board
-///     is XG's stored resulting position for it, and the player's is XG's
-///     position after the played move.
+///     <b>The after-boards are XG's.</b> XG stored a resulting position for
+///     every candidate it analysed, in every analysed decision position, and
+///     each is the candidate's derived after-board — so the count is XG's,
+///     not the built records'. A decision skipped for a corrupt candidate
+///     states no after-board for any of its candidates, so its skip is a
+///     disagreement with XG, and fails this invariant naming the decision
+///     (the umbrella's ruling on halheinrich/backgammon#273: otherwise a
+///     translation regression turns candidates corrupt and leaves the
+///     comparison, and the summary still reads "agree"). The production skip
+///     and its warning are unchanged; the three-outcome invariant still pins
+///     that nothing else fails. The player's after-board is XG's position
+///     after the played move.
 ///   </description></item>
 ///   <item><description>
 ///     <b>XG's error for the player's move is the depth-first error</b> of the
@@ -91,7 +100,7 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
     public void AfterBoards_AreXgsOwnResultingPositions()
     {
         corpus.CandidateAfterBoardMismatches.Should().BeEmpty(
-            "each candidate's derived after-board is XG's stored resulting position for it");
+            "every candidate XG stored has a derived after-board, and it is XG's stored resulting position for it");
         corpus.PlayerAfterBoardMismatches.Should().BeEmpty(
             "the player's derived after-board is XG's position after the played move");
     }
@@ -156,7 +165,10 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
         public List<string> CorruptWarningsNamingNoDecision { get; } = [];
         public List<string> Failures { get; } = [];
 
+        /// <summary>The candidates XG stored in every analysed decision position — XG's count, a skipped decision's included.</summary>
         public int CandidateAfterBoards { get; private set; }
+        /// <summary>The candidates of <see cref="CandidateAfterBoards"/> whose derived after-board is not XG's, or does not exist.</summary>
+        public int CandidateAfterBoardsDisagreeing { get; private set; }
         public List<string> CandidateAfterBoardMismatches { get; } = [];
         public int PlayerAfterBoards { get; private set; }
         public List<string> PlayerAfterBoardMismatches { get; } = [];
@@ -273,6 +285,17 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
             }
             CorruptCandidate += corrupt.Count;
 
+            // A skipped decision's candidates are XG's too, and none has an
+            // after-board: the skip is a disagreement with XG, named here.
+            foreach (var id in corrupt)
+            {
+                int stored = XgDecisionIterator.CandidateCount(((MoveRecord)sources[id]).Analysis);
+                CandidateAfterBoards += stored;
+                CandidateAfterBoardsDisagreeing += stored;
+                CandidateAfterBoardMismatches.Add(
+                    $"{name} {id}: skipped for a corrupt candidate, so none of the {stored} candidates XG stored has an after-board");
+            }
+
             var built = new Dictionary<DecisionId, BgDecisionData>();
             foreach (var record in records)
             {
@@ -304,12 +327,22 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
             BuiltPlays++;
             string where = $"{name} {play.Id}";
 
-            for (int i = 0; i < play.Decision.Plays.Count; i++)
+            int stored = XgDecisionIterator.CandidateCount(move.Analysis);
+            for (int i = 0; i < stored; i++)
             {
                 CandidateAfterBoards++;
+                if (i >= play.Decision.Plays.Count)
+                {
+                    CandidateAfterBoardsDisagreeing++;
+                    CandidateAfterBoardMismatches.Add($"{where} candidate {i + 1}: XG stored it, the record states no such candidate");
+                    continue;
+                }
                 var xg = move.Analysis.PositionsPlayed[i].ToBoardPosition().Flipped();
                 if (play.AfterBoardOf(i) != xg)
+                {
+                    CandidateAfterBoardsDisagreeing++;
                     CandidateAfterBoardMismatches.Add($"{where} candidate {i + 1} ({play.Decision.Plays[i].Notation})");
+                }
             }
             if (play.AfterPlayerBoard is { } after)
             {
@@ -398,7 +431,7 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
             foreach (var skip in CorruptSkips)
                 text.AppendLine(CultureInfo.InvariantCulture, $"  skipped: {skip}");
             text.AppendLine(CultureInfo.InvariantCulture,
-                $"After-boards: candidates {CandidateAfterBoards - CandidateAfterBoardMismatches.Count}/{CandidateAfterBoards} agree; players {PlayerAfterBoards - PlayerAfterBoardMismatches.Count}/{PlayerAfterBoards} agree.");
+                $"After-boards: candidates {CandidateAfterBoards - CandidateAfterBoardsDisagreeing}/{CandidateAfterBoards} XG stored agree; players {PlayerAfterBoards - PlayerAfterBoardMismatches.Count}/{PlayerAfterBoards} agree.");
             text.AppendLine(CultureInfo.InvariantCulture,
                 $"Player's error: depth first agrees {PlayerErrors - PlayerErrorExceptions.Count}/{PlayerErrors} ({PlayerErrorsAgreeingExactly} within {Exact:E0}); equity agrees {PlayerErrorsAgreeingUnderEquity}/{PlayerErrors}; {UnlistedPlayErrors} unlisted plays carry XG's error as stored.");
             text.AppendLine(CultureInfo.InvariantCulture,

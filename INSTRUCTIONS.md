@@ -688,10 +688,15 @@ vacuously on an empty corpus. It pins invariants, never a count:
 * every analysed decision builds a record, is passed by as not a decision,
   or is skipped for a corrupt candidate, with the warning naming it —
   nothing else fails;
-* each candidate's derived after-board is XG's stored resulting position
-  for it, and the player's is XG's position after the played move — XG
-  stores both in the mover's frame, so each is compared turned
-  (`BoardPosition.Flipped`), for either seat (see "Board format");
+* every candidate XG stored, in every analysed decision position, has a
+  derived after-board equal to XG's stored resulting position for it, and
+  the player's is XG's position after the played move — XG stores both in
+  the mover's frame, so each is compared turned (`BoardPosition.Flipped`),
+  for either seat (see "Board format"). The candidate count is XG's, not
+  the built records', so a decision skipped for a corrupt candidate is a
+  disagreement and fails this invariant, naming the decision: a
+  translation regression cannot leave the comparison unseen (the
+  umbrella's ruling on halheinrich/backgammon#273);
 * XG's recorded error for the player's move is the played candidate's
   error under depth first, save where the depth-first best is an
   opening-book candidate XG's recorded analysis evidently did not rank (the

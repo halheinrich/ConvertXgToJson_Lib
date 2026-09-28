@@ -511,8 +511,13 @@ public static class XgDecisionIterator
         return plays;
     }
 
-    /// <summary>The number of candidates an analysis carries: the slots with a move encoding and an evaluation, within its move count.</summary>
-    private static int CandidateCount(BestMoveAnalysis analysis) =>
+    /// <summary>
+    /// The number of candidates an analysis carries: the slots with a move
+    /// encoding and an evaluation, within its move count. Internal-not-private
+    /// for the corpus mirror, which counts the candidates XG stored whether or
+    /// not a record is built, as <see cref="IsSentinelOnlyAnalysis"/> is.
+    /// </summary>
+    internal static int CandidateCount(BestMoveAnalysis analysis) =>
         Math.Min(analysis.MoveCount, Math.Min(analysis.Evals.Length, analysis.Moves.Length));
 
     /// <summary>
