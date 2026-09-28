@@ -485,14 +485,6 @@ candidate is found by resulting position: the candidate whose
 `PositionsPlayed` XG stores equal to its `FinalPosition`, compared as
 `BoardPosition`s; none matches when the move was unlisted or not made.
 
-**One known stand-in: `ProbOfOpponentErrorJustifyingDouble = 0`.** XG
-stores no such value, so the record's claim that it is stored is a
-producer-model gap (Hal's ruling on halheinrich/backgammon#273,
-2026-09-27). The 0 every converted record has carried stays at its one
-site as temporary arc debt, until BgDataTypes_Lib's next leg removes the
-field; it is not derived here (the figure is booked as
-halheinrich/backgammon#288).
-
 **What is not a record.** The emission rules sit at the one dispatch both
 surfaces share (`IterateAnalysedDecisions`), so the two can never disagree
 about which source decisions become records:

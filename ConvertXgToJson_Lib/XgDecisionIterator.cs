@@ -670,13 +670,6 @@ public static class XgDecisionIterator
                 BgPctAfterDoubleTake = analysis.EvalDoubleTake.WinBackgammon,
                 LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
                 LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
-                // Temporary arc debt (Hal's ruling on halheinrich/backgammon#273,
-                // 2026-09-27): XG stores no such value, so the record's claim that
-                // it is stored is a producer-model gap. The 0 every converted
-                // record has carried stays until BgDataTypes_Lib's next leg of
-                // halheinrich/backgammon#273 removes the field; it is not derived
-                // here (the figure is booked as halheinrich/backgammon#288).
-                ProbOfOpponentErrorJustifyingDouble = 0,
                 UserDoublerAction = doublerAction,
                 UserTakerAction = takerAction,
                 // XG's error for a half is stored only where the record states
