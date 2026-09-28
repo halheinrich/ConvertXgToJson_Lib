@@ -12,7 +12,37 @@ namespace ConvertXgToJson_Lib.Tests;
 /// (<c>TestData/xg/</c> and <c>TestData/xgp/</c>; halheinrich/backgammon#273,
 /// halheinrich/backgammon#282). A record states only what XG stores and
 /// BgDataTypes_Lib derives the rest; XG stores much of the rest too, so each
-/// derivation has an oracle:
+/// derivation has an oracle.
+///
+/// <para>
+/// <b>The three kinds of evidence</b> this repo keeps, each its own
+/// (SPEC-scoring §3, "The truth-claim derivation"; Hal's ruling of 2026-09-27
+/// on halheinrich/backgammon#273). The cube claim's rule is not among them:
+/// BgDataTypes_Lib owns it and verifies it with synthetic tests.
+/// </para>
+/// <list type="number">
+///   <item><description>
+///     <b>Agreement with facts XG stores</b> — the invariants below, asserted
+///     here: among them, the inputs the claim derives from, XG's stored cube
+///     errors and its stored double/pass equity.
+///   </description></item>
+///   <item><description>
+///     <b>Measured counts</b> — how many built cube records derive each claim
+///     pair (<see cref="CubeDecisionData.BestClaimPair"/>), in
+///     <see cref="Summary"/>'s output with the other counts. A report, never
+///     asserted: the corpus stays free to change.
+///   </description></item>
+///   <item><description>
+///     <b>Permanent real input reaching Too Good / Pass</b> through the
+///     production path — not here, since this corpus is gitignored and
+///     churns, but in <see cref="TooGoodPassFixtureTests"/>, over named
+///     <c>TestData/FixtureFiles</c>. That is our rule applied to XG's stored
+///     numbers, not agreement with an XG label: XG stores none this repo can
+///     read as one.
+///   </description></item>
+/// </list>
+///
+/// <para>The facts XG stores, each asserted:</para>
 /// <list type="bullet">
 ///   <item><description>
 ///     <b>Every analysed decision has one of three outcomes</b> — it builds a
@@ -45,11 +75,17 @@ namespace ConvertXgToJson_Lib.Tests;
 ///     <b>XG's cube errors are the scoring policy's</b> errors of the stated
 ///     actions (BgDataTypes_Lib, "Cube-decision scoring on CubeDecisionData").
 ///   </description></item>
+///   <item><description>
+///     <b>XG's stored double/pass equity is the record's pass equity</b>: the
+///     analysis pane's <c>EquityDoubleDrop</c> equals
+///     <see cref="CubeDecisionData.ActionEquity"/> of
+///     <see cref="CubeAction.Pass"/>, both from the doubler's side. The value
+///     is read from the production API and never restated here.
+///   </description></item>
 /// </list>
 /// The corpus is gitignored and churns, so the invariants hold for any corpus
 /// and no count is pinned; on an empty corpus every fact passes vacuously, by
-/// design (AGENTS.md, "TestData convention"). This gates nothing. The measured
-/// counts are in <see cref="Summary"/>'s output.
+/// design (AGENTS.md, "TestData convention"). This gates nothing.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -71,6 +107,15 @@ namespace ConvertXgToJson_Lib.Tests;
 /// after-boards are in the next mover's frame, the mover's turned
 /// (<see cref="BoardPosition.Flipped"/>), so XG's resulting position is
 /// compared flipped, for either seat.
+/// </para>
+/// <para>
+/// <b>The pass equity: pairing and perspective.</b> Each built cube record is
+/// paired with the analysis pane it was built from by its
+/// <see cref="DecisionId"/>, which the mirror walk computes for the pane as
+/// the iterator does. The pane's equities are the doubler's — the record
+/// states its no-double and double/take equities verbatim — so its stored
+/// double/pass equity is compared as stored, with no negation, and exactly:
+/// a constant XG stores needs no tolerance.
 /// </para>
 /// </remarks>
 [Collection("FileIO")]
@@ -122,6 +167,18 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
     {
         corpus.DoublerErrorMismatches.Should().BeEmpty("XG's doubling error is the stated doubler action's derived error");
         corpus.TakerErrorMismatches.Should().BeEmpty("XG's take error is the stated taker action's derived error");
+    }
+
+    /// <summary>
+    /// XG's stored double/pass equity is the equity the record gives a pass,
+    /// in the doubler's perspective, for every built cube record: an input of
+    /// the cube claim held to a fact XG stores.
+    /// </summary>
+    [Fact]
+    public void PassEquity_IsXgsStoredDoublePassEquity()
+    {
+        corpus.PassEquityMismatches.Should().BeEmpty(
+            "XG's stored double/pass equity is ActionEquity(Pass), both from the doubler's side");
     }
 
     /// <summary>
@@ -189,6 +246,15 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
         public List<string> TakerErrorMismatches { get; } = [];
         public int UnstatedDoublerErrors { get; private set; }
         public int UnstatedTakerErrors { get; private set; }
+
+        /// <summary>The built cube records whose pane's double/pass equity was compared — every one.</summary>
+        public int PassEquities { get; private set; }
+        /// <summary>The distinct double/pass equities XG stored across <see cref="PassEquities"/>, as measured.</summary>
+        public SortedSet<double> StoredPassEquities { get; } = [];
+        public List<string> PassEquityMismatches { get; } = [];
+
+        /// <summary>How many built cube records derive each claim pair: reported, never asserted.</summary>
+        public Dictionary<CubeClaimPair, int> ClaimPairs { get; } = [];
 
         public int XgpFiles { get; private set; }
         public List<string> XgpPolicyMismatches { get; } = [];
@@ -403,6 +469,17 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
                 if (difference <= Exact) TakerErrorsExact++;
                 if (difference > ErrorTolerance) TakerErrorMismatches.Add($"{name} {cube.Id}: {difference:E3}");
             }
+
+            PassEquities++;
+            double xgPass = record.Analysis.EquityDoubleDrop;
+            double pass = d.ActionEquity(CubeAction.Pass);
+            StoredPassEquities.Add(xgPass);
+            if (xgPass != pass)
+                PassEquityMismatches.Add(string.Create(CultureInfo.InvariantCulture,
+                    $"{name} {cube.Id}: XG stores {xgPass:R}, the record's pass equity is {pass:R}"));
+
+            var pair = d.BestClaimPair;
+            ClaimPairs[pair] = ClaimPairs.GetValueOrDefault(pair) + 1;
         }
 
         private void MeasureXgpPolicy(XgFile file, string name, List<BgDecisionData> walked)
@@ -440,6 +517,10 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
                 text.AppendLine(CultureInfo.InvariantCulture, $"  {(book ? "book" : "NOT BOOK")}: {where}: {detail}");
             text.AppendLine(CultureInfo.InvariantCulture,
                 $"Cube errors: doubler {DoublerErrors - DoublerErrorMismatches.Count}/{DoublerErrors} agree ({DoublerErrorsExact} within {Exact:E0}, max difference {DoublerErrorMaxDifference:E3}); taker {TakerErrors - TakerErrorMismatches.Count}/{TakerErrors} agree ({TakerErrorsExact} within {Exact:E0}, max difference {TakerErrorMaxDifference:E3}); stored as unstated: doubler {UnstatedDoublerErrors}, taker {UnstatedTakerErrors}.");
+            text.AppendLine(CultureInfo.InvariantCulture,
+                $"Pass equity: XG's stored double/pass equity is the record's {PassEquities - PassEquityMismatches.Count}/{PassEquities}; values XG stored: {string.Join(", ", StoredPassEquities.Select(v => v.ToString("R", CultureInfo.InvariantCulture)))}.");
+            text.AppendLine(CultureInfo.InvariantCulture,
+                $"Claim pairs of the {BuiltCubes} built cube records (reported, not asserted): {string.Join("; ", ClaimPairs.OrderBy(p => p.Key.Claim).ThenBy(p => p.Key.Taker).Select(p => $"{p.Key.Claim}/{p.Key.Taker} {p.Value}"))}.");
             text.AppendLine(CultureInfo.InvariantCulture,
                 $".xgp policy: {XgpFiles - XgpPolicyMismatches.Count}/{XgpFiles} agree.");
             return text.ToString();
