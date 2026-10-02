@@ -748,9 +748,10 @@ equity in 17,722/17,722, the one value XG stored being 1. Measured
 2026-10-01 over the 573-file corpus of that day (193 `.xgp`), 18,170 built
 cube records: their truths are No double 15,913, Double / Take 752,
 Double / Pass 580 and the fourth answer 925, which reads Too good in 902
-and No double / Pass in 23. Among the `.xg` fixtures the same day, 133 cube
-records across eleven files have the fourth answer as their truth, 129
-reading Too good and 4 No double / Pass. Dated evidence, not pins.
+and No double / Pass in 23. Measured 2026-10-02 (UTC) over the 21 `.xg`
+fixtures, all of which parsed (none failed): 133 cube records, across
+eleven of the files, have the fourth answer as their truth, 129 reading
+Too good and 4 No double / Pass. Dated evidence, not pins.
 
 Supporting helpers:
 

@@ -24,12 +24,12 @@ namespace ConvertXgToJson_Lib.Tests;
 /// </para>
 /// <para>
 /// The fixtures, chosen by the umbrella's probe of 2026-09-27. Measured
-/// 2026-10-01 over the local <c>.xg</c> fixtures: 133 cube records across
-/// eleven files have the fourth answer as their truth; 129 of them read Too
-/// good and 4 No double / Pass, and <c>MoneyTest.xg</c> game 1 move 16 is the
-/// only money one. The match is <c>match35253054.xg</c> game 1 move 28 (no
-/// double +1.3660, double/take +2.7966), a 5-point match fixture other tests
-/// already name. Measured at both: the cube is 1 and centred, the opponent
+/// 2026-10-02 (UTC) over the local <c>.xg</c> fixtures: all 21 parsed, none
+/// failed. Among them 133 cube records, across eleven of the files, have the
+/// fourth answer as their truth; 129 of them read Too good and 4 No double /
+/// Pass, and <c>MoneyTest.xg</c> game 1 move 16 is the only money one. The
+/// match is <c>match35253054.xg</c> game 1 move 28 (no double +1.3660,
+/// double/take +2.7966), a 5-point match fixture other tests already name. Measured at both: the cube is 1 and centred, the opponent
 /// has nothing borne off, and gammons are possible (so the money session is
 /// not under the Jacoby rule), and the answer reads Too good; this test pins
 /// that reading.
