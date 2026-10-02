@@ -17,23 +17,27 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <para>
 /// <b>The three kinds of evidence</b> this repo keeps, each its own
 /// (SPEC-scoring §3, "The truth-claim derivation"; Hal's ruling of 2026-09-27
-/// on halheinrich/backgammon#273). The cube claim's rule is not among them:
-/// BgDataTypes_Lib owns it and verifies it with synthetic tests.
+/// on halheinrich/backgammon#273). The cube truth's rule is not among them:
+/// BgDataTypes_Lib owns it and verifies it with synthetic tests. The truth is
+/// one of the four cube answers, <see cref="CubeDecisionData.BestAnswer"/>
+/// (SPEC-scoring §3, as amended on halheinrich/backgammon#326).
 /// </para>
 /// <list type="number">
 ///   <item><description>
 ///     <b>Agreement with facts XG stores</b> — the invariants below, asserted
-///     here: among them, the inputs the claim derives from, XG's stored cube
+///     here: among them, the inputs the truth derives from, XG's stored cube
 ///     errors and its stored double/pass equity.
 ///   </description></item>
 ///   <item><description>
-///     <b>Measured counts</b> — how many built cube records derive each claim
-///     pair (<see cref="CubeDecisionData.BestClaimPair"/>), in
+///     <b>Measured counts</b> — how many built cube records have each answer
+///     as their truth (<see cref="CubeDecisionData.BestAnswer"/>), and of
+///     those with the fourth, how many it reads as Too good and how many as
+///     No double / Pass (<see cref="CubeDecision.ClaimOf"/>), in
 ///     <see cref="Summary"/>'s output with the other counts. A report, never
 ///     asserted: the corpus stays free to change.
 ///   </description></item>
 ///   <item><description>
-///     <b>Permanent real input reaching Too Good / Pass</b> through the
+///     <b>Permanent real input reaching the fourth answer</b> through the
 ///     production path — not here, since this corpus is gitignored and
 ///     churns, but in <see cref="TooGoodPassFixtureTests"/>, over named
 ///     <c>TestData/FixtureFiles</c>. That is our rule applied to XG's stored
@@ -172,7 +176,7 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
     /// <summary>
     /// XG's stored double/pass equity is the equity the record gives a pass,
     /// in the doubler's perspective, for every built cube record: an input of
-    /// the cube claim held to a fact XG stores.
+    /// the cube truth held to a fact XG stores.
     /// </summary>
     [Fact]
     public void PassEquity_IsXgsStoredDoublePassEquity()
@@ -253,8 +257,13 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
         public SortedSet<double> StoredPassEquities { get; } = [];
         public List<string> PassEquityMismatches { get; } = [];
 
-        /// <summary>How many built cube records derive each claim pair: reported, never asserted.</summary>
-        public Dictionary<CubeClaimPair, int> ClaimPairs { get; } = [];
+        /// <summary>How many built cube records have each answer as their truth (<see cref="CubeDecisionData.BestAnswer"/>): reported, never asserted.</summary>
+        public Dictionary<CubeAnswer, int> BestAnswers { get; } = [];
+        /// <summary>
+        /// The records whose truth is the fourth answer, counted by its reading at the decision
+        /// (<see cref="CubeDecision.ClaimOf"/>: Too good or No double / Pass): reported, never asserted.
+        /// </summary>
+        public Dictionary<CubeClaim, int> FourthAnswerReadings { get; } = [];
 
         public int XgpFiles { get; private set; }
         public List<string> XgpPolicyMismatches { get; } = [];
@@ -478,8 +487,13 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
                 PassEquityMismatches.Add(string.Create(CultureInfo.InvariantCulture,
                     $"{name} {cube.Id}: XG stores {xgPass:R}, the record's pass equity is {pass:R}"));
 
-            var pair = d.BestClaimPair;
-            ClaimPairs[pair] = ClaimPairs.GetValueOrDefault(pair) + 1;
+            var answer = d.BestAnswer;
+            BestAnswers[answer] = BestAnswers.GetValueOrDefault(answer) + 1;
+            if (answer == CubeAnswer.NoDoublePass)
+            {
+                var reading = cube.ClaimOf(answer);
+                FourthAnswerReadings[reading] = FourthAnswerReadings.GetValueOrDefault(reading) + 1;
+            }
         }
 
         private void MeasureXgpPolicy(XgFile file, string name, List<BgDecisionData> walked)
@@ -520,7 +534,7 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
             text.AppendLine(CultureInfo.InvariantCulture,
                 $"Pass equity: XG's stored double/pass equity is the record's {PassEquities - PassEquityMismatches.Count}/{PassEquities}; values XG stored: {string.Join(", ", StoredPassEquities.Select(v => v.ToString("R", CultureInfo.InvariantCulture)))}.");
             text.AppendLine(CultureInfo.InvariantCulture,
-                $"Claim pairs of the {BuiltCubes} built cube records (reported, not asserted): {string.Join("; ", ClaimPairs.OrderBy(p => p.Key.Claim).ThenBy(p => p.Key.Taker).Select(p => $"{p.Key.Claim}/{p.Key.Taker} {p.Value}"))}.");
+                $"Best answers of the {BuiltCubes} built cube records (reported, not asserted): {string.Join("; ", BestAnswers.OrderBy(p => p.Key).Select(p => $"{p.Key} {p.Value}"))}; the fourth answer, {CubeAnswer.NoDoublePass}, by its reading: {string.Join("; ", FourthAnswerReadings.OrderBy(p => p.Key).Select(p => $"reads {p.Key} {p.Value}"))}.");
             text.AppendLine(CultureInfo.InvariantCulture,
                 $".xgp policy: {XgpFiles - XgpPolicyMismatches.Count}/{XgpFiles} agree.");
             return text.ToString();

@@ -97,8 +97,8 @@ tests synthesize their files through the builders; corpus and fixture tests
 read the umbrella's `TestData/` through `TestPaths` — see "TestData" below.
 `XgCorpusAgreementTests` measures the converter against XG's own numbers
 over the local corpus, and `TooGoodPassFixtureTests` holds permanent
-fixtures reaching the Too Good / Pass branch (see "Measured against XG"
-under XgDecisionIterator).
+fixtures reaching the fourth cube answer, read as Too good (see "Measured
+against XG" under XgDecisionIterator).
 
 ## Architecture
 
@@ -707,29 +707,34 @@ vacuously on an empty corpus. It pins invariants, never a count:
 * read as the `.xgp` it is, a position file emits the play its walk built,
   else its cube.
 
-**The Too Good evidence is kept in three kinds** (SPEC-scoring §3, "The
+**The cube truth's evidence is kept in three kinds** (SPEC-scoring §3, "The
 truth-claim derivation"; Hal's ruling of 2026-09-27 on
-halheinrich/backgammon#273). BgDataTypes_Lib owns the rule and verifies it
-with synthetic tests; this repo owns every comparison against facts XG
-actually stores:
+halheinrich/backgammon#273). The truth is one of the four cube answers,
+`CubeDecisionData.BestAnswer`, and the fourth reads Too good or No double /
+Pass by the decision (`CubeDecision.ClaimOf`); SPEC-scoring §3, as amended
+on halheinrich/backgammon#326, is the model. BgDataTypes_Lib owns the rule
+and the reading and verifies them with synthetic tests; this repo owns
+every comparison against facts XG actually stores:
 
-1. *Agreement with facts XG stores* — the invariants above, the claim's
+1. *Agreement with facts XG stores* — the invariants above, the truth's
    inputs among them (XG's cube errors, its double/pass equity).
 2. *Measured counts* — the corpus test's report states how many built cube
-   records derive each claim pair (`BestClaimPair`). A report, never
-   asserted; the corpus stays free to change.
-3. *Permanent real input reaching Too Good / Pass* —
+   records have each answer as their truth (`BestAnswer`), and how many of
+   those with the fourth read Too good and how many No double / Pass. A
+   report, never asserted; the corpus stays free to change.
+3. *Permanent real input reaching the fourth answer, read as Too good* —
    `TooGoodPassFixtureTests`, `RequiresFixtureFiles`: named permanent
    fixtures, a money session (`MoneyTest.xg` game 1 move 16, the only money
    case among the fixtures) and a match (`match35253054.xg` game 1 move 28),
-   each of whose cube records the production path builds with
-   `BestClaimPair` Too Good / Pass. It fails when a named file is missing.
-   It shows that our rule, applied to XG's stored numbers, reaches that
-   branch on real input — not agreement with an XG Too Good label: XG's
-   files carry no analysis text, and its two stored cube choice fields
-   (`ComputerChoice`, `DoubleChoice3`) are undocumented and agree with the
-   pane's stored equities only at 1-ply (the umbrella's measurement,
-   2026-09-27), so nothing here reads them.
+   each of whose cube records the production path builds with `BestAnswer`
+   the fourth answer, `NoDoublePass`, and with gammons possible, so that it
+   reads Too good; the test pins all three, as measured. It fails when a
+   named file is missing. It shows that our rule, applied to XG's stored
+   numbers, reaches that answer on real input — not agreement with an XG
+   Too Good label: XG's files carry no analysis text, and its two stored
+   cube choice fields (`ComputerChoice`, `DoubleChoice3`) are undocumented
+   and agree with the pane's stored equities only at 1-ply (the umbrella's
+   measurement, 2026-09-27), so nothing here reads them.
 
 Measured 2026-09-27 over the 571-file corpus of that day (378 `.xg`, 193
 `.xgp`): 54,991 analysed decisions, all built (37,269 plays, 17,722 cubes),
@@ -739,11 +744,13 @@ player after-boards 37,240/37,240 equal to XG's; the player's error
 opening moves (moves 2–4) whose depth-first best is a book candidate; cube
 errors 17,357/17,357 (doubler) and 851/851 (taker). Measured 2026-09-28
 (UTC) over the same corpus: XG's double/pass equity is the record's pass
-equity in 17,722/17,722, the one value XG stored being 1; the claim pairs
-of the 17,722 cube records are No double / Take 15,518, No double / Pass
-24, Double / Take 737, Double / Pass 572, Too Good / Pass 871. Among the
-fixtures, 129 cube records across ten `.xg` files derive Too Good / Pass.
-Dated evidence, not pins.
+equity in 17,722/17,722, the one value XG stored being 1. Measured
+2026-10-01 over the 573-file corpus of that day (193 `.xgp`), 18,170 built
+cube records: their truths are No double 15,913, Double / Take 752,
+Double / Pass 580 and the fourth answer 925, which reads Too good in 902
+and No double / Pass in 23. Among the `.xg` fixtures the same day, 133 cube
+records across eleven files have the fourth answer as their truth, 129
+reading Too good and 4 No double / Pass. Dated evidence, not pins.
 
 Supporting helpers:
 
