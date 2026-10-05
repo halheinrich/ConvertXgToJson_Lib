@@ -129,12 +129,12 @@ public static class XgFileReader
     /// The stream must be positioned at the very beginning of the file.
     /// </summary>
     /// <remarks>
-    /// The payload after the outer header is either the legacy format — one
-    /// zlib stream filling it exactly — or a container read through its
-    /// directory, every inner file it names extracted and checked against
-    /// its manifest entry. A payload that is neither is refused, never
-    /// guessed at: a multi-stream payload whose directory is absent or
-    /// fails a check is not read.
+    /// The payload after the outer header is a container read through its
+    /// directory when that directory validates, every inner file it names
+    /// extracted and checked against its manifest entry; otherwise it is the
+    /// legacy format when one zlib stream fills it exactly. A payload that
+    /// is neither is refused, never guessed at: a multi-stream payload whose
+    /// directory is absent or fails a check is not read.
     /// </remarks>
     /// <exception cref="InvalidDataException">
     /// The payload is not one zlib stream and its container directory cannot

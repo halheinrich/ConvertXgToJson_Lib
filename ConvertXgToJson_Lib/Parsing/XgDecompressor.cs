@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using System.IO.Hashing;
 
@@ -12,24 +13,24 @@ namespace ConvertXgToJson_Lib.Parsing;
 ///   temp.xgr  - M x 2184 bytes  (TRolloutContext records, may be absent)
 ///   temp.xgc  - variable         (RTF comments, may be absent)
 ///
-/// <para><b>Which format.</b> A payload is the legacy single-stream format
-/// exactly when one zlib stream begins at its first byte and that stream's
-/// compressed extent ends at the payload's last byte. That stream holds
-/// temp.xg with temp.xgi's two records at its tail, which are split off
-/// when the stream is longer than them. Every other payload is a container
-/// and is read through its directory — the end-record and manifest
-/// <see cref="XgContainerLayout"/> describes — which assigns each inner file
-/// by its manifest name. When the directory is absent or fails any check
-/// below, reading throws <see cref="InvalidDataException"/> whose message
-/// names that check; nothing is assigned by guesswork. One limit follows
-/// from the rule: a container cut off exactly at the end of its first
-/// stream is one complete zlib stream, so it cannot be told from a legacy
-/// file and reads as one.</para>
-///
-/// <para>Deciding the format inflates the zlib stream at the payload's
-/// first byte to learn where it ends. In a container that stream is an
-/// inner file's — temp.xg's in every corpus file — and the result is
-/// discarded: the test extracts nothing and certifies nothing.</para>
+/// <para><b>Which format: the directory decides first.</b> A payload whose
+/// directory — the end-record and manifest <see cref="XgContainerLayout"/>
+/// describes — passes every check below is a container, read through that
+/// directory with each inner file assigned by its manifest name, even if
+/// the payload might also parse as one zlib stream. Only when the directory
+/// fails a check is the payload tested for the legacy single-stream format:
+/// one zlib stream that begins at its first byte and whose compressed
+/// extent ends at the payload's last byte. That stream holds temp.xg with
+/// temp.xgi's two records at its tail, which are split off when the stream
+/// is longer than them. A payload that is neither is refused with
+/// <see cref="InvalidDataException"/> whose message names the directory
+/// check that failed; nothing is assigned by guesswork. So reading a
+/// container inflates nothing but its manifest, bounded by the size its
+/// entry count implies, and the inner files a surface asks for, each
+/// bounded by its declared size. One limit follows: a container cut off
+/// exactly at the end of its first stream has no directory and is one
+/// complete zlib stream, so it cannot be told from a legacy file and reads
+/// as one.</para>
 ///
 /// <para><b>The directory</b> is validated in full before any inner file
 /// is extracted, the same for every read surface: the payload holds at
@@ -38,8 +39,7 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// manifest it locates ends where the end-record begins; the body's CRC32
 /// matches it; the manifest is one zlib stream filling exactly its extent
 /// and inflates to exactly one 532-byte entry per counted file. Then each
-/// entry: it
-/// names an inner file (case-insensitively), and no other entry names the
+/// entry: it names an inner file (case-insensitively), and no other entry names the
 /// same one; its storage flag is 0 (compressed) or 1 (stored), and no other
 /// value is read as either; a stored entry's two sizes are equal; and its
 /// extent lies wholly before the manifest, computed without overflow, so a
@@ -83,9 +83,9 @@ internal static class XgDecompressor
     }
 
     /// <summary>
-    /// The metadata read: opens the payload through the same format test and
-    /// directory validation as <see cref="Decompress"/> and extracts temp.xg
-    /// alone; no other inner file is extracted or checked.
+    /// The metadata read: opens the payload by the same rule as
+    /// <see cref="Decompress"/> and extracts temp.xg alone; no other inner
+    /// file is inflated, extracted or checked.
     /// </summary>
     /// <exception cref="InvalidDataException">
     /// The payload is not one zlib stream and its directory cannot be used,
@@ -106,13 +106,20 @@ internal static class XgDecompressor
     {
         /// <summary>
         /// Decides the payload's format by <see cref="XgDecompressor"/>'s
-        /// rule and validates a container's directory, extracting no inner
-        /// file.
+        /// rule — the directory first, the single stream only when the
+        /// directory fails — extracting no inner file.
         /// </summary>
-        public static Payload Open(byte[] raw) =>
-            Inflate(raw, 0, raw.Length, long.MaxValue, out byte[] single) == InflateOutcome.Complete
-                ? new SingleStreamPayload(single)
-                : ContainerPayload.ReadDirectory(raw);
+        /// <exception cref="InvalidDataException">
+        /// Neither holds; the message names the directory check that failed.
+        /// </exception>
+        public static Payload Open(byte[] raw)
+        {
+            if (ContainerPayload.TryReadDirectory(raw, out var container, out string? failedCheck))
+                return container;
+            if (Inflate(raw, 0, raw.Length, long.MaxValue, out byte[] single) == InflateOutcome.Complete)
+                return new SingleStreamPayload(single);
+            throw DirectoryRefused(failedCheck);
+        }
 
         /// <summary>The bytes of <paramref name="file"/>; empty when the payload holds none.</summary>
         public abstract byte[] Read(XgInnerFile file);
@@ -160,30 +167,54 @@ internal static class XgDecompressor
         }
 
         /// <summary>
-        /// Validates the directory in the order the class doc states,
-        /// throwing at the first check that fails.
+        /// Reads and validates the directory, extracting no inner file:
+        /// <c>true</c> with the container when every check holds, otherwise
+        /// <c>false</c> with the first check that failed, phrased for the
+        /// refusal message.
         /// </summary>
-        public static ContainerPayload ReadDirectory(byte[] raw)
+        public static bool TryReadDirectory(
+            byte[] raw,
+            [NotNullWhen(true)] out ContainerPayload? payload,
+            [NotNullWhen(false)] out string? failedCheck)
+        {
+            var entries = new Dictionary<XgInnerFile, XgContainerLayout.ManifestEntry>();
+            failedCheck = FirstFailedCheck(raw, entries);
+            if (failedCheck is not null)
+            {
+                payload = null;
+                return false;
+            }
+            payload = new ContainerPayload(raw, entries);
+            return true;
+        }
+
+        /// <summary>
+        /// Runs the directory's checks in the order the class doc states,
+        /// filling <paramref name="entries"/>; returns the first check that
+        /// fails, or <c>null</c> when all hold.
+        /// </summary>
+        private static string? FirstFailedCheck(
+            byte[] raw, Dictionary<XgInnerFile, XgContainerLayout.ManifestEntry> entries)
         {
             const int endRecordSize = XgContainerLayout.EndRecordSize;
             if (raw.Length < endRecordSize)
-                throw DirectoryRefused($"the payload holds {raw.Length} bytes, too few for the {endRecordSize}-byte end-record");
+                return $"the payload holds {raw.Length} bytes, too few for the {endRecordSize}-byte end-record";
             if (!XgContainerLayout.TryReadEndRecord(raw.AsSpan(raw.Length - endRecordSize), out var trailer))
-                throw DirectoryRefused(
+                return
                     $"its last {endRecordSize} bytes are not an end-record (version {XgContainerLayout.EndRecordVersion}, " +
-                    $"compressed registry {XgContainerLayout.EndRecordCompressedRegistry}, reserved bytes zero)");
+                    $"compressed registry {XgContainerLayout.EndRecordCompressedRegistry}, reserved bytes zero)";
 
             int bodyLength = raw.Length - endRecordSize;
             if (trailer.InnerFileCount == 0)
-                throw DirectoryRefused("the end-record counts no inner files");
+                return "the end-record counts no inner files";
             long manifestEnd = (long)trailer.ManifestOffset + trailer.ManifestCompressedSize;
             if (manifestEnd != bodyLength)
-                throw DirectoryRefused(
+                return
                     $"the end-record places the manifest at bytes {trailer.ManifestOffset} to {manifestEnd} of the body, " +
-                    $"which does not end where the end-record begins, at byte {bodyLength}");
+                    $"which does not end where the end-record begins, at byte {bodyLength}";
             uint bodyCrc = Crc32.HashToUInt32(raw.AsSpan(0, bodyLength));
             if (bodyCrc != trailer.BodyCrc32)
-                throw DirectoryRefused($"the body's CRC32 is 0x{bodyCrc:X8}, but the end-record states 0x{trailer.BodyCrc32:X8}");
+                return $"the body's CRC32 is 0x{bodyCrc:X8}, but the end-record states 0x{trailer.BodyCrc32:X8}";
 
             long manifestLength = (long)trailer.InnerFileCount * XgContainerLayout.ManifestEntrySize;
             string entriesNeed = $"the end-record's {trailer.InnerFileCount} entries need {manifestLength}";
@@ -192,14 +223,13 @@ internal static class XgDecompressor
                 case InflateOutcome.Complete:
                     break;
                 case InflateOutcome.ExceedsLimit:
-                    throw DirectoryRefused($"the manifest inflates to more bytes than {entriesNeed}");
+                    return $"the manifest inflates to more bytes than {entriesNeed}";
                 case var fault:
-                    throw DirectoryRefused($"the manifest's compressed bytes {StreamFault(fault, trailer.ManifestCompressedSize)}");
+                    return $"the manifest's compressed bytes {StreamFault(fault, trailer.ManifestCompressedSize)}";
             }
             if (manifest.Length != manifestLength)
-                throw DirectoryRefused($"the manifest inflates to {manifest.Length} bytes, but {entriesNeed}");
+                return $"the manifest inflates to {manifest.Length} bytes, but {entriesNeed}";
 
-            var entries = new Dictionary<XgInnerFile, XgContainerLayout.ManifestEntry>();
             for (int pos = 0; pos < manifest.Length; pos += XgContainerLayout.ManifestEntrySize)
             {
                 var entry = XgContainerLayout.ReadManifestEntry(
@@ -207,26 +237,26 @@ internal static class XgDecompressor
                 string entryName = $"manifest entry '{entry.Name}'";
 
                 if (!XgContainerLayout.TryParseInnerFileName(entry.Name, out XgInnerFile file))
-                    throw DirectoryRefused($"{entryName} does not name an XG inner file");
+                    return $"{entryName} does not name an XG inner file";
                 if (entries.ContainsKey(file))
-                    throw DirectoryRefused($"the manifest names {XgContainerLayout.NameOf(file)} more than once");
+                    return $"the manifest names {XgContainerLayout.NameOf(file)} more than once";
                 if (!Enum.IsDefined(entry.Storage))
-                    throw DirectoryRefused(
-                        $"{entryName} has storage flag {(byte)entry.Storage}, where only 0 (compressed) and 1 (stored) are known");
+                    return
+                        $"{entryName} has storage flag {(byte)entry.Storage}, where only 0 (compressed) and 1 (stored) are known";
                 if (entry.Storage == XgContainerLayout.EntryStorage.Stored && entry.CompressedSize != entry.UncompressedSize)
-                    throw DirectoryRefused(
+                    return
                         $"{entryName} is stored, but its stored size ({entry.CompressedSize}) differs from its " +
-                        $"uncompressed size ({entry.UncompressedSize})");
+                        $"uncompressed size ({entry.UncompressedSize})";
                 if (entry.End > trailer.ManifestOffset)
-                    throw DirectoryRefused(
-                        $"{entryName} spans bytes {entry.Offset} to {entry.End} of the body, past the manifest at byte {trailer.ManifestOffset}");
+                    return
+                        $"{entryName} spans bytes {entry.Offset} to {entry.End} of the body, past the manifest at byte {trailer.ManifestOffset}";
 
                 entries.Add(file, entry);
             }
             if (!entries.ContainsKey(XgInnerFile.GameRecords))
-                throw DirectoryRefused($"the manifest names no {XgContainerLayout.NameOf(XgInnerFile.GameRecords)}");
+                return $"the manifest names no {XgContainerLayout.NameOf(XgInnerFile.GameRecords)}";
 
-            return new ContainerPayload(raw, entries);
+            return null;
         }
 
         /// <summary>Extracts <paramref name="file"/> by the class doc's one extraction rule.</summary>

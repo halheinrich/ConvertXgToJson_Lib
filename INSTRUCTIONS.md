@@ -151,8 +151,8 @@ Entry points:
 
 * `ReadFile` — full parse of a `.xg` or `.xgp` file, yielding all records.
   Format is detected from file content, so `IterateXgDirectory` routes both
-  extensions through it uniformly. A payload that is neither the legacy
-  single stream nor a container with a usable directory, or whose inner
+  extensions through it uniformly. A payload that is neither a container
+  with a usable directory nor the legacy single stream, or whose inner
   file contradicts its manifest entry, is refused as
   `InvalidDataException` naming the failed check ("Container facts" under
   Writing).
@@ -297,12 +297,17 @@ the evidence and the source's pinned URL; halheinrich/backgammon#343):
   reader recognizes an end-record by them. Pinned by `XgFileWriterTests`
   (writer trailer + `XgCorpus_EndRecord_*` corpus agreement).
 * **Reading — refuse, never guess** (Hal, 2026-10-05: "Refuse with clear
-  error"; `XgDecompressor`'s class doc states the contract in order). A
-  payload is the legacy single-stream format exactly when one zlib stream
-  begins at its first byte and ends at its last; every other payload is
-  read through its directory, or refused with `InvalidDataException` naming
-  the failed check — no inner file is ever assigned by record size. The
-  whole directory is validated before any inner file is extracted: the
+  error"; `XgDecompressor`'s class doc states the contract in order). The
+  directory decides first: a payload whose directory validates is a
+  container, read through it, even if it might also parse as one zlib
+  stream. Only when the directory fails a check is the payload the legacy
+  single-stream format — exactly when one zlib stream begins at its first
+  byte and ends at its last; otherwise it is refused with
+  `InvalidDataException` naming the directory check that failed — no inner
+  file is ever assigned by record size. So reading a container inflates
+  only its manifest (bounded by its entry count) and the inner files a
+  surface asks for (each bounded by its declared size). The whole
+  directory is validated before any inner file is extracted: the
   end-record's shape, a non-zero file count, the manifest ending where the
   end-record begins, the body CRC, the manifest exactly one zlib stream of
   532 bytes per counted file; per entry a known name named once
@@ -316,11 +321,10 @@ the evidence and the source's pinned URL; halheinrich/backgammon#343):
   halheinrich/backgammon#343, verifies the reading where the body CRC
   verifies the bytes). `ReadFile` / `ReadStream` extract all four inner
   files; `ReadMatchInfo` and `ReadGameHeaders` extract temp.xg alone, so
-  they neither extract nor certify the rest. (Deciding the format inflates
-  the stream at the payload's first byte — temp.xg's in every corpus file,
-  so the metadata reads inflate it twice — and discards it.) One limit: a
-  container cut off exactly at the end of its first stream is one complete
-  zlib stream, so it cannot be told from a legacy file and reads as one.
+  they neither inflate nor certify the rest. One limit: a container cut off
+  exactly at the end of its first stream has no directory and is one
+  complete zlib stream, so it cannot be told from a legacy file and reads
+  as one.
 * `temp.xgi` holds exactly two records: byte-copies of the first and last
   records of the emitted stream. (Real XG writes its session's first/last —
   the "last" often isn't in the `.xgp` at all — so XG demonstrably does not

@@ -14,9 +14,11 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <see cref="XgDecompressor"/>'s class doc states it), against payloads
 /// <see cref="RawXgContainer"/> synthesizes byte by byte:
 /// <list type="bullet">
-/// <item>which payloads are the legacy single stream, and that every other
-/// payload is read through its directory or refused — never assigned by
-/// record size;</item>
+/// <item>that a payload is read through its directory when the directory
+/// validates, inflating no inner file before it is consulted; that only a
+/// payload whose directory fails is tested as the legacy single stream; and
+/// that every other payload is refused — never assigned by record
+/// size;</item>
 /// <item>one refusal control per directory check, each refused with the
 /// same <see cref="InvalidDataException"/> by all three read surfaces, the
 /// game-header enumeration's deferred;</item>
@@ -133,7 +135,7 @@ public class XgContainerDirectoryTests
     }
 
     // -----------------------------------------------------------------------
-    //  Which format: exactly one zlib stream, or a directory
+    //  Which format: a directory that validates, else exactly one zlib stream
     // -----------------------------------------------------------------------
 
     [Fact]
@@ -202,6 +204,62 @@ public class XgContainerDirectoryTests
         payload[..first.Length].Should().Equal(first);
 
         AssertEverySurfaceReadsTheMatch(payload[..first.Length]);
+    }
+
+    /// <summary>
+    /// The directory is consulted before any inner file is inflated. This
+    /// container's first stream is temp.xgc, declared as the comment table's
+    /// few bytes but a zip bomb of 64 MiB of zeros. Deciding the format by
+    /// inflating the stream at byte 0 first — the order before this test —
+    /// made every surface inflate it in full and discard it; read through the
+    /// directory first, the metadata reads never touch it and the full read
+    /// stops at its declared size. The observation is the managed bytes each
+    /// read allocates on this thread, far below the bomb's size.
+    /// </summary>
+    [Fact]
+    public void ValidContainer_IsReadThroughItsDirectory_BeforeAnyInnerFileIsInflated()
+    {
+        const long budget = 16 * 1024 * 1024;
+        byte[] bomb = RawXgContainer.Zlib(new byte[64 * 1024 * 1024]);
+        byte[] file = RawXgContainer.File(RawXgContainer.Payload([Xgc with { Body = bomb }, Xg, Xgi]));
+        using var temp = new TempXgFile(file);
+
+        static long Allocated(Action read)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            read();
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        Allocated(() => XgFileReader.ReadMatchInfo(temp.Path)!.Player1.Should().Be("Alice"))
+            .Should().BeLessThan(budget, "the match info read inflates temp.xg alone");
+        Allocated(() => XgFileReader.ReadGameHeaders(temp.Path, new XgIteratorState()).Should().HaveCount(2))
+            .Should().BeLessThan(budget, "the game-header read inflates temp.xg alone");
+        Allocated(() => FluentActions.Invoking(() => XgFileReader.ReadStream(new MemoryStream(file)))
+                .Should().Throw<InvalidDataException>()
+                .WithMessage($"*inner file 'temp.xgc' cannot be read: it inflates to more than the {CommentTable.Length} bytes*"))
+            .Should().BeLessThan(budget, "the full read stops temp.xgc at its declared size");
+    }
+
+    /// <summary>
+    /// A legacy stream with no match footer, ending in a game header: its
+    /// index records — the match header and that last game header again —
+    /// sit at the stream's tail and are split off before the game headers
+    /// are read, so every game is yielded exactly once. At 0d7282b the
+    /// game-header read took the whole stream and yielded the last game a
+    /// second time from the index's copy.
+    /// </summary>
+    [Fact]
+    public void LegacyStream_WithNoMatchFooter_EndingInAGameHeader_YieldsEveryGameOnce()
+    {
+        const int record = SaveRecordParser.RecordSize;
+        byte[] records = GameRecords[..^record];
+        byte[] index = [.. records[..record], .. records[^record..]];
+        using var temp = new TempXgFile(RawXgContainer.File(RawXgContainer.Zlib([.. records, .. index])));
+
+        XgFileReader.ReadGameHeaders(temp.Path, new XgIteratorState()).Select(g => g.Standing).Should().Equal(
+            new MatchStanding { Away1 = 7, Away2 = 7, IsCrawford = false },
+            new MatchStanding { Away1 = 5, Away2 = 6, IsCrawford = false });
     }
 
     [Fact]
