@@ -63,19 +63,19 @@ public static class XgFileWriter
 
         var inner = new List<XgContainerWriter.InnerFile>
         {
-            new("temp.xg", SaveRecordWriter.WriteAll(file.Records)),
+            new(XgContainerLayout.NameOf(XgInnerFile.GameRecords), SaveRecordWriter.WriteAll(file.Records)),
         };
 
         if (file.Rollouts.Count > 0)
-            inner.Add(new("temp.xgr", RolloutContextWriter.WriteAll(file.Rollouts)));
+            inner.Add(new(XgContainerLayout.NameOf(XgInnerFile.RolloutContexts), RolloutContextWriter.WriteAll(file.Rollouts)));
 
         // temp.xgi always holds exactly two records: first and last of the
         // record stream (identical when the stream has a single record).
-        inner.Add(new("temp.xgi", SaveRecordWriter.WriteAll(
+        inner.Add(new(XgContainerLayout.NameOf(XgInnerFile.IndexRecords), SaveRecordWriter.WriteAll(
             [file.Records[0], file.Records[^1]])));
 
         if (file.Comments.Count > 0)
-            inner.Add(new("temp.xgc", CommentWriter.WriteAll(file.Comments)));
+            inner.Add(new(XgContainerLayout.NameOf(XgInnerFile.Comments), CommentWriter.WriteAll(file.Comments)));
 
         XgContainerWriter.Write(output, inner);
     }

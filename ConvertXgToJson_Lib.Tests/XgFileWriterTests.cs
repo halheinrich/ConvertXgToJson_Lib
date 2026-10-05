@@ -1,3 +1,4 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
 
@@ -15,11 +16,13 @@ namespace ConvertXgToJson_Lib.Tests;
 /// </para>
 ///
 /// <para>
-/// Container invariants (stream order, manifest sizes / offsets / CRCs,
-/// xgi = first + last record) are asserted directly against the written
-/// bytes, because <see cref="XgFileReader"/> ignores the manifest entirely —
-/// a reader-level round-trip would pass even with a corrupt manifest, and
-/// real XG is presumed to consume it.
+/// Container invariants (stream order, manifest sizes / offsets / CRCs /
+/// storage bytes, the end-record, xgi = first + last record) are asserted
+/// directly against the written bytes, by a stream splitter and a manifest
+/// decoder of this class's own. The reader reads through the manifest and
+/// refuses one it cannot use, but it shares <see cref="XgContainerLayout"/>
+/// with the writer, so a round trip alone could share a mistake in that
+/// layout and pass; these assertions cannot.
 /// </para>
 /// </summary>
 [Collection("FileIO")]
@@ -115,7 +118,15 @@ public class XgFileWriterTests
     private const int ManifestEntrySize = 532;
     private const int EndRecordSize = 36;
 
-    private sealed record ManifestEntry(string Name, uint UncompressedSize, uint CompressedSize, uint Offset, uint Crc, uint Constant);
+    /// <summary>
+    /// One manifest entry as this class decodes it, by the evidenced layout
+    /// (halheinrich/backgammon#343): the name, the path field's bytes, the
+    /// four sizes and offsets, then the storage flag, the compression level
+    /// and the two padding bytes.
+    /// </summary>
+    private sealed record ManifestEntry(
+        string Name, byte[] PathField, uint UncompressedSize, uint CompressedSize, uint Offset, uint Crc,
+        byte StorageFlag, byte CompressionLevel, byte[] Padding);
 
     private static List<ManifestEntry> ParseManifest(byte[] manifest)
     {
@@ -126,13 +137,81 @@ public class XgFileWriterTests
             int nameLen = manifest[off];
             entries.Add(new ManifestEntry(
                 System.Text.Encoding.Latin1.GetString(manifest, off + 1, nameLen),
+                manifest[(off + 256)..(off + 512)],
                 BitConverter.ToUInt32(manifest, off + 512),
                 BitConverter.ToUInt32(manifest, off + 516),
                 BitConverter.ToUInt32(manifest, off + 520),
                 BitConverter.ToUInt32(manifest, off + 524),
-                BitConverter.ToUInt32(manifest, off + 528)));
+                manifest[off + 528],
+                manifest[off + 529],
+                manifest[(off + 530)..(off + 532)]));
         }
         return entries;
+    }
+
+    /// <summary>
+    /// Every entry the writer emits is compressed and records XG's own
+    /// storage bytes: flag 0, compression level 2 (the value every
+    /// compressed corpus entry carries), zero padding, an empty path.
+    /// </summary>
+    private static void AssertWrittenCompressedAsXgDoes(ManifestEntry entry)
+    {
+        entry.StorageFlag.Should().Be(0, $"{entry.Name} is written compressed (storage flag 0)");
+        entry.CompressionLevel.Should().Be(2, $"{entry.Name} records XG's compression level");
+        entry.Padding.Should().Equal([0, 0], $"{entry.Name}'s padding is zero");
+        entry.PathField.Should().OnlyContain(b => b == 0, $"{entry.Name}'s path field is empty");
+    }
+
+    /// <summary>
+    /// Finds every concatenated zlib stream in <paramref name="raw"/> and
+    /// returns the decompressed bytes of each, in order — this class's own
+    /// splitter, independent of the production reader. After decompressing a
+    /// stream at <c>pos</c> it scans forward from <c>pos + 2</c> for the next
+    /// zlib header rather than trusting the source position, which
+    /// <see cref="System.IO.Compression.ZLibStream"/>'s read-ahead leaves past
+    /// the stream's end; a header inside compressed data fails to decompress
+    /// and the scan moves on. Sound for the writer's own output, the only
+    /// input it is given.
+    /// </summary>
+    private static List<byte[]> SplitZlibStreams(byte[] raw)
+    {
+        var results = new List<byte[]>();
+        int pos = 0;
+        while (pos < raw.Length - 1)
+        {
+            byte[]? decompressed = IsZlibHeader(raw, pos) ? TryDecompress(raw, pos) : null;
+            if (decompressed == null)
+            {
+                pos++;
+                continue;
+            }
+
+            results.Add(decompressed);
+            int next = pos + 2;
+            while (next < raw.Length - 1 && !IsZlibHeader(raw, next))
+                next++;
+            pos = next < raw.Length - 1 ? next : raw.Length;
+        }
+        return results;
+    }
+
+    private static bool IsZlibHeader(byte[] raw, int pos) =>
+        raw[pos] == 0x78 && raw[pos + 1] is 0x01 or 0x5E or 0x9C or 0xDA;
+
+    private static byte[]? TryDecompress(byte[] raw, int offset)
+    {
+        try
+        {
+            using var input = new MemoryStream(raw, offset, raw.Length - offset);
+            using var output = new MemoryStream();
+            using var zlib = new System.IO.Compression.ZLibStream(input, System.IO.Compression.CompressionMode.Decompress);
+            zlib.CopyTo(output);
+            return output.ToArray();
+        }
+        catch (Exception e) when (e is InvalidDataException or IOException)
+        {
+            return null;
+        }
     }
 
     [Fact]
@@ -150,7 +229,7 @@ public class XgFileWriterTests
         // the compressed body is everything up to the 36-byte end-record.
         byte[] content = bytes[8232..];
         byte[] body = content[..^EndRecordSize];
-        var streams = XgDecompressor.DecompressAllStreams(body);
+        var streams = SplitZlibStreams(body);
         streams.Should().HaveCount(5, "xg, xgr, xgi, xgc, manifest");
 
         byte[] xg = streams[0], xgr = streams[1], xgi = streams[2], xgc = streams[3], manifest = streams[4];
@@ -175,7 +254,7 @@ public class XgFileWriterTests
             entries[i].UncompressedSize.Should().Be((uint)inner[i].Length, $"{entries[i].Name} uncompressed size");
             entries[i].Offset.Should().Be(expectedOffset, $"{entries[i].Name} offset accumulates compressed sizes");
             entries[i].Crc.Should().Be(System.IO.Hashing.Crc32.HashToUInt32(inner[i]), $"{entries[i].Name} CRC32 of uncompressed bytes");
-            entries[i].Constant.Should().Be(0x200);
+            AssertWrittenCompressedAsXgDoes(entries[i]);
             expectedOffset += entries[i].CompressedSize;
         }
 
@@ -222,10 +301,47 @@ public class XgFileWriterTests
         var noExtras = new XgFile { Header = file.Header, Records = file.Records };
 
         byte[] bytes = XgFileWriter.ToBytes(noExtras);
-        var streams = XgDecompressor.DecompressAllStreams(bytes[8232..^EndRecordSize]);
+        var streams = SplitZlibStreams(bytes[8232..^EndRecordSize]);
         streams.Should().HaveCount(3, "xg, xgi, manifest");
 
         ParseManifest(streams[2]).Select(e => e.Name).Should().Equal("temp.xg", "temp.xgi");
+    }
+
+    /// <summary>
+    /// The container shape on a synthesized file, so it gates without
+    /// <c>TestData/</c>: a commented play gives temp.xg, temp.xgi and
+    /// temp.xgc, each entry compressed with XG's storage bytes, the sizes,
+    /// offsets and CRCs consistent with the streams, and the end-record
+    /// agreeing with the body.
+    /// </summary>
+    [Fact]
+    public void WrittenContainer_OfASynthesizedFile_HasRealXgShape()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame().Play(XgPlayer.Player1, new DiceRoll(3, 1),
+            Play.Create(new Move(8, 5), new Move(6, 5)), comment: "a note");
+
+        byte[] content = XgFileWriter.ToBytes(builder.Build())[8232..];
+        byte[] body = content[..^EndRecordSize];
+        var streams = SplitZlibStreams(body);
+        streams.Should().HaveCount(4, "xg, xgi, xgc, manifest");
+
+        var entries = ParseManifest(streams[3]);
+        entries.Select(e => e.Name).Should().Equal("temp.xg", "temp.xgi", "temp.xgc");
+
+        uint expectedOffset = 0;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            entries[i].UncompressedSize.Should().Be((uint)streams[i].Length, $"{entries[i].Name} uncompressed size");
+            entries[i].Offset.Should().Be(expectedOffset, $"{entries[i].Name} offset accumulates compressed sizes");
+            entries[i].Crc.Should().Be(System.IO.Hashing.Crc32.HashToUInt32(streams[i]), $"{entries[i].Name} CRC32 of uncompressed bytes");
+            AssertWrittenCompressedAsXgDoes(entries[i]);
+            expectedOffset += entries[i].CompressedSize;
+        }
+        expectedOffset.Should().Be((uint)(body.Length - CompressedLengthOfLastStream(body)),
+            "compressed sizes tile the payload exactly up to the manifest");
+
+        AssertTrailerMatchesRecomputed(content);
     }
 
     // -----------------------------------------------------------------------
@@ -246,18 +362,18 @@ public class XgFileWriterTests
 
         long manifestLen = CompressedLengthOfLastStream(body);
         long manifestOffset = body.Length - manifestLen;
-        int dataStreamCount = XgDecompressor.DecompressAllStreams(body).Count - 1;
+        int innerFileCount = SplitZlibStreams(body).Count - 1;
 
         BitConverter.ToUInt32(trailer, 0).Should().Be(
-            System.IO.Hashing.Crc32.HashToUInt32(body), "field 1: CRC32 of the whole compressed body");
-        BitConverter.ToUInt32(trailer, 4).Should().Be((uint)dataStreamCount, "field 2: data stream count (manifest excluded)");
-        BitConverter.ToUInt32(trailer, 8).Should().Be(1u, "field 3: constant 1");
-        BitConverter.ToUInt32(trailer, 12).Should().Be((uint)manifestLen, "field 4: compressed size of the manifest stream");
-        BitConverter.ToUInt32(trailer, 16).Should().Be((uint)manifestOffset, "field 5: manifest offset from content start");
-        BitConverter.ToUInt32(trailer, 20).Should().Be(1u, "field 6: constant 1");
-        BitConverter.ToUInt32(trailer, 24).Should().Be(0u, "field 7: zero");
-        BitConverter.ToUInt32(trailer, 28).Should().Be(0u, "field 8: zero");
-        BitConverter.ToUInt32(trailer, 32).Should().Be(0u, "field 9: zero");
+            System.IO.Hashing.Crc32.HashToUInt32(body), "field 1, crc: CRC32 of the whole compressed body");
+        BitConverter.ToUInt32(trailer, 4).Should().Be((uint)innerFileCount, "field 2, filecount: inner files (manifest excluded)");
+        BitConverter.ToUInt32(trailer, 8).Should().Be(1u, "field 3, version: 1, the one value the corpus evidences");
+        BitConverter.ToUInt32(trailer, 12).Should().Be((uint)manifestLen, "field 4, registrysize: compressed size of the manifest stream");
+        BitConverter.ToUInt32(trailer, 16).Should().Be((uint)manifestOffset, "field 5, archivesize: manifest offset from content start");
+        BitConverter.ToUInt32(trailer, 20).Should().Be(1u, "field 6, compressedregistry: 1, the manifest is a zlib stream");
+        BitConverter.ToUInt32(trailer, 24).Should().Be(0u, "reserved bytes 24-27: zero");
+        BitConverter.ToUInt32(trailer, 28).Should().Be(0u, "reserved bytes 28-31: zero");
+        BitConverter.ToUInt32(trailer, 32).Should().Be(0u, "reserved bytes 32-35: zero");
     }
 
     [Fact]

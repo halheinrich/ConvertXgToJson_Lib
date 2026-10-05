@@ -151,14 +151,26 @@ Entry points:
 
 * `ReadFile` — full parse of a `.xg` or `.xgp` file, yielding all records.
   Format is detected from file content, so `IterateXgDirectory` routes both
-  extensions through it uniformly.
-* `ReadMatchInfo` — fast path. Reads only the first zlib stream and stops at
-  the `MatchHeaderRecord`. Used when a caller only needs match metadata.
-* `ReadGameHeaders` — fast path. Reads the first zlib stream and yields
-  `XgGameInfo` entries; populates `XgIteratorState.MatchInfo` before the
-  first yield. A stream whose first record is not the match header is
+  extensions through it uniformly. A payload that is neither the legacy
+  single stream nor a container with a usable directory, or whose inner
+  file contradicts its manifest entry, is refused as
+  `InvalidDataException` naming the failed check ("Container facts" under
+  Writing).
+* `ReadMatchInfo` — fast path. Extracts temp.xg alone — selected by its
+  manifest name through the same validated directory the full read uses —
+  and stops at the `MatchHeaderRecord`. Used when a caller only needs match
+  metadata. `null` when temp.xg is shorter than one record or does not
+  begin with a match header; an unusable directory, or a temp.xg that
+  contradicts its entry, throws the full read's `InvalidDataException`,
+  message and all. A result certifies temp.xg alone: `ReadFile` can still
+  refuse the file over an inner file this read never extracted.
+* `ReadGameHeaders` — fast path. Extracts temp.xg alone, the same way, and
+  yields `XgGameInfo` entries; populates `XgIteratorState.MatchInfo` before
+  the first yield. A stream whose first record is not the match header is
   refused as `InvalidDataException`: a game's standing is read under the
-  match's terms, so there is no game header to yield without one. To stop early, the consumer breaks out of the foreach;
+  match's terms, so there is no game header to yield without one. Every
+  refusal, the directory's included, is deferred to the enumeration's
+  first `MoveNext`. To stop early, the consumer breaks out of the foreach;
   disposing the enumerator stops further yields. There is no imperative
   skip flag.
 * `ToJson` / `WriteJsonAsync` / `ReadJson` — the JSON document, through
@@ -246,28 +258,69 @@ The reader's mirror. Layered exactly like the read path:
   Writer/Reader mirrors byte layout. Consumers never touch record
   internals.
 
-Container facts shared by both sides (decoded from the fixture corpus,
-pinned by `XgFileWriterTests`, byte layout encoded once in
+Container facts shared by both sides (decoded from the fixture corpus —
+434 files, `TestData/FixtureFiles/*.xg*` and `TestData/xg/*.xg`, read
+byte by byte 2026-10-05 — and corroborated by xgdatatools' `xgzarc.py`,
+whose field names are used here: reverse engineering, not an XG
+specification. Pinned by `XgFileWriterTests`; byte layout encoded once in
 `XgContainerLayout` — the SSOT `XgContainerWriter` emits through and
-`XgDecompressor` assigns streams through):
+`XgDecompressor` reads through, whose class doc carries the field tables,
+the evidence and the source's pinned URL; halheinrich/backgammon#343):
 
 * Physical stream order is `temp.xg`, `temp.xgr` (only when rollouts exist),
   `temp.xgi`, `temp.xgc` (only when comments exist), then a manifest stream,
-  then a 36-byte uncompressed end-record.
-* The manifest is one 532-byte entry per inner file, in stream order, the
-  manifest itself unlisted: Pascal ANSI filename padded to 512 bytes, then
-  uncompressed size, compressed size, offset relative to content start,
-  CRC32 (IEEE) of the uncompressed bytes, and constant `0x200`.
+  then a 36-byte uncompressed end-record. Every corpus file lists its
+  entries in body order, their extents tiling the body up to the manifest;
+  the reader relies on neither, selecting each inner file by name.
+* The manifest is one 532-byte entry per inner file, the manifest itself
+  unlisted: a 256-byte name and a 256-byte path (Delphi short strings; the
+  path is empty in every corpus entry and never read), uncompressed size,
+  compressed size (the entry's length in the body — for a stored entry its
+  raw length, equal to the uncompressed size), offset relative to content
+  start, CRC32 (IEEE) of the uncompressed bytes, then a storage flag (0 =
+  one zlib stream, 1 = raw bytes), a compression level (2 in every
+  compressed corpus entry, 0 in every stored one; never a gate) and two
+  padding bytes (zero; never read). 1018 corpus entries are compressed and
+  3 stored: `temp.xgc` holding CR LF in one `.xgp`, and a zero-length
+  `temp.xgr` and `temp.xgc` in one `.xg`, the latter lying exactly at the
+  manifest's offset. When XG chooses to store an entry is not established,
+  so the writer writes every entry compressed at level 2.
 * The end-record is nine little-endian int32s XG seeks to from EOF to find
   the manifest (so its absence makes the file unloadable even though every
-  other structure validates): CRC32 (IEEE) of the entire compressed body
-  (all data streams **and** the manifest stream), count of data streams
-  (manifest excluded), constant `1`, compressed size of the manifest stream,
-  manifest offset from content start (= sum of the data streams' compressed
-  sizes), constant `1`, then three zero int32s. Decoded byte-level against
-  XG-authored `.xgp`/`.xg` (2-, 3-, and 4-stream files all validate) and
-  pinned by `XgFileWriterTests` (writer trailer + `XgCorpus_EndRecord_*`
-  corpus agreement).
+  other structure validates): `crc`, CRC32 (IEEE) of the entire compressed
+  body (all inner files **and** the manifest stream); `filecount`, the
+  inner files (manifest excluded); `version`, 1; `registrysize`, the
+  manifest stream's compressed size; `archivesize`, the manifest's offset
+  from content start; `compressedregistry`, 1 — the manifest is a zlib
+  stream; then twelve reserved zero bytes. Only those values of `version`,
+  `compressedregistry` and the reserved bytes occur in the corpus, and the
+  reader recognizes an end-record by them. Pinned by `XgFileWriterTests`
+  (writer trailer + `XgCorpus_EndRecord_*` corpus agreement).
+* **Reading — refuse, never guess** (Hal, 2026-10-05: "Refuse with clear
+  error"; `XgDecompressor`'s class doc states the contract in order). A
+  payload is the legacy single-stream format exactly when one zlib stream
+  begins at its first byte and ends at its last; every other payload is
+  read through its directory, or refused with `InvalidDataException` naming
+  the failed check — no inner file is ever assigned by record size. The
+  whole directory is validated before any inner file is extracted: the
+  end-record's shape, a non-zero file count, the manifest ending where the
+  end-record begins, the body CRC, the manifest exactly one zlib stream of
+  532 bytes per counted file; per entry a known name named once
+  (case-insensitively), a storage flag of 0 or 1 (no other value is read as
+  either), equal sizes when stored, and an extent wholly before the
+  manifest, computed without overflow (a zero-length entry exactly at the
+  manifest's offset is valid); temp.xg named. Each inner file a surface
+  asks for is extracted by one rule — stored read raw, compressed inflated
+  within exactly its extent and never past its declared size — and checked
+  against its entry's size and CRC32 (the CRC check, added by
+  halheinrich/backgammon#343, verifies the reading where the body CRC
+  verifies the bytes). `ReadFile` / `ReadStream` extract all four inner
+  files; `ReadMatchInfo` and `ReadGameHeaders` extract temp.xg alone, so
+  they neither extract nor certify the rest. (Deciding the format inflates
+  the stream at the payload's first byte — temp.xg's in every corpus file,
+  so the metadata reads inflate it twice — and discards it.) One limit: a
+  container cut off exactly at the end of its first stream is one complete
+  zlib stream, so it cannot be told from a legacy file and reads as one.
 * `temp.xgi` holds exactly two records: byte-copies of the first and last
   records of the emitted stream. (Real XG writes its session's first/last —
   the "last" often isn't in the `.xgp` at all — so XG demonstrably does not
@@ -1244,7 +1297,7 @@ public static class XgFileReader
                                             CancellationToken cancellationToken = default);
     public static XgFile                ReadJson(string path);
 
-    // Fast paths (first zlib stream only)
+    // Fast paths (temp.xg only, through the full read's directory validation)
     public static XgMatchInfo?          ReadMatchInfo(string path);
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state);
 }
@@ -1610,33 +1663,48 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   binary-exact day fraction (midnight, noon, 18:00) or the re-read value can
   differ by a tick or two.
 * **The RichGameHeader is packed; the container manifest + end-record are
-  load-bearing for XG but silently optional for our reader.**
+  load-bearing, and a round trip cannot vouch for them.**
   `ThumbnailOffset` (an Int64 at offset 12) must be written raw — an aligned
-  8-byte write would insert padding and corrupt the header. `XgFileReader`
-  assigns streams by manifest name (located via the end-record, exactly as
-  real XG loads a file) but degrades to record-size heuristics whenever the
-  trailer or manifest fails validation — so a reader-level round-trip still
-  passes with a corrupt manifest or a *missing trailer*. That gap once
-  shipped: the writer omitted the end-record, round-trip tests stayed green,
-  and real XG rejected every file (it seeks from EOF through the trailer to
-  locate the manifest). So `XgFileWriterTests` asserts manifest sizes /
-  offsets / CRC32s **and** the end-record's fields against the raw written
-  bytes, plus `XgCorpus_EndRecord_*` pins the trailer decoding against
-  XG-authored files — keep these when refactoring the container writer. The
-  one smoke the suite cannot run: open a freshly written `.xgp` in real XG.
-* **Stream assignment is manifest-first; the heuristic fallback cannot tell
-  the manifest from a comment stream.** `XgDecompressor` names the four
-  sub-streams from the manifest and falls back to record-size heuristics
-  only for the old single-stream format and unvalidatable containers. Under
-  the fallback, a commentless multi-stream container parses with one phantom
-  garbage comment — the manifest (532-byte entries, matching no record size)
-  lands in the xgc slot. That bug shipped silently for every commentless
-  XG-authored file, masked because round-trips re-emitted the phantom as a
-  real `temp.xgc`; files written during that window still parse with the
-  garbage entry, which is correct for what their bytes say. The fallback's
-  limitation is accepted (robust over minimal) and pinned by
-  `Decompress_CorruptTrailer_FallsBackToRecordSizeHeuristics`; the corpus
-  guard is `XgCorpus_NoParsedCommentIsManifestShaped`.
+  8-byte write would insert padding and corrupt the header. The reader
+  reads every container through its manifest and refuses one it cannot
+  use, but writer and reader share `XgContainerLayout`, so a reader-level
+  round trip passes with any layout mistake the two share. The gap once
+  shipped in another form: while the reader still degraded to record-size
+  heuristics, the writer omitted the end-record, round-trip tests stayed
+  green, and real XG rejected every file (it seeks from EOF through the
+  trailer to locate the manifest). So `XgFileWriterTests` asserts manifest
+  sizes / offsets / CRC32s / storage bytes **and** the end-record's fields
+  against the raw written bytes, through a manifest decoder and stream
+  splitter of its own, plus `XgCorpus_EndRecord_*` pins the trailer
+  decoding against XG-authored files — keep these independent of the
+  production layout when refactoring the container writer. The one smoke
+  the suite cannot run: open a freshly written `.xgp` in real XG.
+* **A container is read through its directory or refused — never guessed
+  at** (Hal, 2026-10-05, halheinrich/backgammon#343: "Refuse with clear
+  error", reversing the limitation this Pitfall once accepted). The reader
+  used to fall back to record-size heuristics whenever
+  the end-record or manifest failed validation, and the fallback put the
+  manifest stream (532-byte entries, matching no record size) in the
+  comment slot. That shipped twice. First for every commentless XG-authored
+  file, before stream assignment used the manifest at all — masked because
+  round trips re-emitted the manifest as a real `temp.xgc`; files written
+  then still parse with that entry, which is correct for what their bytes
+  say. Then for every file holding a stored entry: each entry's last four
+  bytes were read as one constant, `0x200`, which a stored entry's
+  `01 00 00 00` failed, so the whole manifest was rejected and BgQuiz's
+  Notes showed "temp.xg … temp.xgr". Those bytes are a storage flag, a
+  compression level and padding; a stored entry is read raw. The fallback
+  is gone: `Decompress_CorruptTrailer_IsRefused` and the refusal controls
+  in `XgContainerDirectoryTests` pin the refusal, and
+  `XgCorpus_NoParsedCommentIsManifestShaped` stays as the corpus guard.
+  Two traps for whoever touches the inflation. .NET's `ZLibStream` reads a
+  truncated stream without complaint and never says where a stream ended,
+  and `DeflateStream.CopyTo` pumps its whole source through the inflater —
+  so `XgDecompressor` learns whether a stream fills its extent exactly from
+  its extent feed, driven by `Read`, never `CopyTo`. And a zlib header
+  asking for a preset dictionary raises `ZLibException`, an `IOException`
+  outside the public surface, which the reader maps to its own
+  `InvalidDataException`.
 * **A centred cube above 1 is not exportable.** The record encodes cube
   ownership in the sign of a log2 field, so "centred, above 1" (auto-doubled
   money positions) has no representation without XG's auto-double

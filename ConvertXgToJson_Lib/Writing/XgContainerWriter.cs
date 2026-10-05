@@ -13,6 +13,12 @@ namespace ConvertXgToJson_Lib.Writing;
 /// Stream order matches real XG files: temp.xg, temp.xgr (when rollouts
 /// exist), temp.xgi, temp.xgc (when comments exist), then the manifest,
 /// then the end-record.
+///
+/// Every inner file is written compressed, its entry recording
+/// <see cref="XgContainerLayout.CompressedEntryLevel"/> as XG does. The
+/// layout can also describe a stored entry (raw bytes), which the reader
+/// accepts; when XG chooses to store one is not established, so this
+/// writer never does.
 /// </summary>
 internal static class XgContainerWriter
 {
@@ -54,7 +60,7 @@ internal static class XgContainerWriter
         Span<byte> endRecord = stackalloc byte[XgContainerLayout.EndRecordSize];
         XgContainerLayout.WriteEndRecord(endRecord, new XgContainerLayout.EndRecord(
             BodyCrc32: bodyCrc.GetCurrentHashAsUInt32(),
-            DataStreamCount: (uint)files.Count,
+            InnerFileCount: (uint)files.Count,
             ManifestCompressedSize: (uint)compressedManifest.Length,
             ManifestOffset: manifestOffset));
         output.Write(endRecord);
@@ -74,7 +80,9 @@ internal static class XgContainerWriter
                     UncompressedSize: (uint)files[i].Data.Length,
                     CompressedSize: (uint)compressed[i].Length,
                     Offset: offset,
-                    Crc32: Crc32.HashToUInt32(files[i].Data)));
+                    Crc32: Crc32.HashToUInt32(files[i].Data),
+                    Storage: XgContainerLayout.EntryStorage.Compressed,
+                    CompressionLevel: XgContainerLayout.CompressedEntryLevel));
 
             offset += (uint)compressed[i].Length;
         }

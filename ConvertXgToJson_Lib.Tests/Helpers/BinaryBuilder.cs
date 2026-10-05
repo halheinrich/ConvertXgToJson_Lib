@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Text;
 
 namespace ConvertXgToJson_Lib.Tests.Helpers;
@@ -162,7 +161,8 @@ internal sealed class BinaryBuilder
 
 /// <summary>
 /// Builds complete .XG file byte payloads for integration-level tests,
-/// assembling: RichGameHeader + thumbnail + compressed(xg+xgi+xgr+xgc).
+/// assembling: RichGameHeader + the container payload (temp.xg, temp.xgi,
+/// temp.xgc, the manifest and the end-record).
 /// </summary>
 internal static class XgBytesBuilder
 {
@@ -171,7 +171,10 @@ internal static class XgBytesBuilder
 
     /// <summary>
     /// Builds a minimal but valid .XG file stream containing a single
-    /// MatchHeader record and a MatchFooter record.
+    /// MatchHeader record and a MatchFooter record, plus one comment. The
+    /// payload is written by the production container writer, directory and
+    /// all: a payload of bare concatenated streams is refused by the reader
+    /// (halheinrich/backgammon#343).
     /// </summary>
     public static MemoryStream BuildMinimalXgFile(
         string player1 = "Alice",
@@ -185,19 +188,29 @@ internal static class XgBytesBuilder
 
         byte[] xgBytes = BuildXgStream(player1, player2, matchLength, matchDate, location, maxCubeExponent);
         byte[] xgiBytes = BuildXgiStream(xgBytes);
-        byte[] xgrBytes = [];
         byte[] xgcBytes = Encoding.Latin1.GetBytes("Match comment\r\n");
 
-        byte[] compressed = CompressAll(xgBytes, xgrBytes, xgiBytes, xgcBytes);
+        var file = new MemoryStream();
+        file.Write(BuildRichGameHeader());
+        Writing.XgContainerWriter.Write(file,
+            [new("temp.xg", xgBytes), new("temp.xgi", xgiBytes), new("temp.xgc", xgcBytes)]);
+        file.Position = 0;
+        return file;
+    }
 
-        var guid = System.Guid.NewGuid();
+    /// <summary>
+    /// The 8232-byte RichGameHeader of a synthetic file: no thumbnail, so
+    /// the payload begins at the byte after it.
+    /// </summary>
+    public static byte[] BuildRichGameHeader()
+    {
         var header = new BinaryBuilder()
             .UInt32(RmMagicNumber)
             .UInt32(1)
             .UInt32(HeaderSize)
             .Int64Packed(0)   // ThumbnailOffset (packed, no align)
             .UInt32(0)
-            .Guid(guid)
+            .Guid(System.Guid.NewGuid())
             .WideCharArray("Test Game", 1024)
             .WideCharArray("Test Save", 1024)
             .WideCharArray("", 1024)
@@ -210,12 +223,7 @@ internal static class XgBytesBuilder
             Array.Copy(header, padded, header.Length);
             header = padded;
         }
-
-        var file = new MemoryStream();
-        file.Write(header);
-        file.Write(compressed);
-        file.Position = 0;
-        return file;
+        return header;
     }
 
     // ------------------------------------------------------------------
@@ -236,19 +244,7 @@ internal static class XgBytesBuilder
         return [.. first, .. last];
     }
 
-    private static byte[] CompressAll(byte[] xg, byte[] xgr, byte[] xgi, byte[] xgc)
-    {
-        // Each non-empty section gets its own zlib stream, in order: xg, xgr, xgi, xgc.
-        // This matches the ZlibArchive multi-stream format used by XG.
-        var ms = new MemoryStream();
-        foreach (var section in new[] { xg, xgr, xgi, xgc })
-        {
-            if (section.Length == 0) continue;
-            using var z = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true);
-            z.Write(section);
-        }
-        return ms.ToArray();
-    }    // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
     //  Record builders
     // ------------------------------------------------------------------
 

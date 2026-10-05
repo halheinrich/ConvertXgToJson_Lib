@@ -115,6 +115,9 @@ public static class XgFileReader
     /// <see cref="XgFile"/> object.
     /// </summary>
     /// <param name="path">Full path to the .XG file.</param>
+    /// <exception cref="InvalidDataException">
+    /// As <see cref="ReadStream"/>: the file's payload is unreadable.
+    /// </exception>
     public static XgFile ReadFile(string path)
     {
         using var stream = File.OpenRead(path);
@@ -125,6 +128,19 @@ public static class XgFileReader
     /// Reads a .XG file from an open <see cref="Stream"/>.
     /// The stream must be positioned at the very beginning of the file.
     /// </summary>
+    /// <remarks>
+    /// The payload after the outer header is either the legacy format — one
+    /// zlib stream filling it exactly — or a container read through its
+    /// directory, every inner file it names extracted and checked against
+    /// its manifest entry. A payload that is neither is refused, never
+    /// guessed at: a multi-stream payload whose directory is absent or
+    /// fails a check is not read.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">
+    /// The payload is not one zlib stream and its container directory cannot
+    /// be used, or an inner file contradicts its manifest entry; the message
+    /// names the check that failed.
+    /// </exception>
     public static XgFile ReadStream(Stream stream)
     {
         // Step 1: Strip the RichGameFormat outer header
@@ -221,63 +237,94 @@ public static class XgFileReader
     /// the file. Use when only player names and match length are needed.
     /// Significantly faster than <see cref="ReadFile"/> for corpus-wide scans.
     /// </summary>
+    /// <remarks>
+    /// The payload is opened by the same rule and directory validation as
+    /// <see cref="ReadStream"/>, and temp.xg — the game records, selected by
+    /// its manifest name — is the only inner file extracted. A result
+    /// therefore says nothing of the inner files this read never extracts
+    /// (the index, rollouts and comments): <see cref="ReadFile"/> can still
+    /// refuse a file whose match info reads here.
+    /// </remarks>
     /// <param name="path">Full path to the .xg file.</param>
     /// <returns>
     /// An <see cref="XgMatchInfo"/> populated from the first
-    /// <see cref="MatchHeaderRecord"/>, or <c>null</c> if the file's first
-    /// zlib stream is unreadable, undersized, or does not begin with a
-    /// match header record. Callers that previously relied on a
-    /// default-constructed return (empty strings, <c>MatchLength = 0</c>)
-    /// should treat <c>null</c> as "skip this file" rather than as a
-    /// zero-length money match.
+    /// <see cref="MatchHeaderRecord"/>, or <c>null</c> if temp.xg is shorter
+    /// than one record or does not begin with a match header record. Callers
+    /// that previously relied on a default-constructed return (empty strings,
+    /// <c>MatchLength = 0</c>) should treat <c>null</c> as "skip this file"
+    /// rather than as a zero-length money match.
     /// </returns>
+    /// <exception cref="InvalidDataException">
+    /// The payload is not one zlib stream and its container directory cannot
+    /// be used, or temp.xg contradicts its manifest entry — the same refusal,
+    /// with the same message, that <see cref="ReadStream"/> throws for it.
+    /// </exception>
     public static XgMatchInfo? ReadMatchInfo(string path)
     {
-        // The MatchHeaderRecord is always the first record of the first stream.
-        byte[]? firstStream = ReadFirstDecompressedStream(path);
-        if (firstStream == null || firstStream.Length < SaveRecordParser.RecordSize)
+        // The MatchHeaderRecord is always the first record of temp.xg.
+        byte[] gameRecords = ReadGameRecords(path);
+        if (gameRecords.Length < SaveRecordParser.RecordSize)
             return null;
 
         // The first record must be RecordType.HeaderMatch (0).
         // Byte 8 of the record is EntryType.
-        if (firstStream[8] != (byte)RecordType.HeaderMatch)
+        if (gameRecords[8] != (byte)RecordType.HeaderMatch)
             return null;
 
-        return XgMatchInfo.From(SaveRecordParser.ReadMatchHeaderRecord(firstStream));
+        return XgMatchInfo.From(SaveRecordParser.ReadMatchHeaderRecord(gameRecords));
     }
 
     /// <summary>
     /// Opens <paramref name="path"/>, strips the RichGameFormat outer header,
-    /// and decompresses only the first zlib stream — the xg game-records
-    /// sub-stream that begins with the match header. Returns <c>null</c> when
-    /// that stream is unreadable.
+    /// and extracts temp.xg alone through <see cref="XgDecompressor"/> — the
+    /// game records that begin with the match header.
     /// </summary>
-    private static byte[]? ReadFirstDecompressedStream(string path)
+    /// <exception cref="InvalidDataException">The payload or temp.xg is refused.</exception>
+    private static byte[] ReadGameRecords(string path)
     {
         using var stream = File.OpenRead(path);
         var (_, contentOffset) = RichGameHeaderParser.Read(stream);
         stream.Position = contentOffset;
-        return XgDecompressor.DecompressFirstStream(XgDecompressor.ReadAllBytes(stream));
+        return XgDecompressor.DecompressGameRecords(stream);
     }
 
     /// <summary>
-    /// Fast path over the first zlib stream only.
+    /// Fast path over temp.xg only.
     /// Yields one <see cref="XgGameInfo"/> per game in the file, populating
     /// <see cref="XgIteratorState.MatchInfo"/> before the first yield.
     /// To stop iteration early, the caller breaks out of the consuming
     /// <c>foreach</c> — disposing the enumerator stops further yields.
     /// </summary>
+    /// <remarks>
+    /// The payload is opened by the same rule and directory validation as
+    /// <see cref="ReadStream"/>, and temp.xg is the only inner file
+    /// extracted, so a full enumeration says nothing of the inner files it
+    /// never extracts: <see cref="ReadFile"/> can still refuse the file.
+    /// Like every failure here, the refusal is deferred: it is thrown by the
+    /// enumeration's first <c>MoveNext</c>, not by this call.
+    /// </remarks>
     /// <param name="path">Full path to the .xg file.</param>
     /// <param name="state">
     /// Iterator state. <see cref="XgIteratorState.MatchInfo"/> is reset to null
     /// at the start of each file and populated before the first yield.
     /// </param>
+    /// <returns>
+    /// The games' headers in file order; none when temp.xg is shorter than
+    /// one record.
+    /// </returns>
+    /// <exception cref="InvalidDataException">
+    /// Thrown on enumeration when the payload is not one zlib stream and its
+    /// container directory cannot be used, or temp.xg contradicts its
+    /// manifest entry — the same refusal, with the same message, that
+    /// <see cref="ReadStream"/> throws for it; or when temp.xg does not
+    /// begin with a match header.
+    /// </exception>
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state)
     {
         state.MatchInfo = null;
 
-        byte[]? data = ReadFirstDecompressedStream(path);
-        if (data == null || data.Length < SaveRecordParser.RecordSize)
+        byte[] data = ReadGameRecords(path);
+        if (data.Length < SaveRecordParser.RecordSize)
             yield break;
 
         // The match header is the first record; each game's standing is read

@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using AwesomeAssertions;
 using ConvertXgToJson_Lib.Parsing;
 using ConvertXgToJson_Lib.Tests.Helpers;
@@ -8,12 +7,11 @@ using Xunit;
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
-/// Tests for XgDecompressor: verifies that each of the four sub-streams
-/// is correctly separated from the compressed payload — by manifest name
-/// when the container carries its directory (payloads built through
-/// <see cref="XgContainerWriter"/>), and by the record-size heuristics
-/// when it does not (the bare concatenated payloads
-/// <see cref="CompressAll"/> builds).
+/// Tests for XgDecompressor over containers the production
+/// <see cref="XgContainerWriter"/> writes: each of the four sub-streams is
+/// separated by its manifest name and arrives byte for byte. The directory
+/// contract itself — the legacy single stream, every check and its
+/// refusal, stored entries — is <see cref="XgContainerDirectoryTests"/>'.
 /// </summary>
 public class DecompressionTests
 {
@@ -22,12 +20,9 @@ public class DecompressionTests
     {
         byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
-        byte[] xgr = [];
         byte[] xgc = "Test comment\r\n"u8.ToArray();
 
-        byte[] compressed = CompressAll(xg, xgr, xgi, xgc);
-
-        using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
+        using var streams = XgDecompressor.Decompress(Container(xg, [], xgi, xgc));
 
         streams.GameRecords.Length.Should().Be(xg.Length);
         streams.IndexRecords.Length.Should().Be(xgi.Length);
@@ -41,9 +36,7 @@ public class DecompressionTests
         byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
 
-        byte[] compressed = CompressAll(xg, [], xgi, []);
-
-        using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
+        using var streams = XgDecompressor.Decompress(Container(xg, [], xgi, []));
 
         byte[] result = new byte[streams.GameRecords.Length];
         streams.GameRecords.ReadExactly(result);
@@ -57,9 +50,7 @@ public class DecompressionTests
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
         byte[] xgc = "Comment with embedded\x01\x02newline\r\n"u8.ToArray();
 
-        byte[] compressed = CompressAll(xg, [], xgi, xgc);
-
-        using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
+        using var streams = XgDecompressor.Decompress(Container(xg, [], xgi, xgc));
 
         byte[] result = new byte[streams.Comments.Length];
         streams.Comments.ReadExactly(result);
@@ -72,9 +63,7 @@ public class DecompressionTests
         byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
 
-        byte[] compressed = CompressAll(xg, [], xgi, []);
-
-        using var streams = XgDecompressor.Decompress(new MemoryStream(compressed));
+        using var streams = XgDecompressor.Decompress(Container(xg, [], xgi, []));
 
         streams.GameRecords.Position.Should().Be(0);
         streams.IndexRecords.Position.Should().Be(0);
@@ -83,25 +72,19 @@ public class DecompressionTests
     }
 
     // ------------------------------------------------------------------ //
-    //  Manifest-directed assignment — containers with a directory are
-    //  split by inner-file name, so a commentless container can never
-    //  grow a phantom comment stream (the misclassification the
-    //  record-size heuristics are prone to).
+    //  Manifest-directed assignment — containers are split by inner-file
+    //  name, so a commentless container can never grow a comment stream.
     // ------------------------------------------------------------------ //
 
     [Fact]
     public void Decompress_CommentlessManifestContainer_LeavesCommentsEmpty()
     {
-        // Under the heuristics this container's trailing manifest (no
-        // record-sized shape) would land in the xgc slot — the phantom-
-        // comment bug this pin guards against.
+        // The manifest names no temp.xgc, and the manifest stream itself is
+        // never an inner file: nothing may land in the comment slot.
         byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
-        using var container = new MemoryStream();
-        XgContainerWriter.Write(container, [new("temp.xg", xg), new("temp.xgi", xgi)]);
-        container.Position = 0;
 
-        using var streams = XgDecompressor.Decompress(container);
+        using var streams = XgDecompressor.Decompress(Container(xg, [], xgi, []));
 
         streams.GameRecords.Length.Should().Be(xg.Length);
         streams.IndexRecords.Length.Should().Be(xgi.Length);
@@ -117,12 +100,8 @@ public class DecompressionTests
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
         byte[] xgr = new byte[2184];
         byte[] xgc = "Real comment\r\n"u8.ToArray();
-        using var container = new MemoryStream();
-        XgContainerWriter.Write(container,
-            [new("temp.xg", xg), new("temp.xgr", xgr), new("temp.xgi", xgi), new("temp.xgc", xgc)]);
-        container.Position = 0;
 
-        using var streams = XgDecompressor.Decompress(container);
+        using var streams = XgDecompressor.Decompress(Container(xg, xgr, xgi, xgc));
 
         streams.GameRecords.Length.Should().Be(xg.Length);
         streams.IndexRecords.Length.Should().Be(xgi.Length);
@@ -133,26 +112,19 @@ public class DecompressionTests
     }
 
     [Fact]
-    public void Decompress_CorruptTrailer_FallsBackToRecordSizeHeuristics()
+    public void Decompress_CorruptTrailer_IsRefused()
     {
-        // An unvalidatable trailer must degrade to the heuristic path, not
-        // fail the parse. The fallback's known limitation then applies: the
-        // manifest stream lands in the comment slot of this commentless
-        // container. Accepted robustness trade-off — pinned so a change is
-        // a conscious decision, not an accident.
+        // Hal's ruling on halheinrich/backgammon#343, "Refuse with clear
+        // error": a container whose directory cannot be used is refused,
+        // never read by guessing which stream is which.
         byte[] xg = BuildTwoRecordXg();
         byte[] xgi = [.. xg[..2560], .. xg[^2560..]];
-        using var container = new MemoryStream();
-        XgContainerWriter.Write(container, [new("temp.xg", xg), new("temp.xgi", xgi)]);
-        byte[] bytes = container.ToArray();
-        bytes[^1] ^= 0xFF; // trailer's zero tail no longer zero → shape rejected
+        byte[] bytes = Container(xg, [], xgi, []).ToArray();
+        bytes[^1] ^= 0xFF; // trailer's reserved bytes no longer zero → not an end-record
 
-        using var streams = XgDecompressor.Decompress(new MemoryStream(bytes));
-
-        streams.GameRecords.Length.Should().Be(xg.Length);
-        streams.IndexRecords.Length.Should().Be(xgi.Length);
-        streams.Comments.Length.Should().BeGreaterThan(0,
-            "the heuristic fallback cannot tell the manifest from a comment stream");
+        FluentActions.Invoking(() => XgDecompressor.Decompress(new MemoryStream(bytes)))
+            .Should().Throw<InvalidDataException>()
+            .WithMessage("*its last 36 bytes are not an end-record*");
     }
 
     // ------------------------------------------------------------------ //
@@ -168,24 +140,20 @@ public class DecompressionTests
     }
 
     /// <summary>
-    /// Compresses each section as its own ZLib stream and concatenates them,
-    /// with no manifest or end-record — the bare payload shape that exercises
-    /// the decompressor's record-size-heuristic fallback.
-    /// Stream order must be: xg, xgr, xgi, xgc.
-    /// Empty sections produce a valid empty zlib stream so the stream count
-    /// stays predictable; the decompressor skips zero-length results.
+    /// The container payload <see cref="XgContainerWriter"/> writes for the
+    /// four sections, in real XG's stream order (xg, xgr, xgi, xgc); an
+    /// empty section is left out, as the file writer leaves it out.
     /// </summary>
-    private static byte[] CompressAll(byte[] xg, byte[] xgr, byte[] xgi, byte[] xgc)
+    private static MemoryStream Container(byte[] xg, byte[] xgr, byte[] xgi, byte[] xgc)
     {
-        // Each non-empty section gets its own zlib stream, in order: xg, xgr, xgi, xgc.
-        // Empty sections are omitted — the size-based classifier does not need placeholders.
-        var ms = new MemoryStream();
-        foreach (var section in new[] { xg, xgr, xgi, xgc })
-        {
-            if (section.Length == 0) continue;
-            using var z = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true);
-            z.Write(section);
-        }
-        return ms.ToArray();
+        var files = new List<XgContainerWriter.InnerFile> { new("temp.xg", xg) };
+        if (xgr.Length > 0) files.Add(new("temp.xgr", xgr));
+        files.Add(new("temp.xgi", xgi));
+        if (xgc.Length > 0) files.Add(new("temp.xgc", xgc));
+
+        var container = new MemoryStream();
+        XgContainerWriter.Write(container, files);
+        container.Position = 0;
+        return container;
     }
 }

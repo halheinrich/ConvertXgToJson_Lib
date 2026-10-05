@@ -2,11 +2,14 @@ namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
 /// Parse-level pins for manifest-directed stream assignment against
-/// XG-authored files: commentless files get an empty comment table (the
-/// phantom-comment regression), rollout streams stay assigned, and files
-/// with a real temp.xgc keep their comments. The synthetic container-level
-/// coverage lives in <see cref="DecompressionTests"/>; these fixtures pin
-/// the same behaviour against bytes real XG wrote.
+/// XG-authored files: commentless files get an empty comment table (before
+/// manifest-based assignment, the manifest itself parsed as one garbage
+/// comment), rollout streams stay assigned, files with a real temp.xgc keep
+/// their comments, and the two files that showed stored entries read them raw
+/// (halheinrich/backgammon#343). The synthetic container-level coverage lives
+/// in <see cref="DecompressionTests"/> and
+/// <see cref="XgContainerDirectoryTests"/>; these fixtures pin the same
+/// behaviour against bytes real XG wrote.
 /// </summary>
 [Collection("FileIO")]
 public class ManifestStreamAssignmentTests
@@ -17,8 +20,7 @@ public class ManifestStreamAssignmentTests
     public void CommentlessXgFixture_ParsesWithEmptyCommentTable()
     {
         // MTCH4064.xg carries only temp.xg + temp.xgi; before manifest-based
-        // assignment its container manifest parsed as one phantom garbage
-        // comment.
+        // assignment its container manifest parsed as one garbage comment.
         var file = XgFileReader.ReadFile(Fixture("MTCH4064.xg"));
         file.Comments.Should().BeEmpty("the fixture has no temp.xgc stream");
     }
@@ -61,5 +63,58 @@ public class ManifestStreamAssignmentTests
                 c => c.Contains('\0') || c.Contains("temp.xg"),
                 $"'{Path.GetFileName(path)}' must not parse container metadata as a comment");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    //  Stored entries (halheinrich/backgammon#343) — local-only by the
+    //  TestData rule; XgContainerDirectoryTests gates the same shapes
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The tester's report: this <c>.xgp</c>'s temp.xgc is a stored entry of
+    /// two bytes, CR LF. Its flag byte reads 1, so the entry did not match
+    /// the four-byte constant the manifest was once read against, and the
+    /// manifest itself landed in the comment slot, where BgQuiz's Notes showed
+    /// the inner-file names. Read raw, it is a comment table of exactly one
+    /// empty comment, and no decision carries a note.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "RequiresFixtureFiles")]
+    public void StoredCommentTableXgp_ReadsOneEmptyComment_AndNoDecisionCarriesANote()
+    {
+        const string name = "21 and 18 anchors 44 BR.xgp";
+        var file = XgFileReader.ReadFile(Fixture(name));
+
+        file.Comments.Should().Equal([""], "temp.xgc is stored as CR LF: one empty comment");
+        var decisions = XgDecisionIterator.IterateDiagramRequests(file, name).ToList();
+        decisions.Should().NotBeEmpty("the position is analysed");
+        decisions.Should().OnlyContain(d => d.Descriptive.Comment == null,
+            "an empty comment is no note, and no record references anything else");
+    }
+
+    /// <summary>
+    /// The start of the real <c>.xg</c>'s name whose temp.xgr and temp.xgc
+    /// are stored and zero-length, temp.xgc lying exactly at the manifest's
+    /// offset. Specific enough to name one match export, and short of the
+    /// export's own numbering suffix, which the umbrella's reference check
+    /// would read as a bare issue reference; the file is found by it.
+    /// </summary>
+    private const string ZeroLengthEntriesPrefix = "Shimodaira-Suzuki 2010 Japan Open Final";
+
+    [Fact]
+    [Trait("Category", "RequiresFixtureFiles")]
+    public void StoredZeroLengthEntriesXg_ReadsAnEmptyCommentTable()
+    {
+        var matches = Directory.EnumerateFiles(TestPaths.FixtureFilesDir, ZeroLengthEntriesPrefix + "*")
+            .Where(path => string.Equals(Path.GetExtension(path), ".xg", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        matches.Should().ContainSingle(
+            $"exactly one .xg in FixtureFiles starts '{ZeroLengthEntriesPrefix}': none means the fixture is " +
+            "missing, more than one that the prefix no longer names it");
+
+        var file = XgFileReader.ReadFile(matches[0]);
+
+        file.Comments.Should().BeEmpty("its temp.xgc is stored with no bytes");
+        file.Rollouts.Should().BeEmpty("its temp.xgr is stored with no bytes");
     }
 }

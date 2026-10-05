@@ -4,293 +4,436 @@ using System.IO.Hashing;
 namespace ConvertXgToJson_Lib.Parsing;
 
 /// <summary>
-/// Decompresses the XG payload, which is stored as multiple concatenated ZLib
-/// streams (one per sub-file), and splits them into the four constituent
-/// sub-streams.
+/// Reads an XG payload — every byte after the RichGameHeader and any
+/// thumbnail — into its inner files (<see cref="XgInnerFile"/>):
 ///
 ///   temp.xg   - N x 2560 bytes  (TSaveRec records)
 ///   temp.xgi  - 2 x 2560 bytes  (first + last TSaveRec, always 5120 bytes)
 ///   temp.xgr  - M x 2184 bytes  (TRolloutContext records, may be absent)
 ///   temp.xgc  - variable         (RTF comments, may be absent)
 ///
-/// Stream assignment prefers the container's own directory: the trailing
-/// 36-byte end-record (sought from EOF, exactly as real XG loads a file)
-/// locates the compressed manifest, whose entries name every data stream —
-/// see <see cref="XgContainerLayout"/> for both layouts. Assignment by name
-/// makes misclassification impossible by construction. When the trailer or
-/// manifest is absent or fails validation (the old single-stream format has
-/// neither; a corrupt container may fail either), assignment falls back to
-/// the historical record-size heuristics.
+/// <para><b>Which format.</b> A payload is the legacy single-stream format
+/// exactly when one zlib stream begins at its first byte and that stream's
+/// compressed extent ends at the payload's last byte. That stream holds
+/// temp.xg with temp.xgi's two records at its tail, which are split off
+/// when the stream is longer than them. Every other payload is a container
+/// and is read through its directory — the end-record and manifest
+/// <see cref="XgContainerLayout"/> describes — which assigns each inner file
+/// by its manifest name. When the directory is absent or fails any check
+/// below, reading throws <see cref="InvalidDataException"/> whose message
+/// names that check; nothing is assigned by guesswork. One limit follows
+/// from the rule: a container cut off exactly at the end of its first
+/// stream is one complete zlib stream, so it cannot be told from a legacy
+/// file and reads as one.</para>
+///
+/// <para>Deciding the format inflates the zlib stream at the payload's
+/// first byte to learn where it ends. In a container that stream is an
+/// inner file's — temp.xg's in every corpus file — and the result is
+/// discarded: the test extracts nothing and certifies nothing.</para>
+///
+/// <para><b>The directory</b> is validated in full before any inner file
+/// is extracted, the same for every read surface: the payload holds at
+/// least an end-record; its last 36 bytes are one (version 1, compressed
+/// registry 1, reserved bytes zero); it counts at least one inner file; the
+/// manifest it locates ends where the end-record begins; the body's CRC32
+/// matches it; the manifest is one zlib stream filling exactly its extent
+/// and inflates to exactly one 532-byte entry per counted file. Then each
+/// entry: it
+/// names an inner file (case-insensitively), and no other entry names the
+/// same one; its storage flag is 0 (compressed) or 1 (stored), and no other
+/// value is read as either; a stored entry's two sizes are equal; and its
+/// extent lies wholly before the manifest, computed without overflow, so a
+/// zero-length entry lying exactly at the manifest's offset is valid.
+/// Finally the manifest names temp.xg. The compression level is not a gate,
+/// and the path field and padding are never read.</para>
+///
+/// <para><b>Extraction</b> applies one rule to each inner file a surface
+/// asks for, and to no other: a stored entry is its raw bytes; a compressed
+/// entry is one zlib stream read within its compressed extent, which it
+/// must fill exactly and must not inflate past its declared size. Either
+/// way the result must hold exactly the entry's uncompressed size, and its
+/// CRC32 must match the entry's. The CRC check verifies the reading, where
+/// the body CRC verifies the bytes: the bytes can be intact and still be
+/// taken from the wrong extent or by the wrong storage, which is the
+/// mistake halheinrich/backgammon#343 corrected. An inner file the manifest
+/// does not name reads as empty. Success certifies only the inner files
+/// extracted: a metadata read of temp.xg says nothing of temp.xgc.</para>
 /// </summary>
 internal static class XgDecompressor
 {
     // Record sizes are owned by the parsers; referenced here for stream sizing.
     private const int XgiSize = 2 * SaveRecordParser.RecordSize;  // 5120
 
+    /// <summary>
+    /// The full read: opens the payload and extracts all four inner files,
+    /// an absent one as an empty stream.
+    /// </summary>
+    /// <exception cref="InvalidDataException">
+    /// The payload is not one zlib stream and its directory cannot be used,
+    /// or an inner file fails extraction.
+    /// </exception>
     public static XgDecompressedStreams Decompress(Stream compressedStream)
     {
-        byte[] raw = ReadAllBytes(compressedStream);
-        return TryDecompressViaManifest(raw) ?? DecompressByRecordSizeHeuristics(raw);
+        Payload payload = Payload.Open(ReadAllBytes(compressedStream));
+        return new XgDecompressedStreams(
+            ToStream(payload.Read(XgInnerFile.GameRecords)),
+            ToStream(payload.Read(XgInnerFile.IndexRecords)),
+            ToStream(payload.Read(XgInnerFile.RolloutContexts)),
+            ToStream(payload.Read(XgInnerFile.Comments)));
     }
 
     /// <summary>
-    /// Manifest-directed decompression: reads the end-record from the tail of
-    /// <paramref name="raw"/> (whose start is the container's content start,
-    /// so all manifest offsets are directly usable as indices), validates it
-    /// against the body, then decompresses and assigns each data stream by its
-    /// manifest name. Returns <c>null</c> — deferring to the heuristic
-    /// fallback — when any structural check fails: unrecognized trailer
-    /// shape, manifest offset/size not tiling the body exactly, body CRC32
-    /// mismatch, undecompressible or wrongly-sized manifest, an entry that
-    /// does not parse, an unknown or duplicate inner-file name, a stream
-    /// whose decompressed length contradicts its entry, or a manifest that
-    /// never names temp.xg. Per-entry CRC32s are not re-verified: the body
-    /// CRC already covers every compressed byte they describe.
+    /// The metadata read: opens the payload through the same format test and
+    /// directory validation as <see cref="Decompress"/> and extracts temp.xg
+    /// alone; no other inner file is extracted or checked.
     /// </summary>
-    private static XgDecompressedStreams? TryDecompressViaManifest(byte[] raw)
+    /// <exception cref="InvalidDataException">
+    /// The payload is not one zlib stream and its directory cannot be used,
+    /// or temp.xg fails extraction.
+    /// </exception>
+    public static byte[] DecompressGameRecords(Stream compressedStream) =>
+        Payload.Open(ReadAllBytes(compressedStream)).Read(XgInnerFile.GameRecords);
+
+    // -----------------------------------------------------------------------
+    //  The payload — the one rule every read surface opens it by
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// An opened payload, its format decided and (for a container) its
+    /// directory validated; <see cref="Read"/> extracts one inner file.
+    /// </summary>
+    private abstract class Payload
     {
-        if (raw.Length <= XgContainerLayout.EndRecordSize)
-            return null;
-        if (!XgContainerLayout.TryReadEndRecord(
-                raw.AsSpan(raw.Length - XgContainerLayout.EndRecordSize), out var trailer))
-            return null;
+        /// <summary>
+        /// Decides the payload's format by <see cref="XgDecompressor"/>'s
+        /// rule and validates a container's directory, extracting no inner
+        /// file.
+        /// </summary>
+        public static Payload Open(byte[] raw) =>
+            Inflate(raw, 0, raw.Length, long.MaxValue, out byte[] single) == InflateOutcome.Complete
+                ? new SingleStreamPayload(single)
+                : ContainerPayload.ReadDirectory(raw);
 
-        int bodyLength = raw.Length - XgContainerLayout.EndRecordSize;
-        if ((long)trailer.ManifestOffset + trailer.ManifestCompressedSize != bodyLength)
-            return null;
-        if (trailer.DataStreamCount == 0)
-            return null;
-        if (Crc32.HashToUInt32(raw.AsSpan(0, bodyLength)) != trailer.BodyCrc32)
-            return null;
+        /// <summary>The bytes of <paramref name="file"/>; empty when the payload holds none.</summary>
+        public abstract byte[] Read(XgInnerFile file);
+    }
 
-        byte[]? manifest = TryDecompress(raw, (int)trailer.ManifestOffset);
-        if (manifest == null ||
-            manifest.Length != (long)trailer.DataStreamCount * XgContainerLayout.ManifestEntrySize)
+    /// <summary>The legacy format: one zlib stream, temp.xg then temp.xgi.</summary>
+    private sealed class SingleStreamPayload : Payload
+    {
+        private readonly byte[] _gameRecords;
+        private readonly byte[] _indexRecords;
+
+        public SingleStreamPayload(byte[] stream)
         {
-            return null;
-        }
-
-        byte[]? xgData = null;
-        byte[]? xgiData = null;
-        byte[]? xgrData = null;
-        byte[]? xgcData = null;
-
-        for (int pos = 0; pos < manifest.Length; pos += XgContainerLayout.ManifestEntrySize)
-        {
-            if (!XgContainerLayout.TryReadManifestEntry(
-                    manifest.AsSpan(pos, XgContainerLayout.ManifestEntrySize), out var entry))
-                return null;
-            if (entry.Offset >= trailer.ManifestOffset)
-                return null;
-
-            byte[]? data = TryDecompress(raw, (int)entry.Offset);
-            if (data == null || (uint)data.Length != entry.UncompressedSize)
-                return null;
-
-            switch (entry.Name.ToLowerInvariant())
+            if (stream.Length > XgiSize)
             {
-                case "temp.xg":
-                    if (xgData != null) return null;
-                    xgData = data;
-                    break;
-                case "temp.xgi":
-                    if (xgiData != null) return null;
-                    xgiData = data;
-                    break;
-                case "temp.xgr":
-                    if (xgrData != null) return null;
-                    xgrData = data;
-                    break;
-                case "temp.xgc":
-                    if (xgcData != null) return null;
-                    xgcData = data;
-                    break;
-                default:
-                    return null;
+                _gameRecords = stream[..^XgiSize];
+                _indexRecords = stream[^XgiSize..];
+            }
+            else
+            {
+                _gameRecords = stream;
+                _indexRecords = [];
             }
         }
 
-        if (xgData == null)
-            return null;
+        public override byte[] Read(XgInnerFile file) => file switch
+        {
+            XgInnerFile.GameRecords => _gameRecords,
+            XgInnerFile.IndexRecords => _indexRecords,
+            XgInnerFile.RolloutContexts or XgInnerFile.Comments => [],
+            _ => throw new ArgumentOutOfRangeException(nameof(file), file, "Not an XG inner file."),
+        };
+    }
 
-        return new XgDecompressedStreams(
-            ToStream(xgData),
-            ToStream(xgiData),
-            ToStream(xgrData),
-            ToStream(xgcData));
+    /// <summary>A container, read through its validated directory.</summary>
+    private sealed class ContainerPayload : Payload
+    {
+        private readonly byte[] _raw;
+        private readonly Dictionary<XgInnerFile, XgContainerLayout.ManifestEntry> _entries;
+
+        private ContainerPayload(byte[] raw, Dictionary<XgInnerFile, XgContainerLayout.ManifestEntry> entries)
+        {
+            _raw = raw;
+            _entries = entries;
+        }
+
+        /// <summary>
+        /// Validates the directory in the order the class doc states,
+        /// throwing at the first check that fails.
+        /// </summary>
+        public static ContainerPayload ReadDirectory(byte[] raw)
+        {
+            const int endRecordSize = XgContainerLayout.EndRecordSize;
+            if (raw.Length < endRecordSize)
+                throw DirectoryRefused($"the payload holds {raw.Length} bytes, too few for the {endRecordSize}-byte end-record");
+            if (!XgContainerLayout.TryReadEndRecord(raw.AsSpan(raw.Length - endRecordSize), out var trailer))
+                throw DirectoryRefused(
+                    $"its last {endRecordSize} bytes are not an end-record (version {XgContainerLayout.EndRecordVersion}, " +
+                    $"compressed registry {XgContainerLayout.EndRecordCompressedRegistry}, reserved bytes zero)");
+
+            int bodyLength = raw.Length - endRecordSize;
+            if (trailer.InnerFileCount == 0)
+                throw DirectoryRefused("the end-record counts no inner files");
+            long manifestEnd = (long)trailer.ManifestOffset + trailer.ManifestCompressedSize;
+            if (manifestEnd != bodyLength)
+                throw DirectoryRefused(
+                    $"the end-record places the manifest at bytes {trailer.ManifestOffset} to {manifestEnd} of the body, " +
+                    $"which does not end where the end-record begins, at byte {bodyLength}");
+            uint bodyCrc = Crc32.HashToUInt32(raw.AsSpan(0, bodyLength));
+            if (bodyCrc != trailer.BodyCrc32)
+                throw DirectoryRefused($"the body's CRC32 is 0x{bodyCrc:X8}, but the end-record states 0x{trailer.BodyCrc32:X8}");
+
+            long manifestLength = (long)trailer.InnerFileCount * XgContainerLayout.ManifestEntrySize;
+            string entriesNeed = $"the end-record's {trailer.InnerFileCount} entries need {manifestLength}";
+            switch (Inflate(raw, (int)trailer.ManifestOffset, (int)trailer.ManifestCompressedSize, manifestLength, out byte[] manifest))
+            {
+                case InflateOutcome.Complete:
+                    break;
+                case InflateOutcome.ExceedsLimit:
+                    throw DirectoryRefused($"the manifest inflates to more bytes than {entriesNeed}");
+                case var fault:
+                    throw DirectoryRefused($"the manifest's compressed bytes {StreamFault(fault, trailer.ManifestCompressedSize)}");
+            }
+            if (manifest.Length != manifestLength)
+                throw DirectoryRefused($"the manifest inflates to {manifest.Length} bytes, but {entriesNeed}");
+
+            var entries = new Dictionary<XgInnerFile, XgContainerLayout.ManifestEntry>();
+            for (int pos = 0; pos < manifest.Length; pos += XgContainerLayout.ManifestEntrySize)
+            {
+                var entry = XgContainerLayout.ReadManifestEntry(
+                    manifest.AsSpan(pos, XgContainerLayout.ManifestEntrySize));
+                string entryName = $"manifest entry '{entry.Name}'";
+
+                if (!XgContainerLayout.TryParseInnerFileName(entry.Name, out XgInnerFile file))
+                    throw DirectoryRefused($"{entryName} does not name an XG inner file");
+                if (entries.ContainsKey(file))
+                    throw DirectoryRefused($"the manifest names {XgContainerLayout.NameOf(file)} more than once");
+                if (!Enum.IsDefined(entry.Storage))
+                    throw DirectoryRefused(
+                        $"{entryName} has storage flag {(byte)entry.Storage}, where only 0 (compressed) and 1 (stored) are known");
+                if (entry.Storage == XgContainerLayout.EntryStorage.Stored && entry.CompressedSize != entry.UncompressedSize)
+                    throw DirectoryRefused(
+                        $"{entryName} is stored, but its stored size ({entry.CompressedSize}) differs from its " +
+                        $"uncompressed size ({entry.UncompressedSize})");
+                if (entry.End > trailer.ManifestOffset)
+                    throw DirectoryRefused(
+                        $"{entryName} spans bytes {entry.Offset} to {entry.End} of the body, past the manifest at byte {trailer.ManifestOffset}");
+
+                entries.Add(file, entry);
+            }
+            if (!entries.ContainsKey(XgInnerFile.GameRecords))
+                throw DirectoryRefused($"the manifest names no {XgContainerLayout.NameOf(XgInnerFile.GameRecords)}");
+
+            return new ContainerPayload(raw, entries);
+        }
+
+        /// <summary>Extracts <paramref name="file"/> by the class doc's one extraction rule.</summary>
+        public override byte[] Read(XgInnerFile file)
+        {
+            if (!_entries.TryGetValue(file, out var entry))
+                return [];
+
+            // The directory bounded every extent within the body, so each
+            // fits an int.
+            int offset = (int)entry.Offset;
+            int length = (int)entry.CompressedSize;
+            byte[] data;
+            if (entry.Storage == XgContainerLayout.EntryStorage.Stored)
+            {
+                data = _raw.AsSpan(offset, length).ToArray();
+            }
+            else
+            {
+                switch (Inflate(_raw, offset, length, entry.UncompressedSize, out data))
+                {
+                    case InflateOutcome.Complete:
+                        break;
+                    case InflateOutcome.ExceedsLimit:
+                        throw InnerFileRefused(entry.Name,
+                            $"it inflates to more than the {entry.UncompressedSize} bytes its manifest entry declares");
+                    case var fault:
+                        throw InnerFileRefused(entry.Name, $"its compressed bytes {StreamFault(fault, entry.CompressedSize)}");
+                }
+            }
+
+            if (data.Length != entry.UncompressedSize)
+                throw InnerFileRefused(entry.Name,
+                    $"it inflates to {data.Length} bytes, but its manifest entry declares {entry.UncompressedSize}");
+            uint crc = Crc32.HashToUInt32(data);
+            if (crc != entry.Crc32)
+                throw InnerFileRefused(entry.Name,
+                    $"its CRC32 is 0x{crc:X8}, but its manifest entry states 0x{entry.Crc32:X8}");
+            return data;
+        }
+    }
+
+    private static InvalidDataException DirectoryRefused(string check) =>
+        new($"The XG payload is not a single zlib stream, and its container directory cannot be used: {check}.");
+
+    private static InvalidDataException InnerFileRefused(string name, string check) =>
+        new($"The XG container's inner file '{name}' cannot be read: {check}.");
+
+    // -----------------------------------------------------------------------
+    //  Exact-extent inflation
+    // -----------------------------------------------------------------------
+
+    /// <summary>How an extent's bytes read as one zlib stream.</summary>
+    private enum InflateOutcome
+    {
+        /// <summary>One zlib stream fills the extent exactly.</summary>
+        Complete,
+
+        /// <summary>The bytes are not a valid zlib stream.</summary>
+        NotZlib,
+
+        /// <summary>The stream needs bytes beyond the extent's end.</summary>
+        RunsPastExtent,
+
+        /// <summary>The stream ends before the extent's last byte.</summary>
+        EndsWithinExtent,
+
+        /// <summary>The stream inflates past the caller's limit; inflation stopped there.</summary>
+        ExceedsLimit,
+    }
+
+    /// <summary>The phrase naming a stream-shape outcome, for an extent of <paramref name="extent"/> bytes.</summary>
+    private static string StreamFault(InflateOutcome outcome, uint extent) => outcome switch
+    {
+        InflateOutcome.NotZlib => "are not a valid zlib stream",
+        InflateOutcome.RunsPastExtent => $"are a zlib stream that runs past its {extent}-byte extent",
+        InflateOutcome.EndsWithinExtent => $"are a zlib stream that ends before its {extent}-byte extent does",
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Not a stream-shape fault."),
+    };
+
+    /// <summary>
+    /// Inflates <paramref name="raw"/>[<paramref name="offset"/>, +<paramref name="length"/>)
+    /// as one zlib stream that must fill that extent exactly, stopping as
+    /// soon as the output passes <paramref name="limit"/> bytes.
+    /// <paramref name="data"/> is the output when the outcome is
+    /// <see cref="InflateOutcome.Complete"/>, and empty otherwise.
+    /// </summary>
+    private static InflateOutcome Inflate(byte[] raw, int offset, int length, long limit, out byte[] data)
+    {
+        data = [];
+        var feed = new ExtentFeed(raw, offset, length);
+        using var output = new MemoryStream();
+        try
+        {
+            using var zlib = new ZLibStream(feed, CompressionMode.Decompress);
+            byte[] buffer = new byte[16 * 1024];
+            int read;
+            // Read, never CopyTo: DeflateStream.CopyTo pumps its whole source
+            // through the inflater, so it would read past any stream's end.
+            while ((read = zlib.Read(buffer)) > 0)
+            {
+                if (output.Length + read > limit)
+                    return InflateOutcome.ExceedsLimit;
+                output.Write(buffer, 0, read);
+            }
+        }
+        catch (Exception e) when (e is InvalidDataException or IOException)
+        {
+            // Malformed deflate data raises InvalidDataException; a header
+            // asking for a preset dictionary raises ZLibException, an
+            // IOException outside the public surface. The feed is in memory,
+            // so no other IOException can arise here.
+            return InflateOutcome.NotZlib;
+        }
+
+        if (feed.ReadPastEnd)
+            return InflateOutcome.RunsPastExtent;
+        if (!feed.EndServed)
+            return InflateOutcome.EndsWithinExtent;
+        data = output.ToArray();
+        return InflateOutcome.Complete;
     }
 
     /// <summary>
-    /// Fallback assignment for payloads without a validatable manifest, by
-    /// record-size heuristics: SaveRec-sized streams are xg then xgi, a
-    /// rollout-sized stream is xgr, the first remaining stream is xgc. A
-    /// single-stream payload (the old XG format) has its xgi split off the
-    /// tail of xg. Note the known limitation that motivates the manifest
-    /// path: a manifest stream matches no record size, so in a commentless
-    /// multi-stream container it lands in the xgc slot.
+    /// Serves one extent of a byte array to a <see cref="ZLibStream"/> so
+    /// that its caller learns whether the zlib stream ended exactly at the
+    /// extent's last byte — which <see cref="ZLibStream"/> does not report:
+    /// it reads a stream cut short by the end of its input without
+    /// complaint, and never says where a complete one ended.
+    ///
+    /// <para>The extent is served whole but for its last byte, which is
+    /// served alone on a later read; any read after that is recorded as
+    /// running past the extent. <c>DeflateStream.Read</c> (.NET 10) takes
+    /// input from its source only while the inflater is unfinished and has
+    /// consumed all it was given, so a stream ending exactly at the extent's
+    /// end takes the last byte and stops (<see cref="EndServed"/>, not
+    /// <see cref="ReadPastEnd"/>); one ending earlier never asks for the last
+    /// byte; one needing more than the extent asks again
+    /// (<see cref="ReadPastEnd"/>). The extent tests in
+    /// <c>XgContainerDirectoryTests</c> pin all three against that
+    /// behaviour.</para>
     /// </summary>
-    private static XgDecompressedStreams DecompressByRecordSizeHeuristics(byte[] raw)
+    private sealed class ExtentFeed(byte[] source, int offset, int length) : Stream
     {
-        var streams = DecompressAllStreams(raw);
+        private int _served;
 
-        byte[]? xgData = null;
-        byte[]? xgiData = null;
-        byte[]? xgrData = null;
-        byte[]? xgcData = null;
+        /// <summary>Whether the extent's last byte was served.</summary>
+        public bool EndServed => length > 0 && _served == length;
 
-        foreach (byte[] s in streams)
+        /// <summary>Whether a read asked for input after the extent's last byte.</summary>
+        public bool ReadPastEnd { get; private set; }
+
+        public override int Read(Span<byte> buffer)
         {
-            int len = s.Length;
-            if (len == 0) continue;
-
-            bool isSaveRecMultiple = len % SaveRecordParser.RecordSize == 0;
-            bool isRolloutMultiple = len % RolloutContextParser.RecordSize == 0;
-
-            if (isSaveRecMultiple)
+            if (buffer.IsEmpty)
+                return 0;
+            int last = length - 1;
+            if (_served < last)
             {
-                // First SaveRec-sized stream = xg, second = xgi
-                if (xgData == null)
-                    xgData = s;
-                else if (xgiData == null)
-                    xgiData = s;
+                int count = Math.Min(buffer.Length, last - _served);
+                source.AsSpan(offset + _served, count).CopyTo(buffer);
+                _served += count;
+                return count;
             }
-            else if (isRolloutMultiple && xgrData == null)
+            if (_served == last)
             {
-                xgrData = s;
+                buffer[0] = source[offset + last];
+                _served++;
+                return 1;
             }
-            else if (xgcData == null)
-            {
-                xgcData = s;
-            }
+            ReadPastEnd = true;
+            return 0;
         }
 
-        // Fallback: single-stream old format — split xgi off the end of xg
-        if (xgiData == null && xgData != null && xgData.Length > XgiSize)
-        {
-            int xgEnd = xgData.Length - XgiSize;
-            xgiData = xgData[xgEnd..];
-            xgData = xgData[..xgEnd];
-        }
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
-        return new XgDecompressedStreams(
-            ToStream(xgData),
-            ToStream(xgiData),
-            ToStream(xgrData),
-            ToStream(xgcData));
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     // -----------------------------------------------------------------------
 
-    internal static byte[] ReadAllBytes(Stream source)
+    private static byte[] ReadAllBytes(Stream source)
     {
         using var ms = new MemoryStream();
         source.CopyTo(ms);
         return ms.ToArray();
     }
 
-    /// <summary>
-    /// Finds every concatenated zlib stream in <paramref name="raw"/> and
-    /// returns the decompressed bytes of each one in order.
-    ///
-    /// Boundary detection: after successfully decompressing a stream starting
-    /// at <c>pos</c>, we scan forward from <c>pos + 2</c> for the next valid
-    /// zlib header rather than relying on <c>MemoryStream.Position</c> (which
-    /// .NET's <see cref="ZLibStream"/> may not update accurately when
-    /// <c>leaveOpen</c> is true due to internal read-ahead buffering).
-    /// </summary>
-    internal static List<byte[]> DecompressAllStreams(byte[] raw)
+    private static MemoryStream ToStream(byte[] data)
     {
-        var results = new List<byte[]>();
-        int pos = 0;
-
-        while (pos < raw.Length - 1)
-        {
-            if (!IsZlibHeader(raw[pos], raw[pos + 1]))
-            {
-                pos++;
-                continue;
-            }
-
-            byte[]? decompressed = TryDecompress(raw, pos);
-            if (decompressed == null)
-            {
-                pos++;
-                continue;
-            }
-
-            results.Add(decompressed);
-
-            // Find the next zlib header after pos+2 to advance correctly.
-            // This is reliable regardless of how many bytes ZLibStream buffered.
-            int next = FindNextZlibHeader(raw, pos + 2);
-            pos = next >= 0 ? next : raw.Length;
-        }
-
-        return results;
-    }
-
-    /// <summary>
-    /// Attempts to decompress a zlib stream starting at <paramref name="offset"/>.
-    /// Returns null if decompression fails.
-    /// </summary>
-    private static byte[]? TryDecompress(byte[] raw, int offset)
-    {
-        try
-        {
-            using var input = new MemoryStream(raw, offset, raw.Length - offset);
-            using var output = new MemoryStream();
-            using var zlib = new ZLibStream(input, CompressionMode.Decompress);
-            zlib.CopyTo(output);
-            return output.ToArray();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Scans <paramref name="raw"/> starting at <paramref name="fromPos"/> and
-    /// returns the index of the next valid zlib header, or -1 if none found.
-    /// </summary>
-    private static int FindNextZlibHeader(byte[] raw, int fromPos)
-    {
-        for (int i = fromPos; i < raw.Length - 1; i++)
-        {
-            if (IsZlibHeader(raw[i], raw[i + 1]))
-                return i;
-        }
-        return -1;
-    }
-
-    private static bool IsZlibHeader(byte b0, byte b1) =>
-        b0 == 0x78 && b1 is 0x01 or 0x5E or 0x9C or 0xDA;
-
-    private static MemoryStream ToStream(byte[]? data)
-    {
-        if (data == null || data.Length == 0) return new MemoryStream(0);
+        if (data.Length == 0) return new MemoryStream(0);
         var ms = new MemoryStream(data.Length);
         ms.Write(data, 0, data.Length);
         ms.Position = 0;
         return ms;
-    }
-    /// <summary>
-    /// Decompresses only the first zlib stream found in <paramref name="raw"/>.
-    /// Used by <see cref="XgFileReader.ReadMatchInfo"/> to avoid decompressing
-    /// the entire file.
-    /// </summary>
-    internal static byte[]? DecompressFirstStream(byte[] raw)
-    {
-        for (int pos = 0; pos < raw.Length - 1; pos++)
-        {
-            if (!IsZlibHeader(raw[pos], raw[pos + 1]))
-                continue;
-
-            byte[]? decompressed = TryDecompress(raw, pos);
-            if (decompressed != null)
-                return decompressed;
-        }
-        return null;
     }
 }
 
