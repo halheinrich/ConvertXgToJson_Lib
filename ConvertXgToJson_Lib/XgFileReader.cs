@@ -112,7 +112,9 @@ public static class XgFileReader
 
     /// <summary>
     /// Reads a .XG file from disk and parses all sections into a structured
-    /// <see cref="XgFile"/> object.
+    /// <see cref="XgFile"/> object. A decode primitive: a file that cannot be
+    /// opened or decoded throws. For a read that returns a failed source
+    /// instead, use <see cref="XgSourceReader.ReadFile"/>.
     /// </summary>
     /// <param name="path">Full path to the .XG file.</param>
     /// <exception cref="InvalidDataException">
@@ -127,6 +129,9 @@ public static class XgFileReader
     /// <summary>
     /// Reads a .XG file from an open <see cref="Stream"/>.
     /// The stream must be positioned at the very beginning of the file.
+    /// The binary decoder: <see cref="ReadFile"/> and
+    /// <see cref="XgSourceReader"/> decode through it. The stream is
+    /// borrowed — sought to the payload, read, and left open.
     /// </summary>
     /// <remarks>
     /// The payload after the outer header is a container read through its
@@ -190,7 +195,10 @@ public static class XgFileReader
     /// <see cref="ToJson"/> / <see cref="WriteJsonAsync"/> — the read half of
     /// the JSON round-trip. Load-bearing: the JSON directory walks (this
     /// library's internal one and XgFilter_Lib's) parse every export
-    /// through it.
+    /// through it, and <see cref="XgSourceReader"/> decodes
+    /// <see cref="XgSourceFormat.Json"/> through the same decoder.
+    /// For a read that returns a failed source instead of throwing, use
+    /// <see cref="XgSourceReader.ReadFile"/>.
     /// </summary>
     /// <param name="path">Full path to the .json export.</param>
     /// <exception cref="InvalidDataException">
@@ -200,9 +208,28 @@ public static class XgFileReader
     /// </exception>
     public static XgFile ReadJson(string path)
     {
-        string json = File.ReadAllText(path);
+        using var stream = File.OpenRead(path);
+        return DecodeJson(stream, path);
+    }
+
+    /// <summary>
+    /// The JSON decoder: reads <paramref name="stream"/> to its end as text —
+    /// UTF-8 unless a byte-order mark says otherwise, as
+    /// <see cref="File.ReadAllText(string)"/> reads a file — and deserializes
+    /// the document. The stream is borrowed and left open.
+    /// </summary>
+    /// <param name="stream">The document, read from its current position.</param>
+    /// <param name="sourceName">Names the source in the refusal's message.</param>
+    /// <exception cref="InvalidDataException">The document is the literal <c>null</c>.</exception>
+    /// <exception cref="JsonException">The document is not this library's JSON.</exception>
+    internal static XgFile DecodeJson(Stream stream, string sourceName)
+    {
+        string json;
+        using (var reader = new StreamReader(
+                   stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true))
+            json = reader.ReadToEnd();
         return JsonSerializer.Deserialize(json, TypeInfo(options: null))
-               ?? throw new InvalidDataException($"Failed to deserialise XgFile from {path}");
+               ?? throw new InvalidDataException($"Failed to deserialise XgFile from {sourceName}");
     }
 
     /// <summary>

@@ -42,8 +42,12 @@ and `Directory.Packages.props` (Central Package Management — no inline
 
 **`ConvertXgToJson_Lib/`** — the library. Seven areas:
 
-- **Reading** — `XgFileReader` (discovery, full parse, the fast match-info
-  and game-header paths, the JSON document) over `Parsing/`:
+- **Reading** — `XgSourceReader`, the one read of one source (acquiring
+  and decoding it under one failure policy, returning an `XgSourceRead`:
+  `XgSourceDecoded` or `XgSourceFailed`, in the `XgSourceFormat` the caller
+  states), over `XgFileReader`'s decode primitives (discovery, full parse,
+  the fast match-info and game-header paths, the JSON document) over
+  `Parsing/`:
   `XgDecompressor` (the zlib container), `PascalBinaryReader` (Delphi
   record alignment), `RichGameHeaderParser`, `SaveRecordParser` (the six
   record variants, and `UnknownRecord` for a code it does not know),
@@ -147,7 +151,9 @@ File discovery (which paths are XG-format input):
   is documented on both overloads). Sorting materializes the matching
   paths on first enumeration; directory-access errors stay deferred.
 
-Entry points:
+Entry points — the decode primitives, which throw for a source they cannot
+read; the per-source read that returns the failure instead is
+`XgSourceReader` (below), which decodes through them:
 
 * `ReadFile` — full parse of a `.xg` or `.xgp` file, yielding all records.
   Format is detected from file content, so `IterateXgDirectory` routes both
@@ -188,6 +194,74 @@ Entry points:
   as `JsonException`. The converter claims the abstract `SaveRecord` alone,
   so the concrete record inside it resolves to the same options' object
   contract — no derived options object exists (halheinrich/backgammon#178).
+  `ReadJson` decodes through the internal `DecodeJson(stream, sourceName)`,
+  which reads the stream as text the way `File.ReadAllText` reads a file
+  (UTF-8 unless a byte-order mark says otherwise) — the one JSON decoder,
+  which `XgSourceReader` calls too.
+
+### The read operation (XgSourceReader)
+
+Reading one source — acquiring its bytes and decoding them — has one owner
+(Hal's ruling of 2026-10-08 on halheinrich/backgammon#373; the work is
+halheinrich/backgammon#359): `XgSourceReader`, which returns the outcome
+instead of throwing for a source that cannot be read, so every walk over
+many sources reads each one the same way and decides for itself what a
+failed source means. It reads and nothing more: converting (the iterator,
+its opening book and ranking) and filtering stay with the caller.
+`XgSourceReader`'s class doc is the statement of the contract; the
+decisions behind its shape:
+
+* **One entry point per kind of source**, named after `XgFileReader`'s:
+  `ReadFile` / `ReadFileAsync` (a path), `ReadStream` (a stream the caller
+  holds) and `ReadAsync` (an acquisition the caller supplies, awaited with
+  the caller's token — a browser upload's stream). The kinds differ in who
+  owns what and in whether there is a token, so each is its own entry
+  point, and a synchronous caller cannot reach an asynchronous acquisition:
+  one source-descriptor type taken by a sync and an async read would have
+  had to refuse that pairing at run time.
+* **The format is the caller's statement** (`XgSourceFormat.Xg` or
+  `XgSourceFormat.Json`), never inferred from the name, which is
+  attribution only. The decoders are `XgFileReader`'s — `ReadStream`, and
+  `DecodeJson` behind `ReadJson` — so there is one decode path, and
+  `XgFileReader` stays the throwing primitive layer it was.
+* **The outcome is a closed pair**: `XgSourceRead` is `XgSourceDecoded`
+  (its `XgFile`, and its `Bytes` when retained) or `XgSourceFailed` (its
+  `Exception`), each carrying `SourceName` — the path or the name exactly
+  as passed — with `Match` / `Switch` as on BgDataTypes_Lib's closed pairs
+  (`GameStanding`). Reference semantics: an outcome is one read's result.
+  The failure is the exception itself, typed, never flattened to text;
+  which stage raised it is not recorded, since one policy covers both and
+  the exception's type already says.
+* **One failure policy**, stated once in code (`FailsTheSource`): every
+  exception raised while acquiring or decoding fails the source, whatever
+  its type, except an `OperationCanceledException`, which propagates
+  whichever token it carries. A header whose payload offset no
+  `MemoryStream` can hold makes the decoder raise
+  `ArgumentOutOfRangeException`; that is the source's failure.
+* **Usage errors are outside the boundary**: a null or blank path or name,
+  a null stream or acquisition, an undefined format, and a `ReadStream`
+  stream that is not readable, seekable and at position 0 are validated
+  before anything is acquired, and thrown — by the asynchronous entry
+  points from the call itself, before a task exists (the two-method shape
+  the iterator uses for `sourceFile`). Everything after — the file system
+  refusing a path, an acquisition throwing, a null task or stream from it,
+  the decoder — is the source's.
+* **Cancellation**: the entry points that take a token observe it before
+  the acquisition starts, after the awaited acquisition (whether it
+  produced bytes or failed, so an acquisition that ignores its token can
+  produce neither a decoded nor a failed source) and before returning an
+  outcome. Decoding is synchronous and not interrupted. An acquisition's
+  own cancellation, a timeout say, ends the caller's operation rather than
+  failing one source.
+* **Resources**: the file entry points open and close the file whatever
+  happens; `ReadStream` borrows its stream and never disposes it;
+  `ReadAsync` owns the stream its acquisition returns, copies it into a
+  buffer the decoder can seek (so a forward-only stream is fine) and
+  disposes it however the copy ends, before decoding.
+* **Retained bytes are opt-in** (`retainBytes: true`, on the entry points
+  that acquire): a caller that copies an unchanged `.xgp` verbatim keeps
+  them and never acquires the source again; a caller that does not ask
+  keeps no copy. `ReadStream` never retains — its caller holds the source.
 
 ### The header types (XgMatchInfo / XgGameInfo)
 
@@ -1306,6 +1380,53 @@ public static class XgFileReader
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state);
 }
 
+// The one read of one source (see "The read operation" under
+// Architecture): acquires, decodes, returns the outcome — never throws for
+// a source that cannot be read. Usage errors throw (the async entry points'
+// from the call itself); an OperationCanceledException propagates.
+public static class XgSourceReader
+{
+    // Opens and closes the file. SourceName = path as passed.
+    public static XgSourceRead       ReadFile(string path, XgSourceFormat format = XgSourceFormat.Xg,
+                                              bool retainBytes = false);
+    public static Task<XgSourceRead> ReadFileAsync(string path, XgSourceFormat format = XgSourceFormat.Xg,
+                                                   bool retainBytes = false,
+                                                   CancellationToken cancellationToken = default);
+
+    // Borrowed: readable, seekable, at position 0; never disposed; no Bytes.
+    public static XgSourceRead       ReadStream(string sourceName, Stream stream,
+                                                XgSourceFormat format = XgSourceFormat.Xg);
+
+    // Owns, buffers and disposes the stream acquire returns (forward-only is fine).
+    public static Task<XgSourceRead> ReadAsync(string sourceName,
+                                               Func<CancellationToken, Task<Stream>> acquire,
+                                               XgSourceFormat format = XgSourceFormat.Xg,
+                                               bool retainBytes = false,
+                                               CancellationToken cancellationToken = default);
+}
+
+public enum XgSourceFormat { Xg = 0, Json = 1 }   // .xg/.xgp by content | this library's JSON
+
+// A closed pair, reference semantics; constructed only by XgSourceReader.
+public abstract class XgSourceRead
+{
+    public string SourceName { get; }   // the path or name exactly as passed
+    public abstract TResult Match<TResult>(Func<XgSourceDecoded, TResult> decoded,
+                                           Func<XgSourceFailed, TResult> failed);
+    public abstract void    Switch(Action<XgSourceDecoded> decoded, Action<XgSourceFailed> failed);
+}
+
+public sealed class XgSourceDecoded : XgSourceRead
+{
+    public XgFile                File  { get; }   // complete in memory; outlives the read's resources
+    public ReadOnlyMemory<byte>? Bytes { get; }   // exactly as acquired, only when retainBytes: true
+}
+
+public sealed class XgSourceFailed : XgSourceRead
+{
+    public Exception Exception { get; }   // acquisition's or decoder's; never a cancellation
+}
+
 public static class XgFileWriter
 {
     // Record-level serializer (reader's mirror). Semantic round-trip, not
@@ -1467,6 +1588,26 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 
 ## Pitfalls
 
+* **A failed source is an outcome, so a catch around `XgSourceReader` is
+  wrong.** What still throws out of a read is a usage error or a
+  cancellation, and both must reach the caller: catching them turns a
+  caller's bug into a skipped file and a cancelled run into a completed
+  one. The read replaces exactly that pattern — a walk catching every
+  exception from a source's read, cancellation included. And keep the
+  policy in `FailsTheSource`: a second filter in one entry point is a
+  second policy.
+* **An acquisition's own cancellation ends the whole operation.** A
+  `ReadAsync` acquisition that times out by throwing
+  `OperationCanceledException` stops the caller's walk, by the ruling that
+  a cancellation stays a cancellation. An acquisition that means "this one
+  source timed out" throws something else (`TimeoutException`), which fails
+  the source alone.
+* **`ReadStream` needs position 0, not merely the source's start.** XG's
+  header states its payload's offset from the file's first byte and the
+  binary decoder seeks there absolutely, so a stream holding the file at a
+  later offset cannot be read in place. The precondition is checked and
+  thrown, never left to decode as garbage; buffer such a source, or read
+  it through `ReadAsync`.
 * **XG's files use two frames; the record uses one.** A record's board is
   on-roll-relative. XG stores a decision's starting position in player 1's
   frame, but each candidate's resulting position and the position after
