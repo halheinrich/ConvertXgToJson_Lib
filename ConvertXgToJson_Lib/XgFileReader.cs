@@ -193,10 +193,9 @@ public static class XgFileReader
     /// <summary>
     /// Reads an <see cref="XgFile"/> back from a JSON export produced by
     /// <see cref="ToJson"/> / <see cref="WriteJsonAsync"/> — the read half of
-    /// the JSON round-trip. Load-bearing: the JSON directory walks (this
-    /// library's internal one and XgFilter_Lib's) parse every export
-    /// through it, and <see cref="XgSourceReader"/> decodes
-    /// <see cref="XgSourceFormat.Json"/> through the same decoder.
+    /// the JSON round-trip. Load-bearing: XgFilter_Lib's JSON directory walk
+    /// parses every export through it, and <see cref="XgSourceReader"/>
+    /// decodes <see cref="XgSourceFormat.Json"/> through the same decoder.
     /// For a read that returns a failed source instead of throwing, use
     /// <see cref="XgSourceReader.ReadFile"/>.
     /// </summary>

@@ -41,6 +41,8 @@ The first seek to 1142 is a leftover from an earlier iteration. The comment abov
 
 The directory-level iterators reset `state.GameInfo = null` at file boundaries, but `ReadGameHeaders` only sets `state.GameInfo` — it never nulls it before each game. If the caller relies on `GameInfo` being `null` until set, this is fine, but it's inconsistent with how `IterateXgDirectory` behaves. Minor but worth making explicit.
 
+*The internal directory iterators were later removed (halheinrich/backgammon#359, 2026-10-10): a walk over many files is the caller's, composed from `EnumerateXgFormatFiles`, `XgSourceReader` and `Iterate`.*
+
 ---
 
 ### 🟡 Robustness / maintainability

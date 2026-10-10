@@ -139,7 +139,7 @@ File discovery (which paths are XG-format input):
 * `EnumerateXgFormatFiles(directory)` — yields all `.xg` then all `.xgp`
   files (filesystem order within each), one `Directory.EnumerateFiles` pass
   per extension rather than a `*.xg*` glob. This is the single producer-side
-  copy of the discovery rule; `IterateXgDirectory` routes through it.
+  copy of the discovery rule; a caller's directory walk lists through it.
 * `EnumerateXgFormatFiles(directory, searchOption)` — recursive-capable
   overload; filters through `IsXgFormatFile`, so `XgFormatExtensions`
   stays the discovery SSOT. **Enumeration order is deterministic and
@@ -156,7 +156,7 @@ read; the per-source read that returns the failure instead is
 `XgSourceReader` (below), which decodes through them:
 
 * `ReadFile` — full parse of a `.xg` or `.xgp` file, yielding all records.
-  Format is detected from file content, so `IterateXgDirectory` routes both
+  Format is detected from file content, so a directory walk reads both
   extensions through it uniformly. A payload that is neither a container
   with a usable directory nor the legacy single stream, or whose inner
   file contradicts its manifest entry, is refused as
@@ -715,20 +715,18 @@ Cube decisions stamp `ctx.MoveNumber + 1`, so a cube decision numbers as
 the move its turn goes on to play: the cube and the play that follows
 share a move number, told apart by their kind.
 
-`IterateXgDirectory` (internal) is the directory-level walk: it
-enumerates both `*.xg` (match files) and `*.xgp` (position files) —
-both formats are XG-native and `XgFileReader` handles them uniformly,
-so a directory of mixed XG content yields all decisions regardless of
-extension. File discovery is delegated to
-`XgFileReader.EnumerateXgFormatFiles` (see XgFileReader above) — the
-single source of the `.xg`-then-`.xgp` rule. `IterateJsonDirectory`
-(internal) is the parallel walk for `*.json` exports. Both are
-internal: external consumers compose their own directory walks from
-the public `EnumerateXgFormatFiles` + `Iterate` /
-`IterateDiagramRequests` pieces (XgFilter_Lib's
-`FilteredDecisionIterator` is the in-tree pattern — it adds
-skip-and-log error handling and filter callbacks this producer
-deliberately doesn't own).
+**A walk over many files is the caller's.** This library owns no
+directory walk: its two internal ones, test-only, dropped a file that
+failed to read without a word, and were removed rather than given a
+reporting channel nobody consumed (halheinrich/backgammon#359). A walk
+composes the public pieces — `XgFileReader.EnumerateXgFormatFiles` (both
+`*.xg` and `*.xgp`, which `XgFileReader` reads alike) or a `*.json`
+listing; `XgSourceReader` per file, whose outcome names a file that
+failed to read and carries why, for the walk to skip, report or stop on;
+and `Iterate` / `IterateDiagramRequests` per decoded file, under its file
+name with the extension. XgFilter_Lib's `FilteredDecisionIterator` is the
+in-tree walk, adding the skip report and filter callbacks this producer
+deliberately doesn't own.
 
 **Depth: the typed facts.** A candidate's and a cube analysis's depth is
 stored as typed facts — the `AnalysisMode` × `AnalysisLevel` pair, the
@@ -1069,8 +1067,8 @@ Pure read-only observer of producer-internal iteration state. Inspect for
 per-row context; carries no caller-mutable surface.
 
 * `MatchInfo` — populated by the iterator at the file boundary (start of
-  every `Iterate` / `IterateDiagramRequests` invocation, including the
-  per-file calls inside the directory walks).
+  every `Iterate` / `IterateDiagramRequests` invocation — once per file in
+  a caller's directory walk).
 * `GameInfo` — populated by the iterator at each new `GameHeaderRecord`.
   Reset to null at each file boundary.
 
@@ -1081,8 +1079,8 @@ type does not participate in iteration control.
 ### XgIteratorCallbacks
 
 Optional predicate record supplied at call time to
-`Iterate` / `IterateDiagramRequests` / `IterateXgDirectory` /
-`IterateJsonDirectory`. Four predicates, each null by default:
+`Iterate` / `IterateDiagramRequests`. Four predicates, each null by
+default:
 
 * `SkipMatchAt(XgMatchInfo) → bool` — fires once per match at the match
   header. True = skip the entire match before any row yields.
@@ -1102,8 +1100,7 @@ is best, and each play's error, are a ranking's.
 ### XgIteratorOptions
 
 Optional producer configuration record supplied at call time to
-`Iterate` / `IterateDiagramRequests` (and the internal directory walks) —
-the third leg of the iterator's parameter pattern: `XgIteratorState`
+`Iterate` / `IterateDiagramRequests` — the third leg of the iterator's parameter pattern: `XgIteratorState`
 observes, `XgIteratorCallbacks` controls iteration, `XgIteratorOptions`
 configures how rows are built. Two members:
 
@@ -1363,9 +1360,9 @@ public static class XgFileReader
     public static XgFile                ReadFile(string path);
     public static XgFile                ReadStream(Stream stream);
 
-    // JSON serialization round-trip. ReadJson is load-bearing: the
-    // internal XgDecisionIterator.IterateJsonDirectory and XgFilter_Lib's
-    // FilteredDecisionIterator both parse each export through it. Every
+    // JSON serialization round-trip. ReadJson is load-bearing: XgFilter_Lib's
+    // FilteredDecisionIterator parses each export through it, and
+    // XgSourceReader decodes Json through the same decoder. Every
     // record variant round-trips, UnknownRecord's two tags included: the
     // $type mapping is SaveRecordConverter's one table (see XgFileReader
     // under Architecture).
@@ -1714,9 +1711,8 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   ordering of `ExtractMatchInfo`. `ExtractMatchInfo` finds a header at
   any position; `MatchContext` requires one at index 0. Consumers
   iterating directories of unknown files must catch this if they want
-  log-and-skip semantics; the producer's `Iterate*Directory` helpers
-  swallow only `XgFileReader.ReadFile` failures, not iterator-time
-  errors.
+  log-and-skip semantics: `XgSourceReader` covers reading a file, not
+  iterating it.
 * **Sentinel-only analyses are filtered at the iterator boundary, not in
   the leaves.** XG emits two known patterns where the lone "candidate" in
   `BestMoveAnalysis.Moves[best]` is a non-play sentinel pair:
@@ -1980,7 +1976,8 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   discovery copies onto the sorted overload, consider routing the
   single-arg form through `(directory, TopDirectoryOnly)` so the class
   carries one order contract. Deliberate behavior change, not a drive-by:
-  it alters `IterateXgDirectory`'s file order — its own session.
+  it alters the order a caller's walk over the single-arg overload sees
+  (XgFilter_Lib's) — its own session.
 * **Analysis carry-through landed as the slice exporter** (`XgpExporter`'s
   `XgFile` + coordinates surface) — the original "Option B"
   (reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from

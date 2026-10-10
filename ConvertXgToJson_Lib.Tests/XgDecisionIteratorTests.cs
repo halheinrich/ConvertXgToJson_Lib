@@ -139,16 +139,56 @@ public class XgDecisionIteratorTests
     }
 
     // -----------------------------------------------------------------------
-    //  IterateXgDirectory file selection
+    //  Directory walks — the caller's, composed from the public pieces
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// IterateXgDirectory must enumerate both <c>*.xg</c> match files and
+    /// halheinrich/backgammon#359: the library's own directory walks dropped
+    /// a file that failed to read without a word, and are gone. A walk now
+    /// composes discovery with <see cref="XgSourceReader"/>, whose outcome
+    /// for each file names the one that failed and carries why — so no
+    /// unreadable file can vanish from a walk unseen.
+    /// </summary>
+    [Fact]
+    public void AWalkOverTheReadOperation_NamesEveryFileThatFailsToRead()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame().Play(XgPlayer.Player1, new DiceRoll(3, 1), Play.Create(new Move(8, 5), new Move(6, 5)));
+        byte[] readable = XgFileWriter.ToBytes(builder.Build());
+        byte[] unreadable = readable.ToArray();
+        unreadable[^60] ^= 0xFF;   // inside the compressed manifest: the body CRC fails
+
+        string dir = Directory.CreateTempSubdirectory("ConvertXgToJson_Lib.Tests_").FullName;
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir, "good.xg"), readable);
+            File.WriteAllBytes(Path.Combine(dir, "bad.xg"), unreadable);
+            File.WriteAllBytes(Path.Combine(dir, "good.xgp"), readable);
+
+            var reads = XgFileReader.EnumerateXgFormatFiles(dir)
+                .Select(path => XgSourceReader.ReadFile(path))
+                .ToList();
+
+            reads.Should().HaveCount(3, "every listed file has an outcome");
+            var failed = reads.OfType<XgSourceFailed>().Should().ContainSingle().Subject;
+            failed.SourceName.Should().Be(Path.Combine(dir, "bad.xg"));
+            failed.Exception.Should().BeOfType<InvalidDataException>();
+            reads.OfType<XgSourceDecoded>().Select(read => Path.GetFileName(read.SourceName))
+                .Should().BeEquivalentTo(["good.xg", "good.xgp"]);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A walk over a directory reads both <c>*.xg</c> match files and
     /// <c>*.xgp</c> position files — both formats are valid XG-native
     /// inputs and downstream consumers (e.g. LocalFolderProcessor) treat
-    /// them as a single supported set. Regression guard: prior to this
-    /// test, the iterator filtered to <c>*.xg</c> only and silently
-    /// skipped every <c>.xgp</c>.
+    /// them as a single supported set. Regression guard: the library's walk
+    /// once filtered to <c>*.xg</c> only and silently skipped every
+    /// <c>.xgp</c>.
     ///
     /// <para>
     /// Self-contained: copies one fixture of each extension into a fresh
@@ -157,7 +197,7 @@ public class XgDecisionIteratorTests
     /// </para>
     /// </summary>
     [Fact]
-    public void IterateXgDirectory_IncludesBothXgAndXgpFiles()
+    public void DirectoryWalk_IncludesBothXgAndXgpFiles()
     {
         const string xgFixture = "match35041658.xg";
         const string xgpFixture = "PlayAnalysis.xgp";
@@ -175,13 +215,13 @@ public class XgDecisionIteratorTests
             File.Copy(xgSource, Path.Combine(tempDir, xgFixture));
             File.Copy(xgpSource, Path.Combine(tempDir, xgpFixture));
 
-            var rows = XgDecisionIterator.IterateXgDirectory(tempDir).ToList();
+            var rows = DirectoryWalk.XgRows(tempDir).ToList();
 
             var sourceFiles = rows.Select(r => r.SourceFile).Distinct().ToList();
             sourceFiles.Should().Contain(xgFixture,
-                "IterateXgDirectory must yield rows from .xg match files");
+                "a directory walk must yield rows from .xg match files");
             sourceFiles.Should().Contain(xgpFixture,
-                "IterateXgDirectory must yield rows from .xgp position files — " +
+                "a directory walk must yield rows from .xgp position files — " +
                 "the prior *.xg-only filter silently skipped these");
         }
         finally
@@ -205,9 +245,7 @@ public class XgDecisionIteratorTests
 
         var callbacks = new XgIteratorCallbacks(
             StopMatchAfter: _ => true);
-        var collected = XgDecisionIterator
-            .IterateXgDirectory(TestPaths.XgDir, callbacks: callbacks)
-            .ToList();
+        var collected = DirectoryWalk.XgRows(TestPaths.XgDir, callbacks: callbacks).ToList();
 
         // Should get exactly one row per file that has any rows.
         collected.Count.Should().BeGreaterThanOrEqualTo(2,
@@ -229,7 +267,7 @@ public class XgDecisionIteratorTests
         XgMatchInfo? capturedInfo = null;
         bool firstRow = true;
 
-        foreach (var row in XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir, state))
+        foreach (var row in DirectoryWalk.XgRows(TestPaths.XgDir, state))
         {
             if (firstRow)
             {
@@ -258,7 +296,7 @@ public class XgDecisionIteratorTests
         var capturedInfos = new List<XgMatchInfo?>();
         string? lastSourceFile = null;
 
-        foreach (var row in XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir, state))
+        foreach (var row in DirectoryWalk.XgRows(TestPaths.XgDir, state))
         {
             if (row.SourceFile != lastSourceFile)
             {

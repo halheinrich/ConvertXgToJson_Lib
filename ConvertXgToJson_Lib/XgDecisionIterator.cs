@@ -30,6 +30,15 @@ namespace ConvertXgToJson_Lib;
 /// <c>.xgp</c> position files yield <em>at most one</em> decision. See
 /// <see cref="SelectXgpDecision"/> for the policy and its rationale.
 /// </para>
+///
+/// <para>
+/// The iterator walks one parsed file. A walk over many files is the
+/// caller's: it lists them (<see cref="XgFileReader.EnumerateXgFormatFiles(string)"/>),
+/// reads each through <see cref="XgSourceReader"/> — whose outcome names a
+/// file that failed to read, for the caller to skip, report or stop on —
+/// and iterates each decoded file under its own name
+/// (halheinrich/backgammon#359).
+/// </para>
 /// </summary>
 public static class XgDecisionIterator
 {
@@ -348,69 +357,6 @@ public static class XgDecisionIterator
                 yield break;
             if (callbacks.StopGameAfter?.Invoke(filterView) == true)
                 skipCurrentGame = true;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    //  Directory walks (internal — external consumers build their own walks
-    //  over EnumerateXgFormatFiles + Iterate, as XgFilter_Lib does)
-    // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// Yields all decisions from every XG-format file in
-    /// <paramref name="xgDir"/> — both <c>.xg</c> match files and
-    /// <c>.xgp</c> position files. <see cref="XgFileReader.ReadFile"/>
-    /// detects format from file content, so per-file handling is uniform.
-    /// </summary>
-    /// <param name="xgDir">Directory containing .xg and/or .xgp files.</param>
-    /// <param name="state">Optional read-only observer. See <see cref="Iterate"/>
-    /// — per-file <see cref="XgIteratorState.MatchInfo"/> repopulation happens
-    /// inside <c>Iterate</c> at each file boundary.</param>
-    /// <param name="callbacks">Optional skip predicates. Re-evaluated fresh per
-    /// file — predicates are stateless from the producer's perspective, so a
-    /// match-skip in one file has no effect on the next.</param>
-    /// <param name="options">Optional producer configuration, shared across
-    /// all files in the walk. See <see cref="XgIteratorOptions"/>.</param>
-    internal static IEnumerable<DecisionRow> IterateXgDirectory(
-        string xgDir,
-        XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null,
-        XgIteratorOptions? options = null)
-    {
-        foreach (var path in XgFileReader.EnumerateXgFormatFiles(xgDir))
-        {
-            XgFile file;
-            try { file = XgFileReader.ReadFile(path); }
-            catch { continue; }
-
-            string sourceFile = Path.GetFileName(path);
-            foreach (var row in Iterate(file, sourceFile, state, callbacks, options))
-                yield return row;
-        }
-    }
-
-    /// <summary>
-    /// Yields all decisions from every .json file in <paramref name="jsonDir"/>.
-    /// </summary>
-    /// <param name="jsonDir">Directory containing .json files.</param>
-    /// <param name="state">Optional read-only observer. See <see cref="Iterate"/>.</param>
-    /// <param name="callbacks">Optional skip predicates. See <see cref="IterateXgDirectory"/>.</param>
-    /// <param name="options">Optional producer configuration. See <see cref="IterateXgDirectory"/>.</param>
-    internal static IEnumerable<DecisionRow> IterateJsonDirectory(
-        string jsonDir,
-        XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null,
-        XgIteratorOptions? options = null)
-    {
-        foreach (var path in Directory.EnumerateFiles(jsonDir, "*.json"))
-        {
-            XgFile file;
-            try { file = XgFileReader.ReadJson(path); }
-            catch { continue; }
-
-            string sourceFile = Path.GetFileName(path);
-            foreach (var row in Iterate(file, sourceFile, state, callbacks, options))
-                yield return row;
         }
     }
 

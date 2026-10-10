@@ -1,6 +1,7 @@
 // ReadMatchInfoBenchmarkTests.cs
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Tests.Helpers;
 using System.Diagnostics;
 using Xunit.Abstractions;
 
@@ -283,19 +284,19 @@ public class ReadMatchInfoBenchmarkTests(ITestOutputHelper output)
             }
 
             // Warm up
-            XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).ToList();
-            XgDecisionIterator.IterateJsonDirectory(tempJsonDir).ToList();
+            DirectoryWalk.XgRows(TestPaths.XgDir).ToList();
+            DirectoryWalk.JsonRows(tempJsonDir).ToList();
 
             // --- XG iteration ---
             var sw = Stopwatch.StartNew();
-            int xgDecisions = XgDecisionIterator.IterateXgDirectory(TestPaths.XgDir).Count();
+            int xgDecisions = DirectoryWalk.XgRows(TestPaths.XgDir).Count();
             sw.Stop();
             double xgMs = sw.Elapsed.TotalMilliseconds;
             double xgPerSec = xgFiles.Count / (xgMs / 1000.0);
 
             // --- JSON iteration ---
             sw.Restart();
-            int jsonDecisions = XgDecisionIterator.IterateJsonDirectory(tempJsonDir).Count();
+            int jsonDecisions = DirectoryWalk.JsonRows(tempJsonDir).Count();
             sw.Stop();
             double jsonMs = sw.Elapsed.TotalMilliseconds;
             double jsonPerSec = xgFiles.Count / (jsonMs / 1000.0);
