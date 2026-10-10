@@ -45,8 +45,8 @@ and `Directory.Packages.props` (Central Package Management — no inline
 - **Reading** — `XgSourceReader`, the one read of one source (acquiring
   and decoding it under one failure policy, returning an `XgSourceRead`:
   `XgSourceDecoded` or `XgSourceFailed`, in the `XgSourceFormat` the caller
-  states), over `XgFileReader`'s decode primitives (discovery, full parse,
-  the fast match-info and game-header paths, the JSON document) over
+  states), and `XgFileReader` (discovery, and the decode primitives: full
+  parse, the fast match-info and game-header paths, the JSON document) over
   `Parsing/`:
   `XgDecompressor` (the zlib container), `PascalBinaryReader` (Delphi
   record alignment), `RichGameHeaderParser`, `SaveRecordParser` (the six
@@ -1114,9 +1114,10 @@ is best, and each play's error, are a ranking's.
 ### XgIteratorOptions
 
 Optional producer configuration record supplied at call time to
-`Iterate` / `IterateDiagramRequests` — the third leg of the iterator's parameter pattern: `XgIteratorState`
-observes, `XgIteratorCallbacks` controls iteration, `XgIteratorOptions`
-configures how rows are built. Two members:
+`Iterate` / `IterateDiagramRequests` — the third leg of the iterator's
+parameter pattern: `XgIteratorState` observes, `XgIteratorCallbacks`
+controls iteration, `XgIteratorOptions` configures how rows are built. Two
+members:
 
 * `OpeningBook` — a loaded book database for depth enrichment (see "Book
   enrichment" above). Null = no enrichment; book hits state their bare
