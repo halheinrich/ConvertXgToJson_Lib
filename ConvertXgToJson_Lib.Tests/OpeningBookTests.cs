@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
 
@@ -25,10 +26,11 @@ public class OpeningBookTests
     private static readonly sbyte[] DefaultStoredPosition =
         [0, -2, 0, 0, 0, 0, 5, 0, 3, 0, 0, 0, -4, 5, 0, 0, -1, -3, 0, -4, -1, 0, 0, 0, 2, 0];
 
-    /// <summary>The same play's resulting position in the XG record
-    /// convention (player-1-relative) with player 1 as the mover — the flip
-    /// of <see cref="DefaultStoredPosition"/>.</summary>
-    private static readonly sbyte[] DefaultPositionPlayedByPlayer1 =
+    /// <summary>The same play's resulting position as XG stores it in a
+    /// record: in the mover's frame, whichever seat moved — the mover's
+    /// checkers positive, 13/9 6/5 played from the standard start, stated by
+    /// hand. The flip of <see cref="DefaultStoredPosition"/>.</summary>
+    private static readonly sbyte[] DefaultPositionPlayedInMoversFrame =
         [0, -2, 0, 0, 0, 1, 4, 0, 3, 1, 0, 0, -5, 4, 0, 0, 0, -3, 0, -5, 0, 0, 0, 0, 2, 0];
 
     private static byte[] HeaderBlock(
@@ -241,34 +243,29 @@ public class OpeningBookTests
     //  Key normalization
     // -----------------------------------------------------------------------
 
+    /// <summary>
+    /// The key flips the mover's-frame position XG stores into the book's
+    /// frame, that of the player on roll after the play. It takes no seat:
+    /// XG stores the resulting position in the mover's frame for either
+    /// seat, so the flip is the same whoever moved (halheinrich/backgammon#290;
+    /// the seats are pinned through the iterator below).
+    /// </summary>
     [Fact]
-    public void ForMatchPlay_Player1Mover_FlipsToStoredPerspective()
+    public void ForMatchPlay_FlipsTheMoversFrameToTheBooksPerspective()
     {
         var book = OpeningBook.FromImage(Image(HeaderBlock(),
             EntryBlock(onRollAway: 2, opponentAway: 4)));
 
         var key = OpeningBookKey.ForMatchPlay(
-            Pos(DefaultPositionPlayedByPlayer1), activePlayer: 1,
-            moverAway: 4, opponentAway: 2, isCrawford: false);
+            Pos(DefaultPositionPlayedInMoversFrame), moverAway: 4, opponentAway: 2, isCrawford: false);
+        var unflipped = OpeningBookKey.ForMatchPlay(
+            Pos(DefaultStoredPosition), moverAway: 4, opponentAway: 2, isCrawford: false);
 
         book.TryGetEntry(key, out var entry).Should().BeTrue(
-            "player 1's resulting position must be flipped to the stored new-on-roll perspective");
+            "the mover's resulting position must be flipped to the stored new-on-roll perspective");
         entry!.OnRollAway.Should().Be(2);
-    }
-
-    [Fact]
-    public void ForMatchPlay_Player2Mover_UsesPositionAsIs()
-    {
-        var book = OpeningBook.FromImage(Image(HeaderBlock(),
-            EntryBlock(onRollAway: 2, opponentAway: 4)));
-
-        // Player 2 as mover: the record position is already expressed from
-        // the new on-roll player's (player 1's) perspective.
-        var key = OpeningBookKey.ForMatchPlay(
-            Pos(DefaultStoredPosition), activePlayer: -1,
-            moverAway: 4, opponentAway: 2, isCrawford: false);
-
-        book.TryGetEntry(key, out _).Should().BeTrue();
+        book.TryGetEntry(unflipped, out _).Should().BeFalse(
+            "a position already in the book's frame is not what XG stores, and is flipped away from it");
     }
 
     [Fact]
@@ -280,8 +277,7 @@ public class OpeningBookTests
             EntryBlock(onRollAway: 2, opponentAway: 4)));
 
         var swapped = OpeningBookKey.ForMatchPlay(
-            Pos(DefaultPositionPlayedByPlayer1), activePlayer: 1,
-            moverAway: 2, opponentAway: 4, isCrawford: false);
+            Pos(DefaultPositionPlayedInMoversFrame), moverAway: 2, opponentAway: 4, isCrawford: false);
 
         book.TryGetEntry(swapped, out _).Should().BeFalse();
     }
@@ -294,9 +290,9 @@ public class OpeningBookTests
             EntryBlock(onRollAway: 1, opponentAway: 4, crawford: false, seed: 2)));
 
         var crawford = OpeningBookKey.ForMatchPlay(
-            Pos(DefaultPositionPlayedByPlayer1), 1, moverAway: 4, opponentAway: 1, isCrawford: true);
+            Pos(DefaultPositionPlayedInMoversFrame), moverAway: 4, opponentAway: 1, isCrawford: true);
         var postCrawford = OpeningBookKey.ForMatchPlay(
-            Pos(DefaultPositionPlayedByPlayer1), 1, moverAway: 4, opponentAway: 1, isCrawford: false);
+            Pos(DefaultPositionPlayedInMoversFrame), moverAway: 4, opponentAway: 1, isCrawford: false);
 
         book.TryGetEntry(crawford, out var c).Should().BeTrue();
         book.TryGetEntry(postCrawford, out var pc).Should().BeTrue();
@@ -311,10 +307,8 @@ public class OpeningBookTests
             EntryBlock(jacoby: true, seed: 1),
             EntryBlock(jacoby: false, seed: 2)));
 
-        var withJacoby = OpeningBookKey.ForMoneyPlay(
-            Pos(DefaultPositionPlayedByPlayer1), 1, jacoby: true);
-        var withoutJacoby = OpeningBookKey.ForMoneyPlay(
-            Pos(DefaultPositionPlayedByPlayer1), 1, jacoby: false);
+        var withJacoby = OpeningBookKey.ForMoneyPlay(Pos(DefaultPositionPlayedInMoversFrame), jacoby: true);
+        var withoutJacoby = OpeningBookKey.ForMoneyPlay(Pos(DefaultPositionPlayedInMoversFrame), jacoby: false);
 
         book.TryGetEntry(withJacoby, out var j).Should().BeTrue();
         book.TryGetEntry(withoutJacoby, out var nj).Should().BeTrue();
@@ -329,7 +323,7 @@ public class OpeningBookTests
             EntryBlock(jacoby: true, beaver: false, seed: 1),
             EntryBlock(jacoby: true, beaver: true, seed: 2)));
 
-        var key = OpeningBookKey.ForMoneyPlay(Pos(DefaultPositionPlayedByPlayer1), 1, jacoby: true);
+        var key = OpeningBookKey.ForMoneyPlay(Pos(DefaultPositionPlayedInMoversFrame), jacoby: true);
 
         book.GetEntries(key).Should().HaveCount(2,
             "entries differing only in Beaver share a key");
@@ -338,16 +332,92 @@ public class OpeningBookTests
     [Fact]
     public void ForMatchPlay_InvalidArguments_Throw()
     {
-        var pos = Pos(DefaultPositionPlayedByPlayer1);
+        var pos = Pos(DefaultPositionPlayedInMoversFrame);
 
-        FluentActions.Invoking(() => OpeningBookKey.ForMatchPlay(null!, 1, 4, 2, false))
+        FluentActions.Invoking(() => OpeningBookKey.ForMatchPlay(null!, 4, 2, false))
             .Should().Throw<ArgumentNullException>();
-        FluentActions.Invoking(() => OpeningBookKey.ForMatchPlay(pos, 1, 0, 2, false))
+        FluentActions.Invoking(() => OpeningBookKey.ForMatchPlay(pos, 0, 2, false))
             .Should().Throw<ArgumentOutOfRangeException>();
-        FluentActions.Invoking(() => OpeningBookKey.ForMatchPlay(pos, 1, 4, 0, false))
+        FluentActions.Invoking(() => OpeningBookKey.ForMatchPlay(pos, 4, 0, false))
             .Should().Throw<ArgumentOutOfRangeException>();
-        FluentActions.Invoking(() => OpeningBookKey.ForMoneyPlay(null!, 1, jacoby: false))
+        FluentActions.Invoking(() => OpeningBookKey.ForMoneyPlay(null!, jacoby: false))
             .Should().Throw<ArgumentNullException>();
+    }
+
+    // -----------------------------------------------------------------------
+    //  The production lookup, for either mover
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The iterator's book enrichment hits for a player-2 mover as for a
+    /// player-1 mover (halheinrich/backgammon#290: it once missed nearly
+    /// every player-2 hit). Every input is stated by hand, none made by
+    /// <see cref="XgGameBuilder"/>: the record states 13/9 6/5 from the
+    /// standard start as XG stores it, the resulting position in the mover's
+    /// frame (<see cref="DefaultPositionPlayedInMoversFrame"/>), and the book
+    /// holds one entry per mover, in the book's own frame
+    /// (<see cref="DefaultStoredPosition"/>) with the away pair stored for
+    /// that mover at 2–4 in a 7-point match — player 1 5-away, player 2
+    /// 3-away. A key in the wrong frame, or with the other mover's away pair,
+    /// misses, and the candidate states only the bare book facts.
+    /// </summary>
+    [Theory]
+    [InlineData(1, AnalysisLevel.Ply3, 1296)]
+    [InlineData(-1, AnalysisLevel.Ply4, 5184)]
+    public void Iterator_EnrichesABookHit_ForEitherMover(int activePlayer, AnalysisLevel level, int trials)
+    {
+        var book = OpeningBook.FromImage(Image(HeaderBlock(),
+            // Player 1 moved: player 2 is on roll after it, 3-away; player 1, the mover, 5-away.
+            EntryBlock(onRollAway: 3, opponentAway: 5, movesLevel: 2, trials: 1296, seed: 1),
+            // Player 2 moved: player 1 is on roll after it, 5-away; player 2, the mover, 3-away.
+            EntryBlock(onRollAway: 5, opponentAway: 3, movesLevel: 3, trials: 5184, seed: 2)));
+
+        var play = XgDecisionIterator
+            .IterateDiagramRequests(BookStampedOpening(activePlayer), "book.xg",
+                options: new XgIteratorOptions(OpeningBook: book))
+            .Should().ContainSingle().Which.Should().BeOfType<CheckerPlayDecision>().Subject;
+
+        var candidate = play.Decision.Plays.Should().ContainSingle().Subject;
+        candidate.AnalysisMode.Should().Be(AnalysisMode.BookRollout);
+        candidate.BookEdition.Should().Be(BookEdition.V2);
+        candidate.AnalysisLevel.Should().Be(level, "the hit states its own entry's rollout moves level");
+        candidate.RolloutTrials.Should().Be(trials);
+    }
+
+    /// <summary>
+    /// A 7-point match at 2–4 whose one decision is the opening 4-1 played
+    /// 13/9 6/5 by <paramref name="activePlayer"/>, its one candidate stamped
+    /// with XG's V2 book code — records written by hand.
+    /// </summary>
+    private static XgFile BookStampedOpening(int activePlayer)
+    {
+        // The standard start, which reads the same in player 1's frame and the mover's.
+        var standard = Pos([0, -2, 0, 0, 0, 0, 5, 0, 3, 0, 0, 0, -5, 5, 0, 0, 0, -3, 0, -5, 0, 0, 0, 0, 2, 0]);
+        var played = Pos(DefaultPositionPlayedInMoversFrame);
+        return new XgFile
+        {
+            Records =
+            [
+                new MatchHeaderRecord { MatchLength = 7, Player1 = "Alice", Player2 = "Bob" },
+                new GameHeaderRecord { Score1 = 2, Score2 = 4, InitialPosition = standard },
+                new MoveRecord
+                {
+                    InitialPosition = standard,
+                    FinalPosition = played,
+                    ActivePlayer = activePlayer,
+                    Dice = [4, 1],
+                    Analysis = new BestMoveAnalysis
+                    {
+                        MoveCount = 1,
+                        Evals = [new EvalResult { Equity = 0.01f }],
+                        Moves = [[12, 8, 5, 4, -1, -1, -1, -1]],   // 13/9 6/5
+                        EvalLevels = [new EvalLevel { Level = XgDepthFacts.BookV2Code }],
+                        PositionsPlayed = [played],
+                    },
+                    RolloutIndices = [.. Enumerable.Repeat(-1, 32)],
+                },
+            ],
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -420,7 +490,7 @@ public class OpeningBookTests
     }
 
     private static OpeningBookKey MoneyKey() =>
-        OpeningBookKey.ForMoneyPlay(Pos(DefaultPositionPlayedByPlayer1), 1, jacoby: false);
+        OpeningBookKey.ForMoneyPlay(Pos(DefaultPositionPlayedInMoversFrame), jacoby: false);
 
     // -----------------------------------------------------------------------
     //  Malformed input + Load / TryLoad transport

@@ -168,7 +168,8 @@ internal static class XgRecordFactory
     /// for a position saved with dice but no play (PlayAnalysis fixture) has
     /// <paramref name="finalPosition"/> zeroed, an all-zero
     /// <paramref name="moveList"/>, and <paramref name="played"/> false; a
-    /// play that was made but not analysed carries its result instead.
+    /// play that was made but not analysed carries its result instead — the
+    /// position after it in the mover's frame, as XG stores one.
     /// </summary>
     internal static MoveRecord UnanalysedMoveRecord(
         int activePlayer, PositionEngine position, PositionEngine finalPosition,

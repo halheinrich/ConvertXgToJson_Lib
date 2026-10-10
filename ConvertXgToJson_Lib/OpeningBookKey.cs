@@ -15,11 +15,14 @@ namespace ConvertXgToJson_Lib;
 /// <list type="bullet">
 ///   <item><b>Perspective.</b> The book stores the resulting position from
 ///   the perspective of the player on roll <i>after</i> the play — the
-///   mover's opponent. XG record positions
-///   (<see cref="BestMoveAnalysis.PositionsPlayed"/>,
-///   <see cref="MoveRecord.FinalPosition"/>) are player-1-relative, so the
-///   factories flip when player 1 made the play
-///   (<c>activePlayer &gt;= 0</c>) and pass through when player 2 did.</item>
+///   mover's opponent. XG stores a candidate's resulting position
+///   (<see cref="BestMoveAnalysis.PositionsPlayed"/>, like
+///   <see cref="MoveRecord.FinalPosition"/>) in the <i>mover's</i> frame,
+///   for either seat (INSTRUCTIONS.md, "Board format": measured on every
+///   candidate of the 2026-09-27 corpus), so the factories flip it whoever
+///   moved, and the key needs no seat (halheinrich/backgammon#290: the key
+///   once flipped player 1's alone, and missed nearly every player-2 book
+///   hit).</item>
 ///   <item><b>Away-score orientation.</b> The stored score pair is
 ///   (on-roll player's away, mover's away) in the flipped frame. The
 ///   factories take decision-time roles — <c>moverAway</c> /
@@ -64,24 +67,21 @@ internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
     /// <summary>
     /// Builds the key for a candidate play made during a match game.
     /// </summary>
-    /// <param name="positionPlayed">The candidate's resulting position in
-    /// the XG record convention (player-1-relative) — e.g. an element of
+    /// <param name="positionPlayed">The candidate's resulting position as
+    /// XG stores it, in the mover's frame — an element of
     /// <see cref="BestMoveAnalysis.PositionsPlayed"/>.</param>
-    /// <param name="activePlayer">The player who made the play, in the
-    /// ecosystem's sign convention (≥ 0 = player 1).</param>
     /// <param name="moverAway">Away score of the player who made the play.</param>
     /// <param name="opponentAway">Away score of their opponent.</param>
     /// <param name="isCrawford">Whether the game is the Crawford game.</param>
     public static OpeningBookKey ForMatchPlay(
-        PositionEngine positionPlayed, int activePlayer,
-        int moverAway, int opponentAway, bool isCrawford)
+        PositionEngine positionPlayed, int moverAway, int opponentAway, bool isCrawford)
     {
         ArgumentNullException.ThrowIfNull(positionPlayed);
         ArgumentOutOfRangeException.ThrowIfLessThan(moverAway, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(opponentAway, 1);
 
         return new OpeningBookKey(
-            NormalizeToNewOnRoll(positionPlayed, activePlayer),
+            NormalizeToNewOnRoll(positionPlayed),
             cubeValue: 1, cubeOwnerSign: 0,
             onRollAway: opponentAway, opponentAway: moverAway,
             jacoby: false, crawford: isCrawford);
@@ -90,21 +90,18 @@ internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
     /// <summary>
     /// Builds the key for a candidate play made during a money session.
     /// </summary>
-    /// <param name="positionPlayed">The candidate's resulting position in
-    /// the XG record convention (player-1-relative) — e.g. an element of
+    /// <param name="positionPlayed">The candidate's resulting position as
+    /// XG stores it, in the mover's frame — an element of
     /// <see cref="BestMoveAnalysis.PositionsPlayed"/>.</param>
-    /// <param name="activePlayer">The player who made the play, in the
-    /// ecosystem's sign convention (≥ 0 = player 1).</param>
     /// <param name="jacoby">Whether the Jacoby rule is in effect — part of
     /// the book's money key (the shipped database stores separate money
     /// rollouts per Jacoby setting).</param>
-    public static OpeningBookKey ForMoneyPlay(
-        PositionEngine positionPlayed, int activePlayer, bool jacoby)
+    public static OpeningBookKey ForMoneyPlay(PositionEngine positionPlayed, bool jacoby)
     {
         ArgumentNullException.ThrowIfNull(positionPlayed);
 
         return new OpeningBookKey(
-            NormalizeToNewOnRoll(positionPlayed, activePlayer),
+            NormalizeToNewOnRoll(positionPlayed),
             cubeValue: 1, cubeOwnerSign: 0,
             onRollAway: -1, opponentAway: -1,
             jacoby: jacoby, crawford: false);
@@ -129,17 +126,13 @@ internal readonly struct OpeningBookKey : IEquatable<OpeningBookKey>
     }
 
     /// <summary>
-    /// Re-expresses a player-1-relative resulting position from the
-    /// perspective of the player on roll after the play: flipped
-    /// (<see cref="BoardPosition.Flipped"/>, the one flip) when player 1 was
-    /// the mover, as stored when player 2 was (the new on-roll player 1
-    /// already reads positive).
+    /// Re-expresses a resulting position stored in the mover's frame from
+    /// the perspective of the player on roll after the play — the mover's
+    /// opponent: flipped (<see cref="BoardPosition.Flipped"/>, the one flip),
+    /// whichever seat moved.
     /// </summary>
-    private static BoardPosition NormalizeToNewOnRoll(PositionEngine positionPlayed, int activePlayer)
-    {
-        var stored = positionPlayed.ToBoardPosition();
-        return MatchContext.SeatOf(activePlayer) == Seat.Player1 ? stored.Flipped() : stored;
-    }
+    private static BoardPosition NormalizeToNewOnRoll(PositionEngine positionPlayed) =>
+        positionPlayed.ToBoardPosition().Flipped();
 
     /// <inheritdoc/>
     public bool Equals(OpeningBookKey other) =>

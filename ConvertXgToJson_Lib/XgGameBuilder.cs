@@ -180,13 +180,13 @@ public sealed class XgGameBuilder
             var candidate = candidates[i] ?? throw new ArgumentException(
                 $"Candidate {i} is null.", nameof(candidates));
             var result = ApplyPlay(candidate.Play, sign, nameof(candidates));
-            positionsPlayed[i] = new PositionEngine { Points = result.After };
+            positionsPlayed[i] = new PositionEngine { Points = result.Stored };
             moves[i] = result.Encoded;
             levels[i] = new EvalLevel { Level = ToLevelCode(candidate.Ply) };
             evals[i] = new EvalResult { Equity = (float)candidate.Equity };
             paneLevel = Math.Max(paneLevel, ToLevelCode(candidate.Ply));
             bestEquity = Math.Max(bestEquity, candidate.Equity);
-            if (playedEquity is null && result.After.AsSpan().SequenceEqual(applied.After))
+            if (playedEquity is null && result.Stored.AsSpan().SequenceEqual(applied.Stored))
                 playedEquity = candidate.Equity;
         }
 
@@ -198,7 +198,7 @@ public sealed class XgGameBuilder
         {
             EntryType = RecordType.Move,
             InitialPosition = before,
-            FinalPosition = new PositionEngine { Points = applied.After },
+            FinalPosition = new PositionEngine { Points = applied.Stored },
             ActivePlayer = sign,
             MoveList = ToMoveList(applied.Encoded),
             Dice = [dice.High, dice.Low],
@@ -231,7 +231,7 @@ public sealed class XgGameBuilder
             ErrorTutorMove = XgRecordFactory.UnanalysedError,
             CommentIndex = _match.AddComment(comment),
         });
-        _position = applied.After;
+        _position = applied.Tracked;
         return this;
     }
 
@@ -253,10 +253,10 @@ public sealed class XgGameBuilder
         var applied = ApplyPlay(played, sign, nameof(played));
 
         _records.Add(XgRecordFactory.UnanalysedMoveRecord(
-            sign, before, finalPosition: new PositionEngine { Points = applied.After },
+            sign, before, finalPosition: new PositionEngine { Points = applied.Stored },
             moveList: ToMoveList(applied.Encoded), played: true,
             CubeValueRaw, dice.High, dice.Low));
-        _position = applied.After;
+        _position = applied.Tracked;
         return this;
     }
 
@@ -290,6 +290,9 @@ public sealed class XgGameBuilder
         ThrowIfEnded();
         int sign = player.ToSign();
         var position = new PositionEngine { Points = (sbyte[])_position.Clone() };
+        // The position the sentinel leaves, unchanged, as XG stores a
+        // resulting position: in the mover's frame.
+        var unchanged = new PositionEngine { Points = MoversFrame(_position, sign) };
         var candidate = TerminatorFilled();
         sentinelPair.CopyTo(candidate);
 
@@ -297,7 +300,7 @@ public sealed class XgGameBuilder
         {
             EntryType = RecordType.Move,
             InitialPosition = position,
-            FinalPosition = position,
+            FinalPosition = unchanged,
             ActivePlayer = sign,
             MoveList = ToMoveList(TerminatorFilled()),
             Dice = [dice.High, dice.Low],
@@ -315,7 +318,7 @@ public sealed class XgGameBuilder
                 Crawford = IsCrawford ? 1 : 0,
                 Jacoby = _match.IsMoneySession && _match.IsJacoby ? 1 : 0,
                 MoveCount = 1,
-                PositionsPlayed = [position],
+                PositionsPlayed = [unchanged],
                 Moves = [candidate],
                 EvalLevels = [new EvalLevel { Level = ToLevelCode(1) }],
                 Evals = [new EvalResult()],
@@ -561,18 +564,22 @@ public sealed class XgGameBuilder
     /// <summary>
     /// Validates <paramref name="play"/> against the current position from
     /// the mover's side, applies it through the ecosystem's
-    /// <see cref="BoardState"/>, and returns the resulting position in the
-    /// player-1 frame plus the play in XG's candidate encoding.
+    /// <see cref="BoardState"/>, and returns the resulting position in both
+    /// of XG's frames — player 1's (<c>Tracked</c>, the position the game
+    /// goes on from, the frame of a record's <c>InitialPosition</c>) and the
+    /// mover's (<c>Stored</c>, the frame XG stores a resulting position in,
+    /// <see cref="BestMoveAnalysis.PositionsPlayed"/> and
+    /// <see cref="MoveRecord.FinalPosition"/>, for either seat;
+    /// halheinrich/backgammon#290) — plus the play in XG's candidate
+    /// encoding.
     /// </summary>
-    private (sbyte[] After, sbyte[] Encoded) ApplyPlay(BgDataTypes_Lib.Play play, int moverSign, string paramName)
+    private (sbyte[] Tracked, sbyte[] Stored, sbyte[] Encoded) ApplyPlay(
+        BgDataTypes_Lib.Play play, int moverSign, string paramName)
     {
         if (play.Count > MoveListSlots / 2)
             throw new ArgumentException($"A play holds at most {MoveListSlots / 2} moves.", paramName);
 
-        // The tracked position is in the player-1 frame; the mover's view is
-        // BoardPosition's one flip of it for player 2.
-        var stored = new PositionEngine { Points = _position }.ToBoardPosition();
-        var board = new BoardState(moverSign < 0 ? stored.Flipped() : stored);
+        var board = new BoardState(MoversView(_position, moverSign));
 
         var encoded = TerminatorFilled();
         for (int i = 0; i < play.Count; i++)
@@ -584,9 +591,26 @@ public sealed class XgGameBuilder
             encoded[2 * i + 1] = move.ToPt == 0 ? XgMoveEncoding.Terminator : (sbyte)(Math.Abs(move.ToPt) - 1);
         }
 
+        // BoardState moves the mover's checkers without turning the board,
+        // so the reached position is in the mover's frame.
         var reached = board.ToPosition();
-        return (PointsOf(moverSign < 0 ? reached.Flipped() : reached), encoded);
+        return (PointsOf(moverSign < 0 ? reached.Flipped() : reached), PointsOf(reached), encoded);
     }
+
+    /// <summary>
+    /// A position the builder tracks in player 1's frame, seen by the mover:
+    /// as tracked for player 1, <see cref="BoardPosition"/>'s one flip of it
+    /// for player 2.
+    /// </summary>
+    private static BoardPosition MoversView(sbyte[] trackedPosition, int moverSign)
+    {
+        var tracked = new PositionEngine { Points = trackedPosition }.ToBoardPosition();
+        return moverSign < 0 ? tracked.Flipped() : tracked;
+    }
+
+    /// <summary><see cref="MoversView"/> as XG's signed-byte array.</summary>
+    private static sbyte[] MoversFrame(sbyte[] trackedPosition, int moverSign) =>
+        PointsOf(MoversView(trackedPosition, moverSign));
 
     /// <summary>A position as XG's signed-byte array, in whatever frame it is stated.</summary>
     internal static sbyte[] PointsOf(BoardPosition position)

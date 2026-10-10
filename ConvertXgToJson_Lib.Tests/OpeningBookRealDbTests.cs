@@ -1,3 +1,4 @@
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests;
@@ -98,8 +99,7 @@ public class OpeningBookRealDbTests
         opponentAway.Should().Be(2);
 
         var key = OpeningBookKey.ForMatchPlay(
-            move.Analysis.PositionsPlayed[0], move.ActivePlayer,
-            moverAway, opponentAway, isCrawford: false);
+            move.Analysis.PositionsPlayed[0], moverAway, opponentAway, isCrawford: false);
 
         book.TryGetEntry(key, out var entry).Should().BeTrue();
         entry!.Contributor.Should().Be("Neil Kazaross");
@@ -143,8 +143,7 @@ public class OpeningBookRealDbTests
         var book = LoadBook();
 
         var key = OpeningBookKey.ForMatchPlay(
-            PositionAfter1394And65PlayedByPlayer1(), activePlayer: 1,
-            moverAway: 4, opponentAway: 2, isCrawford: false);
+            PositionAfter1394And65InMoversFrame(), moverAway: 4, opponentAway: 2, isCrawford: false);
 
         var entries = book.GetEntries(key);
         entries.Should().HaveCountGreaterThanOrEqualTo(4,
@@ -169,15 +168,14 @@ public class OpeningBookRealDbTests
     {
         var book = LoadBook();
 
-        // Player 1 plays 13/10 13/9 from the standard start (player-1-relative).
+        // 13/10 13/9 played from the standard start, in the mover's frame.
         var positionPlayed = new PositionEngine
         {
             Points = [0, -2, 0, 0, 0, 0, 5, 0, 3, 1, 1, 0, -5, 3, 0, 0, 0, -3, 0, -5, 0, 0, 0, 0, 2, 0],
         };
 
         var key = OpeningBookKey.ForMatchPlay(
-            positionPlayed, activePlayer: 1,
-            moverAway: 9, opponentAway: 9, isCrawford: false);
+            positionPlayed, moverAway: 9, opponentAway: 9, isCrawford: false);
 
         book.TryGetEntry(key, out var entry).Should().BeTrue();
         entry!.Contributor.Should().Be("Steven Carey");
@@ -206,10 +204,10 @@ public class OpeningBookRealDbTests
     public void RealDb_MoneyLookup_KeysOnJacoby()
     {
         var book = LoadBook();
-        var positionPlayed = PositionAfter1394And65PlayedByPlayer1();
+        var positionPlayed = PositionAfter1394And65InMoversFrame();
 
-        var jacobyKey = OpeningBookKey.ForMoneyPlay(positionPlayed, 1, jacoby: true);
-        var plainKey = OpeningBookKey.ForMoneyPlay(positionPlayed, 1, jacoby: false);
+        var jacobyKey = OpeningBookKey.ForMoneyPlay(positionPlayed, jacoby: true);
+        var plainKey = OpeningBookKey.ForMoneyPlay(positionPlayed, jacoby: false);
 
         book.TryGetEntry(jacobyKey, out var jacobyEntry).Should().BeTrue();
         book.TryGetEntry(plainKey, out var plainEntry).Should().BeTrue();
@@ -220,10 +218,66 @@ public class OpeningBookRealDbTests
         plainEntry.Jacoby.Should().BeFalse();
     }
 
-    /// <summary>Player 1's resulting position after 13/9 6/5 from the
-    /// standard start, in the XG record convention (player-1-relative) —
-    /// fixture (a)'s best candidate.</summary>
-    private static PositionEngine PositionAfter1394And65PlayedByPlayer1() => new()
+    /// <summary>
+    /// A player-2 mover's book hit on real XG data (halheinrich/backgammon#290).
+    /// <c>ajhhBG0407.xg</c> game 1 opens with player 2's 43 at 9-away/9-away,
+    /// its best candidate 13/10 13/9 book-stamped. XG stored that candidate's
+    /// resulting position in the mover's own frame — the board fixture (b)
+    /// states by hand — and copied the book entry's evaluation into the pane
+    /// bit for bit. The key built from the stored position finds that entry,
+    /// fixture (b)'s, and the iterator enriches the candidate from it.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "RequiresFixtureFiles")]
+    public void RealDb_Player2Mover_KeyedFromXgCandidate_ReturnsTheEntryXgCopied()
+    {
+        var book = LoadBook();
+
+        string xgPath = Path.Combine(TestPaths.FixtureFilesDir, "ajhhBG0407.xg");
+        if (!File.Exists(xgPath))
+            throw new Xunit.Sdk.XunitException($"Expected fixture not present: {xgPath}.");
+        var file = XgFileReader.ReadFile(xgPath);
+
+        var move = file.Records.SkipWhile(r => r is not GameHeaderRecord).OfType<MoveRecord>().First();
+        move.ActivePlayer.Should().Be(-1, "player 2 is on roll at game 1 move 1");
+        move.Dice.Should().Equal(4, 3);
+        move.Analysis.EvalLevels[0].Level.Should().Be(998, "the best candidate is a book hit");
+        move.Analysis.PositionsPlayed[0].Points.Should().Equal(
+            [0, -2, 0, 0, 0, 0, 5, 0, 3, 1, 1, 0, -5, 3, 0, 0, 0, -3, 0, -5, 0, 0, 0, 0, 2, 0],
+            "XG stores player 2's result in player 2's own frame: 13/10 13/9, the mover's checkers positive");
+
+        var key = OpeningBookKey.ForMatchPlay(
+            move.Analysis.PositionsPlayed[0], moverAway: 9, opponentAway: 9, isCrawford: false);
+
+        book.TryGetEntry(key, out var entry).Should().BeTrue();
+        entry!.Contributor.Should().Be("Steven Carey");
+        entry.Trials.Should().Be(20736);
+        entry.Seed.Should().Be(13);
+
+        // XG copied the book vector into the .xg pane verbatim — bitwise.
+        var paneEval = move.Analysis.Evals[0];
+        entry.Evaluation.LoseBackgammon.Should().Be(paneEval.LoseBackgammon);
+        entry.Evaluation.LoseGammon.Should().Be(paneEval.LoseGammon);
+        entry.Evaluation.LoseSingle.Should().Be(paneEval.LoseSingle);
+        entry.Evaluation.WinSingle.Should().Be(paneEval.WinSingle);
+        entry.Evaluation.WinGammon.Should().Be(paneEval.WinGammon);
+        entry.Evaluation.WinBackgammon.Should().Be(paneEval.WinBackgammon);
+        entry.Evaluation.Equity.Should().Be(paneEval.Equity);
+
+        var play = XgDecisionIterator
+            .IterateDiagramRequests(file, Path.GetFileName(xgPath), options: new XgIteratorOptions(OpeningBook: book))
+            .OfType<CheckerPlayDecision>()
+            .First(r => r.Game == 1 && r.MoveNumber == 1);
+        var best = play.Decision.Plays[0];
+        best.AnalysisMode.Should().Be(AnalysisMode.BookRollout);
+        best.AnalysisLevel.Should().Be(AnalysisLevel.Ply3, "the entry's rollout plays its moves at 3-ply");
+        best.RolloutTrials.Should().Be(20736);
+    }
+
+    /// <summary>The resulting position after 13/9 6/5 from the standard
+    /// start as XG stores it, in the mover's frame — fixture (a)'s best
+    /// candidate.</summary>
+    private static PositionEngine PositionAfter1394And65InMoversFrame() => new()
     {
         Points = [0, -2, 0, 0, 0, 1, 4, 0, 3, 1, 0, 0, -5, 4, 0, 0, 0, -3, 0, -5, 0, 0, 0, 0, 2, 0],
     };

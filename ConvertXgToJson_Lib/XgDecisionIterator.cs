@@ -831,10 +831,10 @@ public static class XgDecisionIterator
     ///
     /// <para>
     /// The key is exactly the pane data session 1 proved bitwise:
-    /// <c>PositionsPlayed[i]</c> (the candidate's resulting position,
-    /// player-1-relative) plus the decision's session, normalized by the
-    /// <see cref="OpeningBookKey"/> factories (perspective flip, away-pair
-    /// orientation, Jacoby / Crawford). One context guard scopes the lookup
+    /// <c>PositionsPlayed[i]</c> (the candidate's resulting position, in the
+    /// mover's frame for either seat) plus the decision's session turned to
+    /// the mover, normalized by the <see cref="OpeningBookKey"/> factories
+    /// (perspective flip, away-pair orientation, Jacoby / Crawford). One context guard scopes the lookup
     /// to what those factories cover: the cube must be centred at 1 (the
     /// factories' only supported cube context — the book's turned-cube owner
     /// sign is unverified).
@@ -864,9 +864,9 @@ public static class XgDecisionIterator
 
         var positionPlayed = analysis.PositionsPlayed[candidateIndex];
         var key = ctx.SessionFor(MatchContext.SeatOf(activePlayer)).Match(
-            money => OpeningBookKey.ForMoneyPlay(positionPlayed, activePlayer, money.Terms.IsJacoby),
+            money => OpeningBookKey.ForMoneyPlay(positionPlayed, money.Terms.IsJacoby),
             match => OpeningBookKey.ForMatchPlay(
-                positionPlayed, activePlayer, match.OnRollNeeds, match.OpponentNeeds, match.IsCrawford));
+                positionPlayed, match.OnRollNeeds, match.OpponentNeeds, match.IsCrawford));
 
         return book.TryGetEntry(key, out var entry) ? entry : null;
     }

@@ -518,7 +518,11 @@ record stream synthesized behind the handle. `XgFileBuilder.ForMatch` /
 `ForMoneySession` name the players and the match form; `AddGame` takes the
 entering score, optional Crawford flag, and optional initial position (all
 positions in the public surface are 26-cell boards in XG's player-1 frame);
-the returned `XgGameBuilder` records decisions in play order:
+the returned `XgGameBuilder` records decisions in play order, writing XG's
+own two frames as XG does — a decision's starting position in player 1's,
+every resulting position (each candidate's, the position after the move, a
+sentinel's unchanged one) in the mover's, for either seat (see "Board
+format"; halheinrich/backgammon#290):
 
 * `Play(player, dice, played)` — analysed play whose analysis is the played
   move as its only 1-ply candidate (XG's analysed forced play); the
@@ -781,8 +785,9 @@ optional `XgIteratorOptions` whose `OpeningBook` member carries a loaded
 book database (locating the `.ob` on disk is app configuration — this lib
 takes the instance). For each V2-book-stamped (998) checker-play
 candidate, `LookupBookEntry` builds the session-1-proven key —
-`PositionsPlayed[i]` + the decision's session through the `OpeningBookKey`
-factories; it misses for player-2 movers (see Pitfalls) — and hands the selected entry to `XgDepthFacts.Resolve`; every
+`PositionsPlayed[i]` (in the mover's frame, for either seat) + the
+decision's session through the `OpeningBookKey` factories — and hands the
+selected entry to `XgDepthFacts.Resolve`; every
 candidate resolves its own entry (a decision's candidates enrich to
 *different* rollouts). A rollout entry enriches the hit: it states the
 entry's rollout moves level and trial count beside its edition. The rank
@@ -1039,8 +1044,9 @@ that same frame; the eval vector is from the *mover's* perspective. For
 a book hit XG copies the entry's seven floats into the `.xg` analysis
 pane verbatim (bit-identical), so the pane's `PositionsPlayed[i]` +
 score context is exactly the lookup key: `OpeningBookKey.ForMatchPlay` /
-`ForMoneyPlay` own the normalization (flip player-1-relative record
-positions when player 1 moved; reorder decision-frame away scores).
+`ForMoneyPlay` own the normalization (flip the record's resulting
+position, which XG stores in the mover's frame for either seat, so the
+same flip whoever moved; reorder decision-frame away scores).
 Jacoby keys money entries, Crawford keys match entries, Beaver is entry
 data only.
 
@@ -1198,7 +1204,16 @@ turned into a `BoardPosition` by `ToBoardPosition`), in two frames:
   **mover's frame**. A record's derived after-board is in the next mover's
   frame, so it is XG's stored position flipped, for either seat —
   measured on every candidate and every played move of the 2026-09-27
-  corpus (see "Measured against XG").
+  corpus (see "Measured against XG"). Measured 2026-10-10 over 412 `.xg`
+  files (the 391 of `TestData/xg` and the 21 of `FixtureFiles`, all read):
+  in all 46,064 pairs of consecutive move records within a game, the first
+  record's `FinalPosition` is the second's `InitialPosition` turned to the
+  first mover's frame (43 of the pairs at a position that reads the same
+  either way) — after analysed plays, unanalysed plays, dances and
+  illegal-play markers alike; and every dance's sentinel candidate stores
+  its unchanged position in the mover's frame (4,704 of 4,704), as does
+  its `FinalPosition` save 2 player-1 dances whose `FinalPosition` is in
+  neither frame. `XgGameBuilder` writes the same frames.
 
 The XGID, the pip counts and the after-boards are BgDataTypes_Lib's
 derivations from the record; this library encodes none of them.
@@ -1874,25 +1889,25 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   deliberately unsupported.
 * **The opening-book key is doubly perspective-normalized — let
   `OpeningBookKey` do it.** A book entry keys on the position *resulting*
-  from the candidate play, flipped to the player on roll after it, with
-  the away pair stored as (new-on-roll away, mover away) in that flipped
-  frame — while `.xg` record positions are player-1-relative and the
-  decision's context is mover-framed. Hand-building the key invites both a
-  missed flip (player-1 movers flip, player-2 movers don't) and a swapped
-  away pair; the `ForMatchPlay` / `ForMoneyPlay` factories encapsulate
-  exactly these two traps. The eval vector, by contrast, is from the
-  *mover's* perspective (XG copies it into the `.xg` pane verbatim on a
-  book hit — pinned bitwise by `RealDb_FixtureA_…`). **Measured
-  2026-09-27, not changed here: the key misses for player-2 movers.** The
-  keying was proven on player-1 movers only, and XG stores each
-  candidate's resulting position in the mover's frame for either seat (see
-  "Board format"), so a player-2 mover's key needs the flip too. Over the
-  corpus's centred-cube V2-book-stamped candidates, the key as built hits
-  216 of 3,574 player-2 candidates (6 with an entry's evaluation
-  bit-identical to the pane's); flipped for either mover it would hit
-  3,571 (3,513 bit-identical), with player-1 movers unchanged (3,684 of
-  3,688 either way). A player-2 mover's book hit therefore states its bare
-  book facts today.
+  from the candidate play, seen by the player on roll after it, with the
+  away pair stored as (new-on-roll away, mover away) in that frame — while
+  XG stores the resulting position in the *mover's* frame, for either
+  seat, and the decision's context is mover-framed. Hand-building the key
+  invites both a missed flip and a swapped away pair; the `ForMatchPlay` /
+  `ForMoneyPlay` factories encapsulate exactly these two traps. The flip is
+  the same whoever moved, so the factories take no seat: a seat parameter
+  is how the key once flipped player 1's position alone and missed nearly
+  every player-2 hit, while the builder wrote player 2's results in player
+  1's frame, which let synthesized tests agree with it
+  (halheinrich/backgammon#290; `Iterator_EnrichesABookHit_ForEitherMover`
+  pins both seats against boards stated by hand). The eval vector, by
+  contrast, is from the *mover's* perspective (XG copies it into the `.xg`
+  pane verbatim on a book hit — pinned bitwise by `RealDb_FixtureA_…`).
+  Measured 2026-10-10 over the local corpus's centred-cube V2-book-stamped
+  candidates (391 `.xg`, 193 `.xgp`): player-1 movers hit 3,856 of 3,860
+  before the fix and after it, 3,748 with an entry's evaluation
+  bit-identical to the pane's; player-2 movers hit 216 of 3,691 before (6
+  bit-identical) and 3,688 after (3,634). Dated evidence, not pins.
 * **A book entry's equity slot is cubeful and score-contexted; the
   tooltip's cubeless number is derived.** The same resulting position
   stores wildly different equities under different away scores (+0.377 at

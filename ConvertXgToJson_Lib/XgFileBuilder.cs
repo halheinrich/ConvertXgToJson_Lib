@@ -21,7 +21,12 @@ namespace ConvertXgToJson_Lib;
 /// point 1, <c>[25]</c> player 1's bar (≥ 0); positive counts are player
 /// 1's checkers. Plays, by contrast, are in the mover's own numbering
 /// (the <see cref="BgDataTypes_Lib.Play"/> contract); the builder flips
-/// between the two.
+/// between the two. The records it writes keep XG's own two frames, as
+/// XG's files do: a decision's starting position in player 1's frame, and
+/// every resulting position — each candidate's, and the position after
+/// the move, a dance's and an illegal-play marker's unchanged one included
+/// — in the mover's frame, for either seat
+/// (halheinrich/backgammon#290).
 /// </para>
 /// <para>
 /// <b>State is tracked</b> within a game: each play advances the position
