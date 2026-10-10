@@ -14,11 +14,17 @@ namespace ConvertXgToJson_Lib.Writing;
 /// exist), temp.xgi, temp.xgc (when comments exist), then the manifest,
 /// then the end-record.
 ///
-/// Every inner file is written compressed, its entry recording
-/// <see cref="XgContainerLayout.CompressedEntryLevel"/> as XG does. The
-/// layout can also describe a stored entry (raw bytes), which the reader
-/// accepts; when XG chooses to store one is not established, so this
-/// writer never does.
+/// Every inner file that holds bytes is written compressed, its entry
+/// recording <see cref="XgContainerLayout.CompressedEntryLevel"/> as XG
+/// does. An empty inner file is written as XG writes one: a stored entry
+/// with no bytes in the body (storage flag 1,
+/// <see cref="XgContainerLayout.StoredEntryLevel"/>, both sizes 0) — the
+/// corpus's only zero-length entries, two in 627 files read 2026-10-10,
+/// are stored that way, and none is compressed. Compressed, it would be no
+/// entry at all: <see cref="ZLibStream"/> writes no bytes for an empty
+/// input, and the reader refuses a zero-byte extent as not a zlib stream
+/// (halheinrich/backgammon#357). When XG chooses to store an entry that
+/// holds bytes is not established, so this writer stores no other.
 /// </summary>
 internal static class XgContainerWriter
 {
@@ -29,32 +35,39 @@ internal static class XgContainerWriter
     internal readonly record struct InnerFile(string Name, byte[] Data);
 
     /// <summary>
-    /// Compresses each inner file into a zlib stream, appends the compressed
-    /// manifest and the trailing end-record, and writes the whole payload to
-    /// <paramref name="output"/>.
+    /// An inner file as it lies in the body: its bytes there, and how its
+    /// entry says they are stored.
+    /// </summary>
+    private readonly record struct BodyEntry(
+        byte[] Bytes, XgContainerLayout.EntryStorage Storage, byte CompressionLevel);
+
+    /// <summary>
+    /// Writes each inner file into the body — compressed, or stored when
+    /// empty — appends the compressed manifest and the trailing end-record,
+    /// and writes the whole payload to <paramref name="output"/>.
     /// </summary>
     internal static void Write(Stream output, IReadOnlyList<InnerFile> files)
     {
-        var compressed = new byte[files.Count][];
+        var body = new BodyEntry[files.Count];
         for (int i = 0; i < files.Count; i++)
-            compressed[i] = Compress(files[i].Data);
+            body[i] = ToBody(files[i].Data);
 
-        byte[] manifest = BuildManifest(files, compressed);
+        byte[] manifest = BuildManifest(files, body);
         byte[] compressedManifest = Compress(manifest);
 
-        // Manifest offset = sum of the data streams' compressed sizes; the
-        // body CRC covers every compressed stream, manifest included.
+        // Manifest offset = sum of the entries' lengths in the body; the
+        // body CRC covers every entry's bytes, manifest included.
         uint manifestOffset = 0;
         var bodyCrc = new Crc32();
-        foreach (byte[] stream in compressed)
+        foreach (var entry in body)
         {
-            manifestOffset += (uint)stream.Length;
-            bodyCrc.Append(stream);
+            manifestOffset += (uint)entry.Bytes.Length;
+            bodyCrc.Append(entry.Bytes);
         }
         bodyCrc.Append(compressedManifest);
 
-        foreach (byte[] stream in compressed)
-            output.Write(stream);
+        foreach (var entry in body)
+            output.Write(entry.Bytes);
         output.Write(compressedManifest);
 
         Span<byte> endRecord = stackalloc byte[XgContainerLayout.EndRecordSize];
@@ -66,7 +79,15 @@ internal static class XgContainerWriter
         output.Write(endRecord);
     }
 
-    private static byte[] BuildManifest(IReadOnlyList<InnerFile> files, byte[][] compressed)
+    /// <summary>
+    /// How <paramref name="data"/> lies in the body: one zlib stream, or —
+    /// for an empty inner file — nothing, stored.
+    /// </summary>
+    private static BodyEntry ToBody(byte[] data) => data.Length == 0
+        ? new BodyEntry([], XgContainerLayout.EntryStorage.Stored, XgContainerLayout.StoredEntryLevel)
+        : new BodyEntry(Compress(data), XgContainerLayout.EntryStorage.Compressed, XgContainerLayout.CompressedEntryLevel);
+
+    private static byte[] BuildManifest(IReadOnlyList<InnerFile> files, BodyEntry[] body)
     {
         byte[] manifest = new byte[files.Count * XgContainerLayout.ManifestEntrySize];
         uint offset = 0;
@@ -78,13 +99,13 @@ internal static class XgContainerWriter
                 new XgContainerLayout.ManifestEntry(
                     Name: files[i].Name,
                     UncompressedSize: (uint)files[i].Data.Length,
-                    CompressedSize: (uint)compressed[i].Length,
+                    CompressedSize: (uint)body[i].Bytes.Length,
                     Offset: offset,
                     Crc32: Crc32.HashToUInt32(files[i].Data),
-                    Storage: XgContainerLayout.EntryStorage.Compressed,
-                    CompressionLevel: XgContainerLayout.CompressedEntryLevel));
+                    Storage: body[i].Storage,
+                    CompressionLevel: body[i].CompressionLevel));
 
-            offset += (uint)compressed[i].Length;
+            offset += (uint)body[i].Bytes.Length;
         }
 
         return manifest;

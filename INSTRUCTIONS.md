@@ -357,8 +357,16 @@ the evidence and the source's pinned URL; halheinrich/backgammon#343):
   padding bytes (zero; never read). 1018 corpus entries are compressed and
   3 stored: `temp.xgc` holding CR LF in one `.xgp`, and a zero-length
   `temp.xgr` and `temp.xgc` in one `.xg`, the latter lying exactly at the
-  manifest's offset. When XG chooses to store an entry is not established,
-  so the writer writes every entry compressed at level 2.
+  manifest's offset. When XG chooses to store an entry that holds bytes is
+  not established, so the writer writes every such entry compressed at
+  level 2. An empty inner file it writes as XG does, stored with no bytes
+  in the body at level 0 (`XgContainerLayout.StoredEntryLevel`): the
+  corpus's only zero-length entries, two among 1,623 entries of 627 files
+  read 2026-10-10, are stored so, and none is compressed
+  (halheinrich/backgammon#357). `XgFileWriter` never passes one — temp.xg
+  holds at least the match header, temp.xgi two records, and temp.xgr and
+  temp.xgc are written only when they hold a rollout or a comment, each
+  comment at least its CR LF.
 * The end-record is nine little-endian int32s XG seeks to from EOF to find
   the manifest (so its absence makes the file unloadable even though every
   other structure validates): `crc`, CRC32 (IEEE) of the entire compressed
@@ -1835,6 +1843,13 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   decoding against XG-authored files — keep these independent of the
   production layout when refactoring the container writer. The one smoke
   the suite cannot run: open a freshly written `.xgp` in real XG.
+* **An empty inner file is stored, never compressed.** .NET's `ZLibStream`
+  writes no bytes at all for an empty input, so an empty inner file
+  "compressed" leaves a zero-byte extent the reader refuses as not a zlib
+  stream. `XgContainerWriter` stores it with no body bytes, as XG's own
+  zero-length entries are stored (halheinrich/backgammon#357;
+  `AnEmptyInnerFile_IsWrittenAsAStoredZeroLengthEntry_AndReadsBack` pins
+  the written entry through the test class's own manifest decoder).
 * **A container is read through its directory or refused — never guessed
   at** (Hal, 2026-10-05, halheinrich/backgammon#343: "Refuse with clear
   error", reversing the limitation this Pitfall once accepted). The reader

@@ -1,6 +1,7 @@
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
+using ConvertXgToJson_Lib.Writing;
 
 namespace ConvertXgToJson_Lib.Tests;
 
@@ -342,6 +343,75 @@ public class XgFileWriterTests
             "compressed sizes tile the payload exactly up to the manifest");
 
         AssertTrailerMatchesRecomputed(content);
+    }
+
+    /// <summary>
+    /// halheinrich/backgammon#357: an empty inner file is written as XG
+    /// writes one — a stored entry with no bytes in the body (storage flag
+    /// 1, level 0, both sizes 0; the corpus's only zero-length entries are
+    /// stored that way) — and the container reads back. Compressed, an empty
+    /// file became a zero-byte extent, since <see cref="System.IO.Compression.ZLibStream"/>
+    /// writes nothing for an empty input, and the reader refused it as not a
+    /// zlib stream. <see cref="XgFileWriter"/> never passes one; this
+    /// exercises the container writer's own contract. The raw entries are
+    /// decoded by this class's own manifest decoder, so a mistake the writer
+    /// and the reader share through <c>XgContainerLayout</c> cannot pass.
+    /// </summary>
+    [Fact]
+    public void AnEmptyInnerFile_IsWrittenAsAStoredZeroLengthEntry_AndReadsBack()
+    {
+        byte[] gameRecords = [.. Enumerable.Range(0, SaveRecordParser.RecordSize).Select(i => (byte)i)];
+        byte[] indexRecords = [.. gameRecords, .. gameRecords];
+
+        using var output = new MemoryStream();
+        XgContainerWriter.Write(output,
+        [
+            new("temp.xg", gameRecords),
+            new("temp.xgr", []),
+            new("temp.xgi", indexRecords),
+            new("temp.xgc", []),
+        ]);
+        byte[] content = output.ToArray();
+
+        // The production reader reads every inner file back.
+        using (var read = XgDecompressor.Decompress(new MemoryStream(content)))
+        {
+            read.GameRecords.ToArray().Should().Equal(gameRecords);
+            read.RolloutContexts.Length.Should().Be(0);
+            read.IndexRecords.ToArray().Should().Equal(indexRecords);
+            read.Comments.Length.Should().Be(0);
+        }
+
+        // The raw bytes: two zlib streams and the manifest; the empty
+        // entries occupy nothing.
+        byte[] body = content[..^EndRecordSize];
+        var streams = SplitZlibStreams(body);
+        streams.Should().HaveCount(3, "xg, xgi and the manifest are streams; an empty entry has no bytes");
+        var entries = ParseManifest(streams[2]);
+        entries.Select(e => e.Name).Should().Equal("temp.xg", "temp.xgr", "temp.xgi", "temp.xgc");
+
+        AssertWrittenCompressedAsXgDoes(entries[0]);
+        AssertWrittenCompressedAsXgDoes(entries[2]);
+        foreach (var empty in new[] { entries[1], entries[3] })
+        {
+            empty.StorageFlag.Should().Be(1, $"{empty.Name} is stored, as XG stores a zero-length entry");
+            empty.CompressionLevel.Should().Be(0, $"{empty.Name} records a stored entry's level");
+            empty.UncompressedSize.Should().Be(0u);
+            empty.CompressedSize.Should().Be(0u, $"{empty.Name} has no bytes in the body");
+            empty.Crc.Should().Be(0u, "the CRC32 of no bytes");
+            empty.Padding.Should().Equal([0, 0]);
+            empty.PathField.Should().OnlyContain(b => b == 0);
+        }
+        entries[1].Offset.Should().Be(entries[0].CompressedSize, "temp.xgr lies where temp.xg ends");
+        entries[2].Offset.Should().Be(entries[0].CompressedSize, "temp.xgi follows, temp.xgr taking no bytes");
+        uint manifestOffset = entries[2].Offset + entries[2].CompressedSize;
+        entries[3].Offset.Should().Be(manifestOffset, "temp.xgc lies exactly at the manifest's offset");
+
+        byte[] trailer = content[^EndRecordSize..];
+        BitConverter.ToUInt32(trailer, 0).Should().Be(System.IO.Hashing.Crc32.HashToUInt32(body));
+        BitConverter.ToUInt32(trailer, 4).Should().Be(4u, "every inner file is counted, the empty ones included");
+        BitConverter.ToUInt32(trailer, 12).Should().Be((uint)(body.Length - manifestOffset));
+        BitConverter.ToUInt32(trailer, 16).Should().Be(manifestOffset);
     }
 
     // -----------------------------------------------------------------------

@@ -111,6 +111,13 @@ internal static class XgContainerLayout
     /// </summary>
     internal const byte CompressedEntryLevel = 2;
 
+    /// <summary>
+    /// The compression level every stored corpus entry records — the value
+    /// <see cref="Writing.XgContainerWriter"/> writes for the one entry it
+    /// stores, an empty inner file. Never a gate on read.
+    /// </summary>
+    internal const byte StoredEntryLevel = 0;
+
     // Manifest entry field offsets.
     private const int NameFieldSize = 256;
     private const int UncompressedSizeOffset = 512;
