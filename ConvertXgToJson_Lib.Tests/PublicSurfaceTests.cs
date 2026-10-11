@@ -50,6 +50,34 @@ public class PublicSurfaceTests
             .Should().BeNull();
     }
 
+    /// <summary>
+    /// Hal's ruling of 2026-10-11: every <see cref="XgSourceReader"/> entry
+    /// point requires the <see cref="XgSourceFormat"/>, with no default, so
+    /// every caller states which decoder it means. Removing a default breaks
+    /// the callers that leaned on it; restoring one breaks nothing, which is
+    /// why it is pinned here. The entry points are listed, so one added later
+    /// is checked too.
+    /// </summary>
+    [Fact]
+    public void XgSourceReader_EveryEntryPoint_RequiresTheFormat()
+    {
+        var entryPoints = typeof(XgSourceReader).GetMethods(
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
+
+        entryPoints.Select(m => m.Name).Should().BeEquivalentTo(
+            [nameof(XgSourceReader.ReadFile), nameof(XgSourceReader.ReadFileAsync),
+             nameof(XgSourceReader.ReadStream), nameof(XgSourceReader.ReadAsync)]);
+
+        foreach (var entryPoint in entryPoints)
+        {
+            var format = entryPoint.GetParameters().Should()
+                .ContainSingle(p => p.ParameterType == typeof(XgSourceFormat), $"{entryPoint.Name} takes the format")
+                .Subject;
+            format.IsOptional.Should().BeFalse($"{entryPoint.Name} requires the format: the caller states the decoder");
+            format.HasDefaultValue.Should().BeFalse($"{entryPoint.Name} gives the format no default");
+        }
+    }
+
     [Fact]
     public void NoPublicMember_ReferencesAnInternalType()
     {

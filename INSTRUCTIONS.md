@@ -220,8 +220,9 @@ decisions behind its shape:
   one source-descriptor type taken by a sync and an async read would have
   had to refuse that pairing at run time.
 * **The format is the caller's statement** (`XgSourceFormat.Xg` or
-  `XgSourceFormat.Json`), never inferred from the name, which is
-  attribution only. The decoders are `XgFileReader`'s — `ReadStream`, and
+  `XgSourceFormat.Json`): a required argument on every entry point, with no
+  default (Hal's ruling of 2026-10-11; `PublicSurfaceTests` pins it), and
+  never inferred from the name, which is attribution only. The decoders are `XgFileReader`'s — `ReadStream`, and
   `DecodeJson` behind `ReadJson` — so there is one decode path, and
   `XgFileReader` stays the throwing primitive layer it was.
 * **The outcome is a closed pair**: `XgSourceRead` is `XgSourceDecoded`
@@ -1408,24 +1409,24 @@ public static class XgFileReader
 // The one read of one source (see "The read operation" under
 // Architecture): acquires, decodes, returns the outcome — never throws for
 // a source that cannot be read. Usage errors throw (the async entry points'
-// from the call itself); an OperationCanceledException propagates.
+// from the call itself); an OperationCanceledException propagates. The
+// format is required on every entry point, with no default.
 public static class XgSourceReader
 {
     // Opens and closes the file. SourceName = path as passed.
-    public static XgSourceRead       ReadFile(string path, XgSourceFormat format = XgSourceFormat.Xg,
+    public static XgSourceRead       ReadFile(string path, XgSourceFormat format,
                                               bool retainBytes = false);
-    public static Task<XgSourceRead> ReadFileAsync(string path, XgSourceFormat format = XgSourceFormat.Xg,
+    public static Task<XgSourceRead> ReadFileAsync(string path, XgSourceFormat format,
                                                    bool retainBytes = false,
                                                    CancellationToken cancellationToken = default);
 
     // Borrowed: readable, seekable, at position 0; never disposed; no Bytes.
-    public static XgSourceRead       ReadStream(string sourceName, Stream stream,
-                                                XgSourceFormat format = XgSourceFormat.Xg);
+    public static XgSourceRead       ReadStream(string sourceName, Stream stream, XgSourceFormat format);
 
     // Owns, buffers and disposes the stream acquire returns (forward-only is fine).
     public static Task<XgSourceRead> ReadAsync(string sourceName,
                                                Func<CancellationToken, Task<Stream>> acquire,
-                                               XgSourceFormat format = XgSourceFormat.Xg,
+                                               XgSourceFormat format,
                                                bool retainBytes = false,
                                                CancellationToken cancellationToken = default);
 }

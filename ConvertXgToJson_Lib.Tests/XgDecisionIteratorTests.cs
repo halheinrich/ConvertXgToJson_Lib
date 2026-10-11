@@ -166,7 +166,7 @@ public class XgDecisionIteratorTests
             File.WriteAllBytes(Path.Combine(dir, "good.xgp"), readable);
 
             var reads = XgFileReader.EnumerateXgFormatFiles(dir)
-                .Select(path => XgSourceReader.ReadFile(path))
+                .Select(path => XgSourceReader.ReadFile(path, XgSourceFormat.Xg))
                 .ToList();
 
             reads.Should().HaveCount(3, "every listed file has an outcome");

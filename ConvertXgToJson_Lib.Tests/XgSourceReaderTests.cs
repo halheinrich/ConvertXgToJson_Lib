@@ -224,9 +224,9 @@ public sealed class XgSourceReaderTests : IDisposable
     {
         string missing = Path.Combine(_dir, "missing.xg");
 
-        XgSourceReader.ReadFile(missing).Should().BeOfType<XgSourceFailed>()
+        XgSourceReader.ReadFile(missing, XgSourceFormat.Xg).Should().BeOfType<XgSourceFailed>()
             .Which.Exception.Should().BeOfType<FileNotFoundException>();
-        (await XgSourceReader.ReadFileAsync(missing)).Should().BeOfType<XgSourceFailed>()
+        (await XgSourceReader.ReadFileAsync(missing, XgSourceFormat.Xg)).Should().BeOfType<XgSourceFailed>()
             .Which.Exception.Should().BeOfType<FileNotFoundException>();
     }
 
@@ -237,7 +237,7 @@ public sealed class XgSourceReaderTests : IDisposable
     [Fact]
     public void APathTheFileSystemRefuses_IsAFailedSource()
     {
-        XgSourceReader.ReadFile("bad\0path.xg").Should().BeOfType<XgSourceFailed>()
+        XgSourceReader.ReadFile("bad\0path.xg", XgSourceFormat.Xg).Should().BeOfType<XgSourceFailed>()
             .Which.SourceName.Should().Be("bad\0path.xg");
     }
 
@@ -254,7 +254,7 @@ public sealed class XgSourceReaderTests : IDisposable
     [MemberData(nameof(FailingAcquisitions))]
     public async Task AnAcquisitionThatFails_IsAFailedSource(string how, Func<CancellationToken, Task<Stream>> acquire)
     {
-        var read = await XgSourceReader.ReadAsync("upload.xg", acquire);
+        var read = await XgSourceReader.ReadAsync("upload.xg", acquire, XgSourceFormat.Xg);
 
         var failed = read.Should().BeOfType<XgSourceFailed>($"an acquisition that {how} fails the source").Subject;
         failed.SourceName.Should().Be("upload.xg");
@@ -266,7 +266,7 @@ public sealed class XgSourceReaderTests : IDisposable
     {
         var thrown = new IOException("the upload broke");
 
-        var read = await XgSourceReader.ReadAsync("upload.xg", _ => throw thrown);
+        var read = await XgSourceReader.ReadAsync("upload.xg", _ => throw thrown, XgSourceFormat.Xg);
 
         read.Should().BeOfType<XgSourceFailed>().Which.Exception.Should().BeSameAs(thrown);
     }
@@ -277,7 +277,7 @@ public sealed class XgSourceReaderTests : IDisposable
         var thrown = new IOException("the connection dropped");
         var probe = new ProbeStream(XgBytes, seekable: false) { OnRead = () => throw thrown };
 
-        var read = await XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe));
+        var read = await XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe), XgSourceFormat.Xg);
 
         read.Should().BeOfType<XgSourceFailed>().Which.Exception.Should().BeSameAs(thrown);
         probe.Disposed.Should().BeTrue();
@@ -292,9 +292,9 @@ public sealed class XgSourceReaderTests : IDisposable
     [Fact]
     public void ReadFile_UsageErrors_AreThrown()
     {
-        FluentActions.Invoking(() => XgSourceReader.ReadFile(null!)).Should().Throw<ArgumentNullException>();
-        FluentActions.Invoking(() => XgSourceReader.ReadFile("")).Should().Throw<ArgumentException>();
-        FluentActions.Invoking(() => XgSourceReader.ReadFile("  ")).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => XgSourceReader.ReadFile(null!, XgSourceFormat.Xg)).Should().Throw<ArgumentNullException>();
+        FluentActions.Invoking(() => XgSourceReader.ReadFile("", XgSourceFormat.Xg)).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => XgSourceReader.ReadFile("  ", XgSourceFormat.Xg)).Should().Throw<ArgumentException>();
         FluentActions.Invoking(() => XgSourceReader.ReadFile(WriteTemp("a.xg", XgBytes), Undefined))
             .Should().Throw<ArgumentOutOfRangeException>();
     }
@@ -303,8 +303,8 @@ public sealed class XgSourceReaderTests : IDisposable
     public void ReadFileAsync_UsageErrors_AreThrownByTheCallItself()
     {
         // Not awaited: an argument error is the call's, before any task exists.
-        Action nullPath = () => _ = XgSourceReader.ReadFileAsync(null!);
-        Action blankPath = () => _ = XgSourceReader.ReadFileAsync(" ");
+        Action nullPath = () => _ = XgSourceReader.ReadFileAsync(null!, XgSourceFormat.Xg);
+        Action blankPath = () => _ = XgSourceReader.ReadFileAsync(" ", XgSourceFormat.Xg);
         Action undefined = () => _ = XgSourceReader.ReadFileAsync(WriteTemp("a.xg", XgBytes), Undefined);
 
         nullPath.Should().Throw<ArgumentNullException>();
@@ -316,24 +316,24 @@ public sealed class XgSourceReaderTests : IDisposable
     public void ReadStream_UsageErrors_AreThrown_AndTheStreamIsUntouched()
     {
         using var stream = new MemoryStream(XgBytes);
-        FluentActions.Invoking(() => XgSourceReader.ReadStream(null!, stream)).Should().Throw<ArgumentNullException>();
-        FluentActions.Invoking(() => XgSourceReader.ReadStream(" ", stream)).Should().Throw<ArgumentException>();
-        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", null!)).Should().Throw<ArgumentNullException>();
+        FluentActions.Invoking(() => XgSourceReader.ReadStream(null!, stream, XgSourceFormat.Xg)).Should().Throw<ArgumentNullException>();
+        FluentActions.Invoking(() => XgSourceReader.ReadStream(" ", stream, XgSourceFormat.Xg)).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", null!, XgSourceFormat.Xg)).Should().Throw<ArgumentNullException>();
         FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", stream, Undefined))
             .Should().Throw<ArgumentOutOfRangeException>();
 
         var disposed = new MemoryStream(XgBytes);
         disposed.Dispose();
-        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", disposed))
+        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", disposed, XgSourceFormat.Xg))
             .Should().Throw<ArgumentException>().WithParameterName("stream");
 
         using var forwardOnly = new ProbeStream(XgBytes, seekable: false);
-        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", forwardOnly))
+        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", forwardOnly, XgSourceFormat.Xg))
             .Should().Throw<ArgumentException>().WithParameterName("stream");
         forwardOnly.Reads.Should().Be(0, "a usage error is thrown before the stream is read");
 
         stream.Position = 3;
-        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", stream))
+        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", stream, XgSourceFormat.Xg))
             .Should().Throw<ArgumentException>().WithParameterName("stream");
         stream.Position.Should().Be(3, "a usage error is thrown before the stream is read");
     }
@@ -348,9 +348,9 @@ public sealed class XgSourceReaderTests : IDisposable
             return Task.FromResult<Stream>(new MemoryStream(XgBytes));
         };
 
-        Action nullName = () => _ = XgSourceReader.ReadAsync(null!, acquire);
-        Action blankName = () => _ = XgSourceReader.ReadAsync("", acquire);
-        Action nullAcquire = () => _ = XgSourceReader.ReadAsync("a.xg", null!);
+        Action nullName = () => _ = XgSourceReader.ReadAsync(null!, acquire, XgSourceFormat.Xg);
+        Action blankName = () => _ = XgSourceReader.ReadAsync("", acquire, XgSourceFormat.Xg);
+        Action nullAcquire = () => _ = XgSourceReader.ReadAsync("a.xg", null!, XgSourceFormat.Xg);
         Action undefined = () => _ = XgSourceReader.ReadAsync("a.xg", acquire, Undefined);
 
         nullName.Should().Throw<ArgumentNullException>();
@@ -375,7 +375,7 @@ public sealed class XgSourceReaderTests : IDisposable
         {
             acquisitions++;
             return Task.FromResult<Stream>(new MemoryStream(XgBytes));
-        }, cancellationToken: cts.Token);
+        }, XgSourceFormat.Xg, cancellationToken: cts.Token);
 
         (await FluentActions.Awaiting(() => reading).Should().ThrowAsync<OperationCanceledException>())
             .Which.CancellationToken.Should().Be(cts.Token);
@@ -389,7 +389,7 @@ public sealed class XgSourceReaderTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await FluentActions.Awaiting(() => XgSourceReader.ReadFileAsync(path, cancellationToken: cts.Token))
+        await FluentActions.Awaiting(() => XgSourceReader.ReadFileAsync(path, XgSourceFormat.Xg, cancellationToken: cts.Token))
             .Should().ThrowAsync<OperationCanceledException>();
         AssertClosed(path);
     }
@@ -405,7 +405,7 @@ public sealed class XgSourceReaderTests : IDisposable
             started.SetResult();
             await Task.Delay(Timeout.Infinite, token);
             return new MemoryStream(XgBytes);
-        }, cancellationToken: cts.Token);
+        }, XgSourceFormat.Xg, cancellationToken: cts.Token);
 
         await started.Task;
         cts.Cancel();
@@ -427,7 +427,7 @@ public sealed class XgSourceReaderTests : IDisposable
             },
         };
 
-        var reading = XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe), cancellationToken: cts.Token);
+        var reading = XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe), XgSourceFormat.Xg, cancellationToken: cts.Token);
         await reached.Task;
         cts.Cancel();
 
@@ -445,7 +445,7 @@ public sealed class XgSourceReaderTests : IDisposable
         {
             cts.Cancel();                                   // the caller cancels …
             return Task.FromResult<Stream>(probe);          // … and the acquisition completes regardless
-        }, cancellationToken: cts.Token);
+        }, XgSourceFormat.Xg, cancellationToken: cts.Token);
 
         await FluentActions.Awaiting(() => reading).Should().ThrowAsync<OperationCanceledException>();
         probe.Disposed.Should().BeTrue();
@@ -460,7 +460,7 @@ public sealed class XgSourceReaderTests : IDisposable
         {
             cts.Cancel();
             throw new IOException("the handle closed under the cancellation");
-        }, cancellationToken: cts.Token);
+        }, XgSourceFormat.Xg, cancellationToken: cts.Token);
 
         await FluentActions.Awaiting(() => reading).Should().ThrowAsync<OperationCanceledException>();
     }
@@ -477,7 +477,7 @@ public sealed class XgSourceReaderTests : IDisposable
         timeout.Cancel();
         var timedOut = new TaskCanceledException("the upload timed out", null, timeout.Token);
 
-        var reading = XgSourceReader.ReadAsync("upload.xg", _ => throw timedOut, cancellationToken: CancellationToken.None);
+        var reading = XgSourceReader.ReadAsync("upload.xg", _ => throw timedOut, XgSourceFormat.Xg, cancellationToken: CancellationToken.None);
 
         (await FluentActions.Awaiting(() => reading).Should().ThrowAsync<TaskCanceledException>())
             .Which.Should().BeSameAs(timedOut);
@@ -529,7 +529,7 @@ public sealed class XgSourceReaderTests : IDisposable
     {
         var probe = new ProbeStream(XgBytes, seekable: true) { OnRead = () => throw new OperationCanceledException() };
 
-        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", probe))
+        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", probe, XgSourceFormat.Xg))
             .Should().Throw<OperationCanceledException>();
         probe.Disposed.Should().BeFalse("a borrowed stream is never disposed by the read");
     }
@@ -622,13 +622,13 @@ public sealed class XgSourceReaderTests : IDisposable
     {
         string path = WriteTemp("a.xg", corrupt ? Corrupt(XgSourceFormat.Xg) : XgBytes);
 
-        var read = asynchronous ? await XgSourceReader.ReadFileAsync(path) : XgSourceReader.ReadFile(path);
+        var read = asynchronous ? await XgSourceReader.ReadFileAsync(path, XgSourceFormat.Xg) : XgSourceReader.ReadFile(path, XgSourceFormat.Xg);
         read.Should().BeAssignableTo(corrupt ? typeof(XgSourceFailed) : typeof(XgSourceDecoded));
         AssertClosed(path);
 
         var retained = asynchronous
-            ? await XgSourceReader.ReadFileAsync(path, retainBytes: true)
-            : XgSourceReader.ReadFile(path, retainBytes: true);
+            ? await XgSourceReader.ReadFileAsync(path, XgSourceFormat.Xg, retainBytes: true)
+            : XgSourceReader.ReadFile(path, XgSourceFormat.Xg, retainBytes: true);
         retained.Should().BeAssignableTo(corrupt ? typeof(XgSourceFailed) : typeof(XgSourceDecoded));
         AssertClosed(path);
     }
@@ -640,7 +640,7 @@ public sealed class XgSourceReaderTests : IDisposable
     {
         var probe = new ProbeStream(corrupt ? Corrupt(XgSourceFormat.Xg) : XgBytes, seekable: true);
 
-        var read = XgSourceReader.ReadStream("a.xg", probe);
+        var read = XgSourceReader.ReadStream("a.xg", probe, XgSourceFormat.Xg);
 
         read.Should().BeAssignableTo(corrupt ? typeof(XgSourceFailed) : typeof(XgSourceDecoded));
         probe.Disposed.Should().BeFalse("the caller owns the stream");
@@ -654,7 +654,7 @@ public sealed class XgSourceReaderTests : IDisposable
     {
         var probe = new ProbeStream(corrupt ? Corrupt(XgSourceFormat.Xg) : XgBytes, seekable: false);
 
-        var read = await XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe));
+        var read = await XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe), XgSourceFormat.Xg);
 
         read.Should().BeAssignableTo(corrupt ? typeof(XgSourceFailed) : typeof(XgSourceDecoded));
         probe.Disposed.Should().BeTrue();
@@ -700,11 +700,11 @@ public sealed class XgSourceReaderTests : IDisposable
     public async Task ADecodedFile_OutlivesEveryResourceTheReadUsed()
     {
         string path = WriteTemp("a.xg", XgBytes);
-        var fromFile = (XgSourceDecoded)XgSourceReader.ReadFile(path);
+        var fromFile = (XgSourceDecoded)XgSourceReader.ReadFile(path, XgSourceFormat.Xg);
         File.Delete(path);
 
         var probe = new ProbeStream(XgBytes, seekable: false);
-        var fromUpload = (XgSourceDecoded)await XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe));
+        var fromUpload = (XgSourceDecoded)await XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe), XgSourceFormat.Xg);
         probe.Disposed.Should().BeTrue();
 
         foreach (var decoded in new[] { fromFile, fromUpload })
@@ -722,8 +722,8 @@ public sealed class XgSourceReaderTests : IDisposable
     [Fact]
     public void MatchAndSwitch_TakeTheOutcomesBranch_AndRefuseANullBranch()
     {
-        var decoded = XgSourceReader.ReadStream("a.xg", new MemoryStream(XgBytes));
-        var failed = XgSourceReader.ReadStream("b.xg", new MemoryStream(Corrupt(XgSourceFormat.Xg)));
+        var decoded = XgSourceReader.ReadStream("a.xg", new MemoryStream(XgBytes), XgSourceFormat.Xg);
+        var failed = XgSourceReader.ReadStream("b.xg", new MemoryStream(Corrupt(XgSourceFormat.Xg)), XgSourceFormat.Xg);
 
         decoded.Match(d => "decoded", f => "failed").Should().Be("decoded");
         failed.Match(d => "decoded", f => "failed").Should().Be("failed");

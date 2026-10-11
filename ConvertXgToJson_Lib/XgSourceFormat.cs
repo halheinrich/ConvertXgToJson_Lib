@@ -2,8 +2,10 @@ namespace ConvertXgToJson_Lib;
 
 /// <summary>
 /// How a source's bytes are decoded into an <see cref="Models.XgFile"/> by
-/// <see cref="XgSourceReader"/>: the caller states the form it holds, and the
-/// read decodes that form alone.
+/// <see cref="XgSourceReader"/>: the caller states the form it holds — every
+/// entry point requires the argument and none supplies a default (Hal's
+/// ruling of 2026-10-11) — and the read decodes that form alone, inferring
+/// nothing from a path or a name.
 /// </summary>
 public enum XgSourceFormat
 {

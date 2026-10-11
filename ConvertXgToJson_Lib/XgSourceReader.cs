@@ -19,12 +19,15 @@ namespace ConvertXgToJson_Lib;
 /// (<see cref="ReadFileAsync"/>); an open stream the caller owns
 /// (<see cref="ReadStream"/>); and an asynchronous acquisition the caller
 /// supplies — a browser upload's stream, say — which the read awaits with
-/// the caller's token and buffers (<see cref="ReadAsync"/>). Each decodes
-/// the <see cref="XgSourceFormat"/> it is given: XG's binary file through
-/// <see cref="XgFileReader.ReadStream"/>, or this library's JSON document
-/// through the decoder behind <see cref="XgFileReader.ReadJson"/>. There is
-/// no second decoder: <see cref="XgFileReader"/>'s entry points are the
-/// decode primitives this read calls, and they keep throwing.
+/// the caller's token and buffers (<see cref="ReadAsync"/>). Each takes the
+/// <see cref="XgSourceFormat"/> to decode as, a required argument with no
+/// default (Hal's ruling of 2026-10-11): the caller states which decoder it
+/// means, and nothing is inferred from a path or a name. XG's binary file
+/// decodes through <see cref="XgFileReader.ReadStream"/>, this library's
+/// JSON document through the decoder behind
+/// <see cref="XgFileReader.ReadJson"/>. There is no second decoder:
+/// <see cref="XgFileReader"/>'s entry points are the decode primitives this
+/// read calls, and they keep throwing.
 /// </para>
 /// <para>
 /// <b>One failure policy.</b> Every exception raised while acquiring the
@@ -117,7 +120,7 @@ public static class XgSourceReader
     /// <paramref name="format"/>, closes it, and returns the outcome.
     /// </summary>
     /// <param name="path">The file's path; it becomes the outcome's <see cref="XgSourceRead.SourceName"/> as passed.</param>
-    /// <param name="format">How the file's bytes are decoded.</param>
+    /// <param name="format">How the file's bytes are decoded; required — the caller states the decoder.</param>
     /// <param name="retainBytes">
     /// Whether a decoded source keeps the file's bytes
     /// (<see cref="XgSourceDecoded.Bytes"/>). When true the file is read
@@ -132,7 +135,7 @@ public static class XgSourceReader
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value.</exception>
     /// <exception cref="OperationCanceledException">Raised while reading or decoding the file; propagated, never an outcome.</exception>
     public static XgSourceRead ReadFile(
-        string path, XgSourceFormat format = XgSourceFormat.Xg, bool retainBytes = false)
+        string path, XgSourceFormat format, bool retainBytes = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         RequireDefined(format);
@@ -162,7 +165,7 @@ public static class XgSourceReader
     /// before the task completes, whatever the outcome.
     /// </summary>
     /// <param name="path">The file's path; it becomes the outcome's <see cref="XgSourceRead.SourceName"/> as passed.</param>
-    /// <param name="format">How the file's bytes are decoded.</param>
+    /// <param name="format">How the file's bytes are decoded; required — the caller states the decoder.</param>
     /// <param name="retainBytes">Whether a decoded source keeps the file's bytes (<see cref="XgSourceDecoded.Bytes"/>).</param>
     /// <param name="cancellationToken">Observed before the file is read, by the read itself, after it, and before an outcome is returned.</param>
     /// <returns>
@@ -174,7 +177,7 @@ public static class XgSourceReader
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or white space; thrown by the call itself.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value; thrown by the call itself.</exception>
     public static Task<XgSourceRead> ReadFileAsync(
-        string path, XgSourceFormat format = XgSourceFormat.Xg, bool retainBytes = false,
+        string path, XgSourceFormat format, bool retainBytes = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -204,7 +207,7 @@ public static class XgSourceReader
     /// position afterwards is unspecified. A forward-only stream is read
     /// through <see cref="ReadAsync"/>, which buffers it.
     /// </param>
-    /// <param name="format">How the stream's bytes are decoded.</param>
+    /// <param name="format">How the stream's bytes are decoded; required — the caller states the decoder.</param>
     /// <returns>
     /// <see cref="XgSourceDecoded"/> (whose <see cref="XgSourceDecoded.Bytes"/>
     /// is null: the caller holds the source), or <see cref="XgSourceFailed"/>
@@ -219,7 +222,7 @@ public static class XgSourceReader
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value.</exception>
     /// <exception cref="OperationCanceledException">Raised while reading or decoding the stream; propagated, never an outcome.</exception>
     public static XgSourceRead ReadStream(
-        string sourceName, Stream stream, XgSourceFormat format = XgSourceFormat.Xg)
+        string sourceName, Stream stream, XgSourceFormat format)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentNullException.ThrowIfNull(stream);
@@ -265,7 +268,7 @@ public static class XgSourceReader
     /// Whatever the acquisition throws, or a null task or stream it returns,
     /// fails the source — except a cancellation, which propagates.
     /// </param>
-    /// <param name="format">How the source's bytes are decoded.</param>
+    /// <param name="format">How the source's bytes are decoded; required — the caller states the decoder.</param>
     /// <param name="retainBytes">Whether a decoded source keeps the acquired bytes (<see cref="XgSourceDecoded.Bytes"/>).</param>
     /// <param name="cancellationToken">
     /// Passed to <paramref name="acquire"/> and to the copy; observed before
@@ -282,7 +285,7 @@ public static class XgSourceReader
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value; thrown by the call itself.</exception>
     public static Task<XgSourceRead> ReadAsync(
         string sourceName, Func<CancellationToken, Task<Stream>> acquire,
-        XgSourceFormat format = XgSourceFormat.Xg, bool retainBytes = false,
+        XgSourceFormat format, bool retainBytes = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
