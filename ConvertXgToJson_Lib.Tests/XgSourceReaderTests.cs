@@ -92,11 +92,14 @@ public sealed class XgSourceReaderTests : IDisposable
     /// <summary>The entry points, for the tests every one of them must pass.</summary>
     public enum Entry { ReadFile, ReadFileRetaining, ReadFileAsync, ReadStream, ReadAsync }
 
+    /// <summary>The formats the read decodes — every member but the refused <see cref="XgSourceFormat.Unspecified"/>.</summary>
+    private static readonly XgSourceFormat[] SupportedFormats = [XgSourceFormat.Xg, XgSourceFormat.Json];
+
     public static TheoryData<Entry, XgSourceFormat> EveryEntryAndFormat()
     {
         var data = new TheoryData<Entry, XgSourceFormat>();
         foreach (var entry in Enum.GetValues<Entry>())
-            foreach (var format in Enum.GetValues<XgSourceFormat>())
+            foreach (var format in SupportedFormats)
                 data.Add(entry, format);
         return data;
     }
@@ -288,6 +291,45 @@ public sealed class XgSourceReaderTests : IDisposable
     // ------------------------------------------------------------------ //
 
     private const XgSourceFormat Undefined = (XgSourceFormat)7;
+
+    /// <summary>
+    /// An unset format — <see cref="XgSourceFormat.Unspecified"/>, the zero
+    /// value an uninitialized field holds — is a usage error on every entry
+    /// point, thrown before anything is acquired and, by the asynchronous
+    /// ones, from the call itself: no decoder is chosen for a format nobody
+    /// stated (Hal's ruling of 2026-10-11). Every member but this one is a
+    /// format the read decodes.
+    /// </summary>
+    [Fact]
+    public void AnUnsetFormat_IsAUsageError_OnEveryEntryPoint()
+    {
+        XgSourceFormat unset = default;
+        unset.Should().Be(XgSourceFormat.Unspecified, "the zero value is the refused one");
+        Enum.GetValues<XgSourceFormat>().Except([XgSourceFormat.Unspecified])
+            .Should().BeEquivalentTo(SupportedFormats, "every other member is a format the read decodes");
+
+        string path = WriteTemp("a.xg", XgBytes);
+        int acquisitions = 0;
+        Func<CancellationToken, Task<Stream>> acquire = _ =>
+        {
+            acquisitions++;
+            return Task.FromResult<Stream>(new MemoryStream(XgBytes));
+        };
+        using var stream = new MemoryStream(XgBytes);
+
+        FluentActions.Invoking(() => XgSourceReader.ReadFile(path, unset))
+            .Should().Throw<ArgumentOutOfRangeException>().WithParameterName("format");
+        FluentActions.Invoking(() => XgSourceReader.ReadStream("a.xg", stream, unset))
+            .Should().Throw<ArgumentOutOfRangeException>().WithParameterName("format");
+        stream.Position.Should().Be(0, "the stream is not read");
+
+        // Not awaited: the asynchronous entry points throw from the call.
+        Action readFileAsync = () => _ = XgSourceReader.ReadFileAsync(path, unset);
+        Action readAsync = () => _ = XgSourceReader.ReadAsync("a.xg", acquire, unset);
+        readFileAsync.Should().Throw<ArgumentOutOfRangeException>().WithParameterName("format");
+        readAsync.Should().Throw<ArgumentOutOfRangeException>().WithParameterName("format");
+        acquisitions.Should().Be(0, "nothing is acquired for an unset format");
+    }
 
     [Fact]
     public void ReadFile_UsageErrors_AreThrown()

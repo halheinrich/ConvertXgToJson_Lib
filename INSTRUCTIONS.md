@@ -222,9 +222,16 @@ decisions behind its shape:
 * **The format is the caller's statement** (`XgSourceFormat.Xg` or
   `XgSourceFormat.Json`): a required argument on every entry point, with no
   default (Hal's ruling of 2026-10-11; `PublicSurfaceTests` pins it), and
-  never inferred from the name, which is attribution only. The decoders are `XgFileReader`'s — `ReadStream`, and
-  `DecodeJson` behind `ReadJson` — so there is one decode path, and
-  `XgFileReader` stays the throwing primitive layer it was.
+  never inferred from the name, which is attribution only. The enum's zero
+  value is `Unspecified`, which every entry point refuses, as it refuses an
+  integer that is no member (Hal's ruling of 2026-10-11, after
+  `XgUnrepresentableValueReason.Unspecified`): an unset field never chooses
+  a decoder. That refuses a format nobody stated; it cannot show that a
+  stated one fits the bytes. One switch, `DecoderFor`, states which formats
+  decode and how, so the validation and the dispatch cannot disagree. The
+  decoders are `XgFileReader`'s — `ReadStream`, and `DecodeJson` behind
+  `ReadJson` — so there is one decode path, and `XgFileReader` stays the
+  throwing primitive layer it was.
 * **The outcome is a closed pair**: `XgSourceRead` is `XgSourceDecoded`
   (its `XgFile`, and its `Bytes` when retained) or `XgSourceFailed` (its
   `Exception`), each carrying `SourceName` — the path or the name exactly
@@ -240,11 +247,11 @@ decisions behind its shape:
   `MemoryStream` can hold makes the decoder raise
   `ArgumentOutOfRangeException`; that is the source's failure.
 * **Usage errors are outside the boundary**: a null or blank path or name,
-  a null stream or acquisition, an undefined format, and a `ReadStream`
-  stream that is not readable, seekable and at position 0 are validated
-  before anything is acquired, and thrown — by the asynchronous entry
-  points from the call itself, before a task exists (the two-method shape
-  the iterator uses for `sourceFile`). Everything after — the file system
+  a null stream or acquisition, an unset (`Unspecified`) or undefined
+  format, and a `ReadStream` stream that is not readable, seekable and at
+  position 0 are validated before anything is acquired, and thrown — by
+  the asynchronous entry points from the call itself, before a task exists
+  (the two-method shape the iterator uses for `sourceFile`). Everything after — the file system
   refusing a path, an acquisition throwing, a null task or stream from it,
   the decoder — is the source's.
 * **Cancellation**: the entry points that take a token observe it before
@@ -1436,7 +1443,9 @@ public static class XgSourceReader
                                                CancellationToken cancellationToken = default);
 }
 
-public enum XgSourceFormat { Xg = 0, Json = 1 }   // .xg/.xgp by content | this library's JSON
+// Unspecified, the zero value, is refused by every entry point, as an
+// undefined integer is: a usage error, thrown before anything is acquired.
+public enum XgSourceFormat { Unspecified = 0, Xg = 1, Json = 2 }   // .xg/.xgp by content | this library's JSON
 
 // A closed pair, reference semantics; constructed only by XgSourceReader.
 public abstract class XgSourceRead

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
@@ -22,10 +21,14 @@ namespace ConvertXgToJson_Lib;
 /// the caller's token and buffers (<see cref="ReadAsync"/>). Each takes the
 /// <see cref="XgSourceFormat"/> to decode as, a required argument with no
 /// default (Hal's ruling of 2026-10-11): the caller states which decoder it
-/// means, and nothing is inferred from a path or a name. XG's binary file
-/// decodes through <see cref="XgFileReader.ReadStream"/>, this library's
-/// JSON document through the decoder behind
-/// <see cref="XgFileReader.ReadJson"/>. There is no second decoder:
+/// means, and nothing is inferred from a path or a name. The enum's zero
+/// value, <see cref="XgSourceFormat.Unspecified"/>, is refused like a value
+/// that is no member at all (Hal's ruling of 2026-10-11), so an unset format
+/// never chooses a decoder; that refuses a format nobody stated, and cannot
+/// show that a stated one fits the bytes. XG's binary file decodes through
+/// <see cref="XgFileReader.ReadStream"/>, this library's JSON document
+/// through the decoder behind <see cref="XgFileReader.ReadJson"/>. There is
+/// no second decoder:
 /// <see cref="XgFileReader"/>'s entry points are the decode primitives this
 /// read calls, and they keep throwing.
 /// </para>
@@ -44,7 +47,8 @@ namespace ConvertXgToJson_Lib;
 /// <b>Usage errors are thrown, never an outcome.</b> Each entry point
 /// validates its own arguments before it acquires anything, and throws for
 /// a mistake in how it was called: a null or blank path or name, a null
-/// stream or acquisition, an undefined <see cref="XgSourceFormat"/>, and for
+/// stream or acquisition, an unset (<see cref="XgSourceFormat.Unspecified"/>)
+/// or undefined <see cref="XgSourceFormat"/>, and for
 /// <see cref="ReadStream"/> a stream it cannot decode (below). The
 /// asynchronous entry points throw these synchronously, from the call,
 /// before any task exists. Everything after validation — opening the file,
@@ -125,7 +129,7 @@ public static class XgSourceReader
     /// <paramref name="format"/>, closes it, and returns the outcome.
     /// </summary>
     /// <param name="path">The file's path; it becomes the outcome's <see cref="XgSourceRead.SourceName"/> as passed.</param>
-    /// <param name="format">How the file's bytes are decoded; required — the caller states the decoder.</param>
+    /// <param name="format">How the file's bytes are decoded: <see cref="XgSourceFormat.Xg"/> or <see cref="XgSourceFormat.Json"/>, stated by the caller.</param>
     /// <param name="retainBytes">
     /// Whether a decoded source keeps the file's bytes
     /// (<see cref="XgSourceDecoded.Bytes"/>). When true the file is read
@@ -137,13 +141,13 @@ public static class XgSourceReader
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or white space.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member of <see cref="XgSourceFormat"/>.</exception>
     /// <exception cref="OperationCanceledException">Raised while reading or decoding the file; propagated, never an outcome.</exception>
     public static XgSourceRead ReadFile(
         string path, XgSourceFormat format, bool retainBytes = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        RequireDefined(format);
+        var decode = RequireDecoder(format);
 
         try
         {
@@ -151,11 +155,11 @@ public static class XgSourceReader
             {
                 byte[] bytes = File.ReadAllBytes(path);
                 using var buffered = new MemoryStream(bytes, writable: false);
-                return new XgSourceDecoded(path, Decode(buffered, format, path), bytes);
+                return new XgSourceDecoded(path, decode(buffered, path), bytes);
             }
 
             using var stream = File.OpenRead(path);
-            return new XgSourceDecoded(path, Decode(stream, format, path), bytes: null);
+            return new XgSourceDecoded(path, decode(stream, path), bytes: null);
         }
         catch (Exception exception) when (FailsTheSource(exception))
         {
@@ -170,7 +174,7 @@ public static class XgSourceReader
     /// before the task completes, whatever the outcome.
     /// </summary>
     /// <param name="path">The file's path; it becomes the outcome's <see cref="XgSourceRead.SourceName"/> as passed.</param>
-    /// <param name="format">How the file's bytes are decoded; required — the caller states the decoder.</param>
+    /// <param name="format">How the file's bytes are decoded: <see cref="XgSourceFormat.Xg"/> or <see cref="XgSourceFormat.Json"/>, stated by the caller.</param>
     /// <param name="retainBytes">Whether a decoded source keeps the file's bytes (<see cref="XgSourceDecoded.Bytes"/>).</param>
     /// <param name="cancellationToken">Observed before the file is read, by the read itself, after it, and before an outcome is returned.</param>
     /// <returns>
@@ -180,18 +184,18 @@ public static class XgSourceReader
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null; thrown by the call itself.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or white space; thrown by the call itself.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value; thrown by the call itself.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member of <see cref="XgSourceFormat"/>; thrown by the call itself.</exception>
     public static Task<XgSourceRead> ReadFileAsync(
         string path, XgSourceFormat format, bool retainBytes = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        RequireDefined(format);
+        var decode = RequireDecoder(format);
 
         return ReadAcquiredAsync(
             path,
             token => File.ReadAllBytesAsync(path, token),
-            input => Decode(input, format, path),
+            input => decode(input, path),
             retainBytes,
             cancellationToken);
     }
@@ -212,7 +216,7 @@ public static class XgSourceReader
     /// position afterwards is unspecified. A forward-only stream is read
     /// through <see cref="ReadAsync"/>, which buffers it.
     /// </param>
-    /// <param name="format">How the stream's bytes are decoded; required — the caller states the decoder.</param>
+    /// <param name="format">How the stream's bytes are decoded: <see cref="XgSourceFormat.Xg"/> or <see cref="XgSourceFormat.Json"/>, stated by the caller.</param>
     /// <returns>
     /// <see cref="XgSourceDecoded"/> (whose <see cref="XgSourceDecoded.Bytes"/>
     /// is null: the caller holds the source), or <see cref="XgSourceFailed"/>
@@ -224,14 +228,14 @@ public static class XgSourceReader
     /// <paramref name="stream"/> is not readable (a disposed stream is not),
     /// not seekable, or not at position 0.
     /// </exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member of <see cref="XgSourceFormat"/>.</exception>
     /// <exception cref="OperationCanceledException">Raised while reading or decoding the stream; propagated, never an outcome.</exception>
     public static XgSourceRead ReadStream(
         string sourceName, Stream stream, XgSourceFormat format)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentNullException.ThrowIfNull(stream);
-        RequireDefined(format);
+        var decode = RequireDecoder(format);
         if (!stream.CanRead)
             throw new ArgumentException(
                 "The stream must be readable; a closed or disposed stream is not.", nameof(stream));
@@ -246,7 +250,7 @@ public static class XgSourceReader
 
         try
         {
-            return new XgSourceDecoded(sourceName, Decode(stream, format, sourceName), bytes: null);
+            return new XgSourceDecoded(sourceName, decode(stream, sourceName), bytes: null);
         }
         catch (Exception exception) when (FailsTheSource(exception))
         {
@@ -273,7 +277,7 @@ public static class XgSourceReader
     /// Whatever the acquisition throws, or a null task or stream it returns,
     /// fails the source — except a cancellation, which propagates.
     /// </param>
-    /// <param name="format">How the source's bytes are decoded; required — the caller states the decoder.</param>
+    /// <param name="format">How the source's bytes are decoded: <see cref="XgSourceFormat.Xg"/> or <see cref="XgSourceFormat.Json"/>, stated by the caller.</param>
     /// <param name="retainBytes">Whether a decoded source keeps the acquired bytes (<see cref="XgSourceDecoded.Bytes"/>).</param>
     /// <param name="cancellationToken">
     /// Passed to <paramref name="acquire"/> and to the copy; observed before
@@ -287,7 +291,7 @@ public static class XgSourceReader
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="sourceName"/> or <paramref name="acquire"/> is null; thrown by the call itself.</exception>
     /// <exception cref="ArgumentException"><paramref name="sourceName"/> is empty or white space; thrown by the call itself.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value; thrown by the call itself.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member of <see cref="XgSourceFormat"/>; thrown by the call itself.</exception>
     public static Task<XgSourceRead> ReadAsync(
         string sourceName, Func<CancellationToken, Task<Stream>> acquire,
         XgSourceFormat format, bool retainBytes = false,
@@ -295,12 +299,12 @@ public static class XgSourceReader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentNullException.ThrowIfNull(acquire);
-        RequireDefined(format);
+        var decode = RequireDecoder(format);
 
         return ReadAcquiredAsync(
             sourceName,
             token => BufferAsync(acquire, token),
-            input => Decode(input, format, sourceName),
+            input => decode(input, sourceName),
             retainBytes,
             cancellationToken);
     }
@@ -440,20 +444,24 @@ public static class XgSourceReader
     private static bool FailsTheSource(Exception exception) => exception is not OperationCanceledException;
 
     /// <summary>
-    /// Decodes <paramref name="input"/> as <paramref name="format"/> through
-    /// <see cref="XgFileReader"/>'s decoders, the library's only ones.
+    /// The decoder <paramref name="format"/> states — one of
+    /// <see cref="XgFileReader"/>'s, the library's only ones, given the input
+    /// and the source's name — or null when it states none:
+    /// <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member
+    /// at all. The one statement of which formats the read decodes, and how.
     /// </summary>
-    private static XgFile Decode(Stream input, XgSourceFormat format, string sourceName) => format switch
+    private static Func<Stream, string, XgFile>? DecoderFor(XgSourceFormat format) => format switch
     {
-        XgSourceFormat.Xg => XgFileReader.ReadStream(input),
-        XgSourceFormat.Json => XgFileReader.DecodeJson(input, sourceName),
-        _ => throw new UnreachableException($"The format {format} passed validation."),
+        XgSourceFormat.Xg => static (input, _) => XgFileReader.ReadStream(input),
+        XgSourceFormat.Json => static (input, sourceName) => XgFileReader.DecodeJson(input, sourceName),
+        _ => null,
     };
 
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined value.</exception>
-    private static void RequireDefined(XgSourceFormat format)
-    {
-        if (!Enum.IsDefined(format))
-            throw new ArgumentOutOfRangeException(nameof(format), format, "Not a defined XgSourceFormat.");
-    }
+    /// <summary>The decoder <paramref name="format"/> states, validated as the entry point's argument.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member of <see cref="XgSourceFormat"/>.</exception>
+    private static Func<Stream, string, XgFile> RequireDecoder(XgSourceFormat format) =>
+        DecoderFor(format) ?? throw new ArgumentOutOfRangeException(nameof(format), format,
+            format == XgSourceFormat.Unspecified
+                ? "The format is unset: state XgSourceFormat.Xg or XgSourceFormat.Json."
+                : "Not an XgSourceFormat.");
 }
