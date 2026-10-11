@@ -257,7 +257,11 @@ decisions behind its shape:
   happens; `ReadStream` borrows its stream and never disposes it;
   `ReadAsync` owns the stream its acquisition returns, copies it into a
   buffer the decoder can seek (so a forward-only stream is fine) and
-  disposes it however the copy ends, before decoding.
+  disposes it however the copy ends, before decoding. A failure disposing a
+  resource never replaces a cancellation: disposal is still attempted and
+  its failure dropped, so the cancellation propagates; with no cancellation
+  before it, the failure fails the source. Only the acquired stream, the
+  caller's code, can break that, so the read enforces it there.
 * **Retained bytes are opt-in** (`retainBytes: true`, on the entry points
   that acquire): a caller that copies an unchanged `.xgp` verbatim keeps
   them and never acquires the source again; a caller that does not ask
@@ -1623,6 +1627,14 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   a cancellation stays a cancellation. An acquisition that means "this one
   source timed out" throws something else (`TimeoutException`), which fails
   the source alone.
+* **No `await using` on the acquired stream.** `await using` is a
+  `finally`, and an exception thrown in a `finally` replaces the one
+  propagating, so a stream that cancelled its own read and then failed to
+  close turned the cancellation into a failed source (found in review of
+  the read operation, halheinrich/backgammon#374). `BufferAsync` disposes
+  in a `finally` that drops the disposal's failure only while a
+  cancellation propagates; `ACancellationRaisedWhileBuffering_IsNotReplacedByADisposalThatFails`
+  and its control pin both sides.
 * **`ReadStream` needs position 0, not merely the source's start.** XG's
   header states its payload's offset from the file's first byte and the
   binary decoder seeks there absolutely, so a stream holding the file at a

@@ -78,6 +78,20 @@ namespace ConvertXgToJson_Lib;
 /// therefore fine there.
 /// </para>
 /// <para>
+/// <b>A cleanup failure never replaces a cancellation.</b> Every resource
+/// the read disposes is disposed even when the read is cancelled, and a
+/// failure disposing it then is dropped, so the cancellation propagates;
+/// with no cancellation before it, a failure disposing a resource fails the
+/// source, like any other failure in the read. Where the read could break
+/// the rule, it enforces it: the stream <see cref="ReadAsync"/>'s
+/// acquisition returns is the caller's code, whose read may cancel and whose
+/// disposal may fail. Its other resources cannot: the
+/// <see cref="MemoryStream"/>s it makes over its own buffers do not fail to
+/// dispose, the file <see cref="ReadFile"/> opens is read by a synchronous
+/// decode that observes no token, and <see cref="ReadFileAsync"/>'s file is
+/// opened and closed within <see cref="File.ReadAllBytesAsync(string, CancellationToken)"/>.
+/// </para>
+/// <para>
 /// <b>What a decoded source keeps.</b> Its <see cref="XgFile"/>, complete in
 /// memory and independent of every resource the read used. Its bytes, exactly
 /// as acquired, only when the caller asks (<c>retainBytes: true</c>, on the
@@ -329,8 +343,17 @@ public static class XgSourceReader
     /// <summary>
     /// Opens the caller's acquisition and copies its stream into memory the
     /// decoder can seek, disposing the stream whether the copy completes,
-    /// fails or is cancelled.
+    /// fails or is cancelled. A failure disposing it never replaces a
+    /// cancellation the copy raised: the cancellation propagates and the
+    /// disposal's exception is dropped. With no cancellation, a failure
+    /// disposing it propagates, to fail the source.
     /// </summary>
+    /// <remarks>
+    /// Not <c>await using</c>: that is a <c>finally</c>, and an exception thrown
+    /// in a <c>finally</c> replaces the one already propagating — a stream that
+    /// cancelled its own read and then failed to close would have turned the
+    /// cancellation into a failed source.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The acquisition returned a null task or a null stream.</exception>
     private static async Task<byte[]> BufferAsync(
         Func<CancellationToken, Task<Stream>> acquire, CancellationToken cancellationToken)
@@ -340,11 +363,28 @@ public static class XgSourceReader
         Stream? stream = await opening.ConfigureAwait(false)
             ?? throw new InvalidOperationException("The source's acquisition returned no stream.");
 
-        await using (stream.ConfigureAwait(false))
+        bool cancelled = false;
+        try
         {
             using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
             return buffer.ToArray();
+        }
+        catch (OperationCanceledException)
+        {
+            cancelled = true;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception) when (cancelled)
+            {
+                // The cancellation already propagating is the read's outcome.
+            }
         }
     }
 

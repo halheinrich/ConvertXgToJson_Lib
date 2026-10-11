@@ -483,6 +483,47 @@ public sealed class XgSourceReaderTests : IDisposable
             .Which.Should().BeSameAs(timedOut);
     }
 
+    /// <summary>
+    /// A failure disposing the acquired stream never replaces a cancellation
+    /// already raised while it was read: disposal is still attempted, and the
+    /// cancellation — here the stream's own, the caller's token untouched —
+    /// reaches the caller rather than becoming a failed source.
+    /// </summary>
+    [Fact]
+    public async Task ACancellationRaisedWhileBuffering_IsNotReplacedByADisposalThatFails()
+    {
+        var raised = new OperationCanceledException("the source's own cancellation");
+        var probe = new ProbeStream(XgBytes, seekable: false)
+        {
+            OnRead = () => throw raised,
+            OnDispose = () => throw new IOException("the stream failed to close"),
+        };
+
+        var reading = XgSourceReader.ReadAsync(
+            "upload.xg", _ => Task.FromResult<Stream>(probe), XgSourceFormat.Xg,
+            cancellationToken: CancellationToken.None);
+
+        (await FluentActions.Awaiting(() => reading).Should().ThrowAsync<OperationCanceledException>())
+            .Which.Should().BeSameAs(raised);
+        probe.Disposed.Should().BeTrue("disposal is still attempted");
+    }
+
+    /// <summary>
+    /// The control: with no cancellation before it, a failure disposing the
+    /// acquired stream is the source's failure, like any other in the read.
+    /// </summary>
+    [Fact]
+    public async Task ADisposalThatFails_AfterAReadThatDidNot_IsAFailedSource()
+    {
+        var closing = new IOException("the stream failed to close");
+        var probe = new ProbeStream(XgBytes, seekable: false) { OnDispose = () => throw closing };
+
+        var read = await XgSourceReader.ReadAsync("upload.xg", _ => Task.FromResult<Stream>(probe), XgSourceFormat.Xg);
+
+        read.Should().BeOfType<XgSourceFailed>().Which.Exception.Should().BeSameAs(closing);
+        probe.Disposed.Should().BeTrue();
+    }
+
     [Fact]
     public void ACancellationRaisedWhileDecoding_Propagates_AndTheBorrowedStreamStaysOpen()
     {
@@ -708,9 +749,9 @@ public sealed class XgSourceReaderTests : IDisposable
 
     /// <summary>
     /// A read-only stream over <c>bytes</c>, seekable or forward-only, that
-    /// records its disposal and its reads, can run a hook on each read, and
-    /// ignores the token its asynchronous reads are given unless its
-    /// <see cref="BeforeReadAsync"/> hook observes it.
+    /// records its disposal and its reads, can run a hook on each read and on
+    /// its disposal, and ignores the token its asynchronous reads are given
+    /// unless its <see cref="BeforeReadAsync"/> hook observes it.
     /// </summary>
     private sealed class ProbeStream(byte[] bytes, bool seekable) : Stream
     {
@@ -720,6 +761,9 @@ public sealed class XgSourceReaderTests : IDisposable
         public int Reads { get; private set; }
         public Action? OnRead { get; init; }
         public Func<CancellationToken, Task>? BeforeReadAsync { get; init; }
+
+        /// <summary>Runs once the stream is marked disposed — a disposal that fails throws here.</summary>
+        public Action? OnDispose { get; init; }
 
         public override bool CanRead => !Disposed;
         public override bool CanSeek => seekable && !Disposed;
@@ -766,6 +810,7 @@ public sealed class XgSourceReaderTests : IDisposable
         {
             Disposed = true;
             base.Dispose(disposing);
+            OnDispose?.Invoke();
         }
     }
 }
