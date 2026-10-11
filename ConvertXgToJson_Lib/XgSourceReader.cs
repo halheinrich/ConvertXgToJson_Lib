@@ -81,14 +81,19 @@ namespace ConvertXgToJson_Lib;
 /// therefore fine there.
 /// </para>
 /// <para>
-/// <b>A cleanup failure never replaces a cancellation.</b> Every resource
-/// the read disposes is disposed even when the read is cancelled, and a
-/// failure disposing it then is dropped, so the cancellation propagates;
-/// with no cancellation before it, a failure disposing a resource fails the
-/// source, like any other failure in the read. Where the read could break
-/// the rule, it enforces it: the stream <see cref="ReadAsync"/>'s
-/// acquisition returns is the caller's code, whose read may cancel and whose
-/// disposal may fail. Its other resources cannot: the
+/// <b>One precedence between the read's exception and the cleanup's.</b>
+/// Every resource the read disposes is disposed, whatever the read did.
+/// When the read and the disposal both raise, a cancellation the read raised
+/// propagates, the disposal's exception dropped; an ordinary read failure
+/// fails the source with the read's own exception, the disposal's ordinary
+/// failure dropped, unless the disposal raised a cancellation, which
+/// propagates. After a clean read, a cancellation the disposal raises
+/// propagates, and an ordinary failure disposing fails the source with the
+/// disposal's exception. So a cancellation always stays a cancellation, and
+/// a failed source carries the exception that failed it. Where the read
+/// could break the rule, it enforces it: the stream <see cref="ReadAsync"/>'s
+/// acquisition returns is the caller's code, whose read may fail or cancel
+/// and whose disposal may too. Its other resources cannot: the
 /// <see cref="MemoryStream"/>s it makes over its own buffers do not fail to
 /// dispose, the file <see cref="ReadFile"/> opens is read by a synchronous
 /// decode that observes no token, and <see cref="ReadFileAsync"/>'s file is
@@ -346,16 +351,14 @@ public static class XgSourceReader
     /// <summary>
     /// Opens the caller's acquisition and copies its stream into memory the
     /// decoder can seek, disposing the stream whether the copy completes,
-    /// fails or is cancelled. A failure disposing it never replaces a
-    /// cancellation the copy raised: the cancellation propagates and the
-    /// disposal's exception is dropped. With no cancellation, a failure
-    /// disposing it propagates, to fail the source.
+    /// fails or is cancelled. When the copy and the disposal both raise, one
+    /// precedence decides which exception leaves (<see cref="ReadExceptionStands"/>).
     /// </summary>
     /// <remarks>
     /// Not <c>await using</c>: that is a <c>finally</c>, and an exception thrown
     /// in a <c>finally</c> replaces the one already propagating — a stream that
-    /// cancelled its own read and then failed to close would have turned the
-    /// cancellation into a failed source.
+    /// failed or cancelled its own read and then failed to close would have
+    /// lost the read's exception to the disposal's.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The acquisition returned a null task or a null stream.</exception>
     private static async Task<byte[]> BufferAsync(
@@ -366,16 +369,16 @@ public static class XgSourceReader
         Stream? stream = await opening.ConfigureAwait(false)
             ?? throw new InvalidOperationException("The source's acquisition returned no stream.");
 
-        bool cancelled = false;
+        Exception? readException = null;
         try
         {
             using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
             return buffer.ToArray();
         }
-        catch (OperationCanceledException)
+        catch (Exception exception)
         {
-            cancelled = true;
+            readException = exception;
             throw;
         }
         finally
@@ -384,12 +387,26 @@ public static class XgSourceReader
             {
                 await stream.DisposeAsync().ConfigureAwait(false);
             }
-            catch (Exception) when (cancelled)
+            catch (Exception disposalException) when (ReadExceptionStands(readException, disposalException))
             {
-                // The cancellation already propagating is the read's outcome.
+                // The read's exception, already propagating, is the outcome.
             }
         }
     }
+
+    /// <summary>
+    /// The precedence between the exception a read raised and the one its
+    /// disposal raised, stated once: the read's stands — dropping the
+    /// disposal's — when the read was cancelled, or when it failed and the
+    /// disposal did not cancel. So a cancellation always propagates, the
+    /// read's own first; an ordinary read failure fails the source with its
+    /// own exception; and after a clean read (<paramref name="readException"/>
+    /// null) the disposal's exception propagates, a cancellation to the
+    /// caller and an ordinary failure to fail the source.
+    /// </summary>
+    private static bool ReadExceptionStands(Exception? readException, Exception disposalException) =>
+        readException is OperationCanceledException
+        || (readException is not null && disposalException is not OperationCanceledException);
 
     /// <summary>Decodes acquired bytes under the failure policy, keeping them when asked.</summary>
     private static XgSourceRead DecodeAcquired(

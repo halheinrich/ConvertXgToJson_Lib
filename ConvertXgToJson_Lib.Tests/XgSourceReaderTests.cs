@@ -524,6 +524,84 @@ public sealed class XgSourceReaderTests : IDisposable
         probe.Disposed.Should().BeTrue();
     }
 
+    /// <summary>What the acquired stream's read, or its disposal, raises.</summary>
+    public enum Raises { Nothing, AnOrdinaryException, ACancellation }
+
+    /// <summary>What the caller observes of a read whose stream raised as stated.</summary>
+    public enum Observed { Decoded, FailedByTheRead, FailedByTheDisposal, CancelledByTheRead, CancelledByTheDisposal }
+
+    /// <summary>
+    /// The one precedence between the read's exception and the disposal's,
+    /// over every combination of the two: a cancellation the read raised
+    /// propagates whatever the disposal does; an ordinary read failure fails
+    /// the source with its own exception unless the disposal raises a
+    /// cancellation, which propagates; after a clean read, the disposal's
+    /// cancellation propagates and its ordinary failure fails the source.
+    /// </summary>
+    public static TheoryData<Raises, Raises, Observed> ReadAndDisposal() => new()
+    {
+        { Raises.Nothing, Raises.Nothing, Observed.Decoded },
+        { Raises.Nothing, Raises.AnOrdinaryException, Observed.FailedByTheDisposal },
+        { Raises.Nothing, Raises.ACancellation, Observed.CancelledByTheDisposal },
+        { Raises.AnOrdinaryException, Raises.Nothing, Observed.FailedByTheRead },
+        { Raises.AnOrdinaryException, Raises.AnOrdinaryException, Observed.FailedByTheRead },
+        { Raises.AnOrdinaryException, Raises.ACancellation, Observed.CancelledByTheDisposal },
+        { Raises.ACancellation, Raises.Nothing, Observed.CancelledByTheRead },
+        { Raises.ACancellation, Raises.AnOrdinaryException, Observed.CancelledByTheRead },
+        { Raises.ACancellation, Raises.ACancellation, Observed.CancelledByTheRead },
+    };
+
+    /// <summary>
+    /// Through <see cref="XgSourceReader.ReadAsync"/>, the caller's token never
+    /// cancelled: the exception the caller sees, or the failed source's, is
+    /// the very one the precedence names, and disposal is attempted every time.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReadAndDisposal))]
+    public async Task TheReadsExceptionAndTheDisposals_ResolveByOnePrecedence(
+        Raises read, Raises disposal, Observed observed)
+    {
+        Exception? Raised(Raises raises, string by) => raises switch
+        {
+            Raises.AnOrdinaryException => new IOException($"the {by} failed"),
+            Raises.ACancellation => new OperationCanceledException($"the {by} cancelled"),
+            _ => null,
+        };
+        var readException = Raised(read, "read");
+        var disposalException = Raised(disposal, "disposal");
+        var probe = new ProbeStream(XgBytes, seekable: false)
+        {
+            OnRead = readException is null ? null : () => throw readException,
+            OnDispose = disposalException is null ? null : () => throw disposalException,
+        };
+
+        var reading = XgSourceReader.ReadAsync(
+            "upload.xg", _ => Task.FromResult<Stream>(probe), XgSourceFormat.Xg,
+            cancellationToken: CancellationToken.None);
+
+        switch (observed)
+        {
+            case Observed.Decoded:
+                (await reading).Should().BeOfType<XgSourceDecoded>();
+                break;
+            case Observed.FailedByTheRead:
+                (await reading).Should().BeOfType<XgSourceFailed>().Which.Exception.Should().BeSameAs(readException);
+                break;
+            case Observed.FailedByTheDisposal:
+                (await reading).Should().BeOfType<XgSourceFailed>().Which.Exception.Should().BeSameAs(disposalException);
+                break;
+            case Observed.CancelledByTheRead:
+                (await FluentActions.Awaiting(() => reading).Should().ThrowAsync<OperationCanceledException>())
+                    .Which.Should().BeSameAs(readException);
+                break;
+            case Observed.CancelledByTheDisposal:
+                (await FluentActions.Awaiting(() => reading).Should().ThrowAsync<OperationCanceledException>())
+                    .Which.Should().BeSameAs(disposalException);
+                break;
+        }
+        probe.Disposed.Should().BeTrue("disposal is attempted whatever the read did");
+    }
+
     [Fact]
     public void ACancellationRaisedWhileDecoding_Propagates_AndTheBorrowedStreamStaysOpen()
     {
