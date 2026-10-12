@@ -732,7 +732,10 @@ case-insensitive invariant:
   exists only because dice were rolled, so dice in the file mean the saved
   decision is the play; the cube pane is XG's incidental. Depth is not
   compared. A curated cube problem is a pre-roll position and carries no
-  move pane at all.
+  move pane at all. The selection is made before the stop callbacks judge
+  anything: they see only the decision the `.xgp` yields to the caller, so
+  a stop vote cannot change which one that is (halheinrich/backgammon#392;
+  see `XgIteratorCallbacks` below).
 
 **A standalone position states no game, move or standard start**
 (halheinrich/backgammon#124): a decision with an `XgpDecisionId` has no
@@ -1121,6 +1124,18 @@ default:
   decision. True = advance to the next game.
 * `StopMatchAfter(IDecisionFilterData) → bool` — fires after each yielded
   decision. True = advance to the next match.
+
+**"Yielded" means yielded to the caller** (halheinrich/backgammon#392).
+The stop predicates judge each decision the iterator hands its caller, on
+the caller's next `MoveNext`; for an `.xgp` that is after the
+single-decision selection, so a candidate the selection discards is never
+judged and a stop vote cannot change the selection. A caller that stops
+after its first result triggers no callback. The skip predicates are
+header predicates and are unaffected. In `IterateCore` the stop
+callbacks are the last stage — walk, then the `.xgp` selection, then the
+callbacks — and a game stop reaches back into the walk through the
+per-enumeration `GameStopRequest`, so the rest of the game is skipped
+before any of it is built and `.xg` iteration still streams.
 
 The post-yield predicates see each decision under the options' ranking
 (see "The ranking"): on `Iterate` the row itself, which is an
@@ -1728,6 +1743,10 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   or match before any decision is emitted from it), return `true` from
   `SkipGameAt` / `SkipMatchAt` at the boundary instead. The post-yield
   predicates exist for "I've seen enough" early-exit, not pre-filtering.
+  "The yield" is the yield to the caller, after the `.xgp` selection:
+  running the stop callbacks inside the walk again would let a stop vote
+  on an `.xgp`'s cube end the walk before the play is reached
+  (halheinrich/backgammon#392). Keep them the last stage of `IterateCore`.
 * **`TestPaths._root` depends on a specific build output depth.** If
   `AppContext.BaseDirectory` moves relative to the repo root (e.g. a csproj
   layout change), the five-`..` walk breaks and every file-touching test
