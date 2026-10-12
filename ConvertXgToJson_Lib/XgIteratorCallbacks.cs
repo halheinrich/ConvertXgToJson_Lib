@@ -15,6 +15,19 @@ namespace ConvertXgToJson_Lib;
 /// </para>
 ///
 /// <para>
+/// <b>"Yielded" means yielded to the caller.</b> The post-yield predicates,
+/// <see cref="StopGameAfter"/> and <see cref="StopMatchAfter"/>, judge only
+/// the decisions the iterator hands its caller, each on the caller's next
+/// <c>MoveNext</c>. For an <c>.xgp</c> source that is after the
+/// single-decision selection (the analysed checker play, else the analysed
+/// cube): a candidate the selection discards is never judged, so no stop
+/// vote can change which decision is selected
+/// (halheinrich/backgammon#392). A caller that stops after its first result
+/// triggers no callback. A stop ends iteration early to save work; it never
+/// replaces a decision the caller would have received with another.
+/// </para>
+///
+/// <para>
 /// This type replaces the imperative <c>AdvanceNextMatch</c> /
 /// <c>AdvanceNextGame</c> field setters that previously lived on
 /// <see cref="XgIteratorState"/>. Skip semantics belong to the caller's
@@ -33,22 +46,23 @@ namespace ConvertXgToJson_Lib;
 ///   skip the rest of the current game. Use case: game's entry-state
 ///   (away scores, Crawford, non-standard start) does not match the
 ///   filter's sought target.</param>
-/// <param name="StopGameAfter">Evaluated after each yielded decision.
-///   Return <c>true</c> to advance to the next game without yielding any
-///   more decisions from the current game. Use case: per-decision
-///   early-exit (e.g., move-number cutoff reached).
-///   <para>Timing: the predicate fires on the producer's next
-///   <c>MoveNext</c> call, so the consumer sees the just-yielded row
-///   before the skip takes effect. To suppress the row itself, return
+/// <param name="StopGameAfter">Evaluated after each decision yielded to the
+///   caller — after the <c>.xgp</c> selection (see above). Return
+///   <c>true</c> to advance to the next game without yielding any more
+///   decisions from the current game. Use case: per-decision early-exit
+///   (e.g., move-number cutoff reached).
+///   <para>Timing: the predicate fires on the caller's next
+///   <c>MoveNext</c> call, so the caller sees the just-yielded row before
+///   the skip takes effect. To suppress the row itself, return
 ///   <c>true</c> from <see cref="SkipGameAt"/> at the game boundary
 ///   instead.</para></param>
-/// <param name="StopMatchAfter">Evaluated after each yielded decision.
-///   Return <c>true</c> to advance to the next match without yielding any
-///   more decisions from the current match. Use case: per-decision
-///   early-exit at match scope (e.g., "one decision per match" filter
-///   mode).
+/// <param name="StopMatchAfter">Evaluated after each decision yielded to the
+///   caller — after the <c>.xgp</c> selection (see above). Return
+///   <c>true</c> to advance to the next match without yielding any more
+///   decisions from the current match. Use case: per-decision early-exit
+///   at match scope (e.g., "one decision per match" filter mode).
 ///   <para>Timing: same as <see cref="StopGameAfter"/> — the predicate
-///   fires on the producer's next <c>MoveNext</c>; the consumer sees the
+///   fires on the caller's next <c>MoveNext</c>; the caller sees the
 ///   just-yielded row before the skip takes effect. To suppress the
 ///   match's rows entirely, return <c>true</c> from
 ///   <see cref="SkipMatchAt"/> at the match boundary instead.</para></param>

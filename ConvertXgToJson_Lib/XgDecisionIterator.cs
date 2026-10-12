@@ -79,7 +79,7 @@ public static class XgDecisionIterator
     /// <param name="callbacks">
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/> for
     /// the boundaries at which each predicate fires; the post-yield ones see
-    /// the yielded row.
+    /// each row yielded to the caller — for an <c>.xgp</c>, the selected one.
     /// </param>
     /// <param name="options">
     /// Optional producer configuration. See <see cref="XgIteratorOptions"/> —
@@ -147,7 +147,8 @@ public static class XgDecisionIterator
     /// </param>
     /// <param name="callbacks">
     /// Optional skip predicates. See <see cref="XgIteratorCallbacks"/>; the
-    /// post-yield ones see each record through its view for the options'
+    /// post-yield ones see each record yielded to the caller — for an
+    /// <c>.xgp</c>, the selected one — through its view for the options'
     /// ranking (<see cref="BgDecisionData.ViewFor"/>).
     /// </param>
     /// <param name="options">
@@ -185,17 +186,41 @@ public static class XgDecisionIterator
     }
 
     /// <summary>
-    /// Single entry point behind both decision surfaces. Walks the record
-    /// stream once via <see cref="IterateAnalysedDecisions"/>, projecting each
-    /// record to the surface's element, then — for <c>.xgp</c> position files
-    /// only — narrows the result to a single decision through
-    /// <see cref="SelectXgpDecision"/>.
+    /// Single entry point behind both decision surfaces, in three stages:
+    /// the walk (<see cref="IterateAnalysedDecisions"/>) builds each record
+    /// and projects it to the surface's element; for <c>.xgp</c> position
+    /// files only, <see cref="SelectXgpDecision"/> narrows the result to a
+    /// single decision; and the post-yield stop callbacks
+    /// (<see cref="XgIteratorCallbacks.StopMatchAfter"/>,
+    /// <see cref="XgIteratorCallbacks.StopGameAfter"/>) judge each element
+    /// this method yields to the caller, on the caller's next
+    /// <c>MoveNext</c>.
     ///
     /// <para>
     /// Placing the <c>.xgp</c> emission policy here, rather than in either
     /// caller, is what guarantees <see cref="Iterate"/> and
     /// <see cref="IterateDiagramRequests"/> can never disagree about which
     /// decision an <c>.xgp</c> represents.
+    /// </para>
+    ///
+    /// <para>
+    /// The stop callbacks are the last stage, after the selection, so
+    /// "yielded" means yielded to the caller: they never see a candidate the
+    /// selection discards, and so can never change which decision it selects
+    /// (halheinrich/backgammon#392 — run inside the walk, a stop vote on an
+    /// <c>.xgp</c>'s cube ended the walk before the play was reached, and the
+    /// selection fell back to the cube). A caller that stops after its first
+    /// element triggers no callback. A stop of the match ends this sequence;
+    /// a stop of the game reaches back into the walk through
+    /// <see cref="GameStopRequest"/>, so the rest of the game is skipped
+    /// before any of it is built, as before.
+    /// </para>
+    ///
+    /// <para>
+    /// This method is itself an iterator so that each enumeration gets its
+    /// own request: a request raised and never taken (an <c>.xgp</c>'s
+    /// selection ends without resuming the walk) cannot leak into a later
+    /// enumeration of the same sequence.
     /// </para>
     /// </summary>
     private static IEnumerable<T> IterateCore<T>(
@@ -209,10 +234,57 @@ public static class XgDecisionIterator
         Func<T, IDecisionFilterData> view)
         where T : class
     {
-        var decisions = IterateAnalysedDecisions(
-            file, sourceFile, state, callbacks, options, logger, project, view);
+        var gameStop = new GameStopRequest();
 
-        return IsXgpSource(sourceFile) ? SelectXgpDecision(decisions, view) : decisions;
+        var decisions = IterateAnalysedDecisions(
+            file, sourceFile, state, callbacks, gameStop, options, logger, project);
+        if (IsXgpSource(sourceFile))
+            decisions = SelectXgpDecision(decisions, view);
+
+        foreach (var element in decisions)
+        {
+            yield return element;
+
+            if (callbacks is null)
+                continue;
+            var filterView = view(element);
+            if (callbacks.StopMatchAfter?.Invoke(filterView) == true)
+                yield break;
+            if (callbacks.StopGameAfter?.Invoke(filterView) == true)
+                gameStop.Raise();
+        }
+    }
+
+    /// <summary>
+    /// The one channel from the post-yield stop stage of
+    /// <see cref="IterateCore"/> back into the walk: a request, raised after
+    /// the caller has seen a decision, to skip the rest of the game that
+    /// decision came from. The walk takes it when it resumes after its own
+    /// yield, before it reads another record.
+    ///
+    /// <para>
+    /// "The game that decision came from" holds because nothing between the
+    /// walk and the stop stage resumes the walk past a game boundary while
+    /// holding a decision back: an <c>.xg</c> passes each decision straight
+    /// through, and an <c>.xgp</c>'s selection either ends without resuming
+    /// the walk (a play) or yields only once the walk is exhausted (a cube),
+    /// where a request is never taken.
+    /// </para>
+    /// </summary>
+    private sealed class GameStopRequest
+    {
+        private bool _raised;
+
+        /// <summary>Asks the walk to skip the rest of the current game.</summary>
+        public void Raise() => _raised = true;
+
+        /// <summary>Whether a request is raised, clearing it, so each request skips one game.</summary>
+        public bool Take()
+        {
+            bool raised = _raised;
+            _raised = false;
+            return raised;
+        }
     }
 
     /// <summary>
@@ -248,6 +320,13 @@ public static class XgDecisionIterator
     /// while scanning for a play, and the first play short-circuits the walk.
     /// <c>.xg</c> iteration bypasses this filter entirely and stays streaming.
     /// </para>
+    ///
+    /// <para>
+    /// The selection sees every decision the walk builds before any stop
+    /// callback runs: the callbacks judge only what this filter yields
+    /// (<see cref="IterateCore"/>), so they cannot change what it selects
+    /// (halheinrich/backgammon#392).
+    /// </para>
     /// </summary>
     private static IEnumerable<T> SelectXgpDecision<T>(IEnumerable<T> decisions, Func<T, IDecisionFilterData> view)
         where T : class
@@ -270,10 +349,18 @@ public static class XgDecisionIterator
 
     /// <summary>
     /// Shared iteration skeleton for both decision surfaces. Walks the record
-    /// stream once — match-info extraction, state population, the skip / stop
-    /// callbacks, game-header handling — and builds each decision's record,
-    /// which <paramref name="project"/> turns into the surface's element and
-    /// <paramref name="view"/> shows to the post-yield callbacks.
+    /// stream once — match-info extraction, state population, the header skip
+    /// predicates (<see cref="XgIteratorCallbacks.SkipMatchAt"/>,
+    /// <see cref="XgIteratorCallbacks.SkipGameAt"/>), game-header handling —
+    /// and builds each decision's record, which <paramref name="project"/>
+    /// turns into the surface's element.
+    ///
+    /// <para>
+    /// The post-yield stop callbacks are not run here: <see cref="IterateCore"/>
+    /// runs them on what it yields to the caller, after the <c>.xgp</c>
+    /// selection. The walk only honours their game stop, taking
+    /// <paramref name="gameStop"/> each time it resumes after a yield.
+    /// </para>
     ///
     /// <para>
     /// <b>What is not a record.</b> The emission rules sit here, at the one
@@ -290,10 +377,10 @@ public static class XgDecisionIterator
         string sourceFile,
         XgIteratorState? state,
         XgIteratorCallbacks? callbacks,
+        GameStopRequest gameStop,
         XgIteratorOptions options,
         ILogger? logger,
-        Func<BgDecisionData, T> project,
-        Func<T, IDecisionFilterData> view)
+        Func<BgDecisionData, T> project)
         where T : class
     {
         logger ??= NullLogger.Instance;
@@ -347,15 +434,9 @@ public static class XgDecisionIterator
             if (decision is null)
                 continue;
 
-            var element = project(decision);
-            yield return element;
+            yield return project(decision);
 
-            if (callbacks is null)
-                continue;
-            var filterView = view(element);
-            if (callbacks.StopMatchAfter?.Invoke(filterView) == true)
-                yield break;
-            if (callbacks.StopGameAfter?.Invoke(filterView) == true)
+            if (gameStop.Take())
                 skipCurrentGame = true;
         }
     }
