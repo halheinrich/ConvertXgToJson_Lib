@@ -117,8 +117,6 @@ public class XgDecisionIteratorRowJacobyStampTests
         rows.Should().OnlyContain(r => r.MatchScore == expected,
             "a money row whose Jacoby fact is stamped renders the rule as a suffix on "
             + "the money token, never the honest-unknown bare 'money'");
-        rows.Should().OnlyContain(r => r.ToCsvLine().Contains(expected, StringComparison.Ordinal),
-            "MatchScore is a CSV column, so the export carries the fact too");
     }
 
     /// <summary>

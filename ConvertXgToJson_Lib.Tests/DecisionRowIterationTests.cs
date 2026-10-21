@@ -3,36 +3,28 @@ using BgDataTypes_Lib;
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
-/// Integration tests that iterate decisions from .xg files (direct) and
-/// from pre-exported JSON files, writing CSV output to TestData/Csv.
+/// Integration tests over the rows iterated from .xg files (direct) and
+/// from pre-exported JSON files.
 /// </summary>
 [Collection("FileIO")]
-public class DecisionCsvTests
+public class DecisionRowIterationTests
 {
     // -----------------------------------------------------------------------
     //  Direct .xg iteration
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void XgDirect_WriteDecisionCsv()
+    public void XgDirect_Rows_AreNonEmpty_WithValidXgidsAndNoNegativeError()
     {
         var xgFiles = Directory.GetFiles(TestPaths.XgDir, "*.xg");
         xgFiles.Should().NotBeEmpty("TestData/xg should contain at least one .xg file");
 
-        Directory.CreateDirectory(TestPaths.CsvDir);
-
         foreach (var xgPath in xgFiles)
         {
             string matchId = Path.GetFileNameWithoutExtension(xgPath);
-            string csvPath = Path.Combine(TestPaths.CsvDir, matchId + ".csv");
 
             var file = XgFileReader.ReadFile(xgPath);
             var rows = XgDecisionIterator.Iterate(file, Path.GetFileName(xgPath)).ToList();
-
-            using var writer = new StreamWriter(csvPath);
-            writer.WriteLine(DecisionRow.CsvHeader);
-            foreach (var row in rows)
-                writer.WriteLine(row.ToCsvLine());
 
             rows.Should().NotBeEmpty($"{matchId} should contain at least one analysed decision");
             rows.Should().OnlyContain(r => r.Xgid.StartsWith("XGID="),
@@ -95,7 +87,7 @@ public class DecisionCsvTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void JsonDerived_WriteDecisionCsv()
+    public void JsonDerived_Rows_AreNonEmpty()
     {
         EnsureJsonFilesExist();
 
@@ -106,20 +98,12 @@ public class DecisionCsvTests
 
         jsonFiles.Should().NotBeEmpty("Output dir should have JSON from .xg files");
 
-        Directory.CreateDirectory(TestPaths.CsvDir);
-
         foreach (var jsonPath in jsonFiles)
         {
             string matchId = Path.GetFileNameWithoutExtension(jsonPath);
-            string csvPath = Path.Combine(TestPaths.CsvDir, matchId + "-fromjson.csv");
 
             var file = XgFileReader.ReadJson(jsonPath);
             var rows = XgDecisionIterator.Iterate(file, Path.GetFileName(jsonPath)).ToList();
-
-            using var writer = new StreamWriter(csvPath);
-            writer.WriteLine(DecisionRow.CsvHeader);
-            foreach (var row in rows)
-                writer.WriteLine(row.ToCsvLine());
 
             rows.Should().NotBeEmpty($"{matchId} JSON should contain at least one decision");
         }

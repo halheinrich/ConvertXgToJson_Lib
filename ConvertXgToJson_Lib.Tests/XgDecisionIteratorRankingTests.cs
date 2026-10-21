@@ -49,7 +49,7 @@ public class XgDecisionIteratorRankingTests
     /// <summary>
     /// Each row is exactly its record's projection for the options' ranking —
     /// the same row <see cref="DecisionRow.From"/> builds from the record the
-    /// other surface yields, compared whole through the row's CSV and JSON.
+    /// other surface yields, compared whole through the row's JSON.
     /// </summary>
     [Theory]
     [InlineData(PlayRanking.Equity)]
@@ -64,7 +64,6 @@ public class XgDecisionIteratorRankingTests
             .Select(r => DecisionRow.From(r, ranking)).ToList();
 
         rows.Should().HaveCount(2).And.HaveSameCount(fromRecords);
-        rows.Select(r => r.ToCsvLine()).Should().Equal(fromRecords.Select(r => r.ToCsvLine()));
         rows.Select(r => JsonSerializer.Serialize(r)).Should().Equal(fromRecords.Select(r => JsonSerializer.Serialize(r)));
         rows.Should().OnlyContain(r => r.Ranking == ranking);
     }
