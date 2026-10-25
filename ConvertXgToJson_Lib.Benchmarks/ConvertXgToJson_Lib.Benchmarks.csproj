@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The hand-run timing comparisons (halheinrich/backgammon#438): a console
+       tool, not a test project, so `dotnet test` builds it but neither
+       discovers nor runs it. Timing on a shared machine is not a gate. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <LangVersion>14.0</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ConvertXgToJson_Lib.Benchmarks</RootNamespace>
+    <AssemblyName>ConvertXgToJson_Lib.Benchmarks</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ConvertXgToJson_Lib\ConvertXgToJson_Lib.csproj" />
+  </ItemGroup>
+</Project>

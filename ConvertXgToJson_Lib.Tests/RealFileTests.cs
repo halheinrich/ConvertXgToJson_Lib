@@ -6,8 +6,8 @@ namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
 /// Integration tests that read real .xgp and .xg files from the TestData
-/// directories and write JSON output next to the source files.
-/// These tests validate that the full pipeline works end-to-end on real data.
+/// directories. These tests validate that the full pipeline works end-to-end
+/// on real data; they write nothing.
 /// </summary>
 [Collection("FileIO")]
 public class RealFileTests
@@ -34,7 +34,7 @@ public class RealFileTests
     }
 
     [Fact]
-    public void XgpFiles_WriteJson()
+    public void XgpFiles_ToJson_IsAnObjectWithAHeader()
     {
         var files = Directory.Exists(TestPaths.XgpDir)
             ? Directory.GetFiles(TestPaths.XgpDir, "*.xgp")
@@ -43,15 +43,10 @@ public class RealFileTests
         if (files.Length == 0)
             return;
 
-        Directory.CreateDirectory(TestPaths.JsonDir);
-
         foreach (var path in files)
         {
             var xgFile = XgFileReader.ReadFile(path);
             string json = XgFileReader.ToJson(xgFile);
-
-            string outPath = Path.Combine(TestPaths.JsonDir, Path.GetFileNameWithoutExtension(path) + ".json");
-            File.WriteAllText(outPath, json);
 
             // Basic sanity checks on the JSON
             json.Should().StartWith("{", $"{Path.GetFileName(path)} JSON should be an object");
@@ -175,7 +170,7 @@ public class RealFileTests
     }
 
     [Fact]
-    public void XgFiles_WriteJson()
+    public void XgFiles_ToJson_IsAnObjectWithAHeader()
     {
         var files = Directory.Exists(TestPaths.XgDir)
             ? Directory.GetFiles(TestPaths.XgDir, "*.xg")
@@ -184,15 +179,10 @@ public class RealFileTests
         if (files.Length == 0)
             return;
 
-        Directory.CreateDirectory(TestPaths.JsonDir);
-
         foreach (var path in files)
         {
             var xgFile = XgFileReader.ReadFile(path);
             string json = XgFileReader.ToJson(xgFile);
-
-            string outPath = Path.Combine(TestPaths.JsonDir, Path.GetFileNameWithoutExtension(path) + ".json"); 
-            File.WriteAllText(outPath, json);
 
             json.Should().StartWith("{", $"{Path.GetFileName(path)} JSON should be an object");
             json.Should().Contain("\"header\"", $"{Path.GetFileName(path)} JSON should have a header property");

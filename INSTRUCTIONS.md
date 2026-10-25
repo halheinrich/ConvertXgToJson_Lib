@@ -35,7 +35,7 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 
 ## Layout
 
-Two projects under `ConvertXgToJson_Lib.slnx`, governed by repo-root
+Three projects under `ConvertXgToJson_Lib.slnx`, governed by repo-root
 `Directory.Build.props` (TFM, `TreatWarningsAsErrors`, XML doc generation)
 and `Directory.Packages.props` (Central Package Management — no inline
 `Version=` anywhere).
@@ -103,6 +103,14 @@ read the umbrella's `TestData/` through `TestPaths` — see "TestData" below.
 over the local corpus, and `TooGoodPassFixtureTests` holds permanent
 fixtures reaching the fourth cube answer, read as Too good (see "Measured
 against XG" under XgDecisionIterator).
+
+**`ConvertXgToJson_Lib.Benchmarks/`** — a console tool, run by hand and
+never by `dotnet test` (halheinrich/backgammon#438): the fast paths
+(`ReadMatchInfo`, `ReadGameHeaders`) timed against the full parse over
+`TestData/xg`, each printed with its speed-up and whether the expected 3×
+held. Run it in Release, as the startup project in Visual Studio or
+`dotnet run -c Release --project ConvertXgToJson_Lib.Benchmarks [<xg dir>]`;
+it exits 1 when an expectation did not hold, 2 on fewer than two files.
 
 ## Architecture
 

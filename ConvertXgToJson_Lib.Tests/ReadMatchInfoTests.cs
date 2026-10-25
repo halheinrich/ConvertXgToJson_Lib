@@ -27,4 +27,30 @@ public class ReadMatchInfoTests
             fast.Terms.Should().Be(full.Terms, $"terms mismatch in {name}");
         }
     }
+
+    [Fact]
+    public void ReadMatchInfo_ReturnsCorrectData()
+    {
+        var files = TestPaths.XgFiles.ToList();
+        if (files.Count < 2)
+            return;
+
+        foreach (var path in files)
+        {
+            var fast = XgFileReader.ReadMatchInfo(path);
+            var full = XgDecisionIterator.ExtractMatchInfo(XgFileReader.ReadFile(path));
+
+            fast.Should().NotBeNull(
+                $"file should have a readable match header: {Path.GetFileName(path)}");
+            full.Should().NotBeNull(
+                $"full parse should produce a match header: {Path.GetFileName(path)}");
+
+            fast!.Player1.Should().Be(full!.Player1,
+                $"Player1 mismatch in {Path.GetFileName(path)}");
+            fast!.Player2.Should().Be(full!.Player2,
+                $"Player2 mismatch in {Path.GetFileName(path)}");
+            fast!.Terms.Should().Be(full!.Terms,
+                $"terms mismatch in {Path.GetFileName(path)}");
+        }
+    }
 }
