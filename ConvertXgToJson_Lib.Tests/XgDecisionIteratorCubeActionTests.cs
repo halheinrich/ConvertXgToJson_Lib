@@ -1,13 +1,16 @@
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
+using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Tests.Helpers;
 
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
-/// Pins the played cube action <see cref="XgDecisionIterator.IterateDiagramRequests"/>
-/// stamps onto <see cref="CubeDecisionData.UserDoublerAction"/> /
-/// <see cref="CubeDecisionData.UserTakerAction"/> from the raw
-/// <c>CubeRecord.Doubled</c> / <c>Taken</c> pane state.
+/// Pins the recorded cube actions <see cref="XgDecisionIterator.IterateDiagramRequests"/>
+/// builds into <see cref="CubeDecisionData.Recorded"/> from the raw
+/// <c>CubeRecord.Doubled</c> / <c>Taken</c> pane state and XG's errors, read
+/// back through <see cref="CubeDecisionData.UserDoublerAction"/> /
+/// <see cref="CubeDecisionData.UserTakerAction"/>.
 ///
 /// <para>
 /// The named-fixture tests key off <c>match_41648777.xg</c> for three of the
@@ -19,6 +22,13 @@ namespace ConvertXgToJson_Lib.Tests;
 /// where a cube pane is not a decision and is no longer emitted
 /// (halheinrich/backgammon#201). Corpus-wide assertions stay shape-level
 /// per the standing convention.
+/// </para>
+///
+/// <para>
+/// The synthetic-record tests write a cube record byte by byte, for the
+/// shapes no named fixture pins and <see cref="XgGameBuilder"/> does not
+/// write: a double answered by resigning, and each half's analyser's error
+/// for an unstated action.
 /// </para>
 /// </summary>
 [Collection("FileIO")]
@@ -71,6 +81,7 @@ public class XgDecisionIteratorCubeActionTests
 
         decision.UserDoublerAction.Should().Be(CubeAction.Double);
         decision.UserTakerAction.Should().Be(CubeAction.Take);
+        decision.Recorded.Should().Be(RecordedCubeActions.DoubleAnswered(CubeAction.Take));
     }
 
     /// <summary>
@@ -85,6 +96,7 @@ public class XgDecisionIteratorCubeActionTests
 
         decision.UserDoublerAction.Should().Be(CubeAction.Double);
         decision.UserTakerAction.Should().Be(CubeAction.Pass);
+        decision.Recorded.Should().Be(RecordedCubeActions.DoubleAnswered(CubeAction.Pass));
     }
 
     /// <summary>
@@ -101,6 +113,7 @@ public class XgDecisionIteratorCubeActionTests
         decision.UserDoublerAction.Should().Be(CubeAction.NoDouble);
         decision.UserTakerAction.Should().BeNull(
             "no double was offered, so no taker decision exists");
+        decision.Recorded.Should().Be(RecordedCubeActions.NoDouble);
     }
 
     /// <summary>
@@ -121,6 +134,8 @@ public class XgDecisionIteratorCubeActionTests
         decision.UserDoublerAction.Should().BeNull(
             "no cube action was played — the game ended by resignation");
         decision.UserTakerAction.Should().BeNull();
+        decision.Recorded.Should().Be(RecordedCubeActions.None,
+            "no action is stated, and both errors are XG's not-analysed sentinel");
     }
 
     /// <summary>
@@ -142,15 +157,105 @@ public class XgDecisionIteratorCubeActionTests
     }
 
     // -----------------------------------------------------------------------
+    //  Synthetic records — the shapes no named fixture pins
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Writes one game — a game header, a 3-ply-analysed cube record for
+    /// player 1 on the standard position, and a game footer with
+    /// <paramref name="termination"/> — and returns the cube record as read
+    /// back, the game footer after it, and the cube decision the iterator
+    /// emits.
+    /// </summary>
+    private static (CubeRecord Raw, GameFooterRecord Footer, CubeDecision Emitted) SyntheticCube(
+        int doubled, int taken, double errorCube, double errorTake, int termination = 1)
+    {
+        var file = XgFileReader.ReadStream(XgBytesBuilder.BuildXgFileWithRecords(
+            XgBytesBuilder.BuildGameHeaderRecord(),
+            XgBytesBuilder.BuildCubeRecord(
+                doubled, taken, errorCube, errorTake, XgGameBuilder.PointsOf(BoardPosition.Standard)),
+            XgBytesBuilder.BuildGameFooterRecord(termination)));
+
+        var raw = file.Records.OfType<CubeRecord>().Should().ContainSingle().Subject;
+        var footer = file.Records[file.Records.IndexOf(raw) + 1].Should().BeOfType<GameFooterRecord>(
+            "the cube record is the last record of its game").Subject;
+        var emitted = XgDecisionIterator.IterateDiagramRequests(file, "synthetic.xg")
+            .OfType<CubeDecision>().Should().ContainSingle().Subject;
+        return (raw, footer, emitted);
+    }
+
+    /// <summary>
+    /// A double the opponent answered by resigning: <c>Doubled = 1</c>,
+    /// <c>Taken = -1</c>, <c>ErrorTake</c> at the not-analysed sentinel, the
+    /// last record of a game ended by resignation. It is
+    /// <see cref="RecordedCubeActions.DoubleUnanswered"/> — a decision the
+    /// taker was offered, its result not recorded, never a pass
+    /// (SPEC-filtering §8) — and the player result is the doubler's.
+    /// </summary>
+    [Fact]
+    public void DoubleAnsweredByResigning_IsDoubleUnanswered()
+    {
+        var (raw, footer, emitted) = SyntheticCube(
+            doubled: 1, taken: -1, errorCube: 0.0, errorTake: -1000.0, termination: 101);
+
+        raw.Doubled.Should().Be(1);
+        raw.Taken.Should().Be(-1);
+        raw.ErrorTake.Should().Be(-1000.0);
+        footer.Termination.Should().BeGreaterThanOrEqualTo(100, "XG encodes a resignation as 100 or more");
+
+        var decision = emitted.Decision;
+        decision.Recorded.Should().Be(RecordedCubeActions.DoubleUnanswered);
+
+        var view = emitted.ViewFor(PlayRanking.Equity);
+        view.TakerResult.Should().Be(PlayerResult.NotRecorded,
+            "the taker was offered the double, and neither a response nor an error was recorded");
+        view.PlayerResult.Should().Be(PlayerResult.Scored(decision.DoublerActionError(CubeAction.Double)),
+            "the player result is the doubler's half");
+    }
+
+    /// <summary>
+    /// No doubler action stated (<c>Doubled = -1</c>) and an analysed
+    /// doubling error: <see cref="RecordedCubeActions.UnstatedDoubler"/>
+    /// carrying XG's error, with no taker half.
+    /// </summary>
+    [Fact]
+    public void UnstatedDoublerWithAnalysedError_IsUnstatedDoubler()
+    {
+        var (raw, _, emitted) = SyntheticCube(doubled: -1, taken: -1, errorCube: 0.031, errorTake: -1000.0);
+
+        raw.Doubled.Should().Be(-1);
+        raw.ErrorCube.Should().Be(0.031);
+
+        emitted.Decision.Recorded.Should().Be(RecordedCubeActions.UnstatedDoubler(0.031));
+    }
+
+    /// <summary>
+    /// A stated double with no response and an analysed take error, which XG
+    /// writes non-positive: <see cref="RecordedCubeActions.DoubleWithUnstatedResponse"/>
+    /// carrying its magnitude.
+    /// </summary>
+    [Fact]
+    public void DoubleWithAnalysedTakeError_IsDoubleWithUnstatedResponse()
+    {
+        var (raw, _, emitted) = SyntheticCube(doubled: 1, taken: -1, errorCube: 0.0, errorTake: -0.047);
+
+        raw.Doubled.Should().Be(1);
+        raw.Taken.Should().Be(-1);
+        raw.ErrorTake.Should().Be(-0.047);
+
+        emitted.Decision.Recorded.Should().Be(RecordedCubeActions.DoubleWithUnstatedResponse(0.047));
+    }
+
+    // -----------------------------------------------------------------------
     //  Corpus-wide shape assertions
     // -----------------------------------------------------------------------
 
     /// <summary>
     /// Across the whole .xg corpus: each half stays inside its own action
-    /// domain, and the cross-half producer contract holds — a recorded taker
-    /// response implies the doubler doubled. <see cref="CubeDecisionData"/>
-    /// guards the halves individually but leaves the cross-half rule to the
-    /// producer, so this is the only place it is checked.
+    /// domain, and the cross-half rule holds — a recorded taker response
+    /// implies the doubler doubled. <see cref="RecordedCubeActions"/> holds
+    /// that rule and refuses a record that breaks it; this checks the
+    /// producer's output against it over every corpus record.
     /// </summary>
     [Fact]
     public void CubeActions_StayInTheirHalvesAndHonourTheCrossHalfContract()

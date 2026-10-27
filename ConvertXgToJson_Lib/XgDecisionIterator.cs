@@ -697,17 +697,25 @@ public static class XgDecisionIterator
                 BgPctAfterDoubleTake = analysis.EvalDoubleTake.WinBackgammon,
                 LoseGammonPctAfterDoubleTake = analysis.EvalDoubleTake.LoseGammon,
                 LoseBgPctAfterDoubleTake = analysis.EvalDoubleTake.LoseBackgammon,
-                UserDoublerAction = doublerAction,
-                UserTakerAction = takerAction,
-                // XG's error for a half is stored only where the record states
-                // no action of that half to derive it from; the taker's exists
-                // only once a double was offered.
-                UnstatedDoublerActionError = doublerAction is null && cube.ErrorCube > -999.0
-                    ? Math.Abs(cube.ErrorCube)
-                    : null,
-                UnstatedTakerActionError = doublerAction is CubeAction.Double && takerAction is null && cube.ErrorTake > -999.0
-                    ? Math.Abs(cube.ErrorTake)
-                    : null,
+                // The constructor, not a factory: the producer maps four
+                // fields, and the constructor holds the value's rules. Its
+                // ArgumentException would name a producer defect; the gates
+                // here keep every record inside those rules, so it is
+                // unreachable.
+                Recorded = new RecordedCubeActions(
+                    doublerAction,
+                    takerAction,
+                    // XG's error for a half is carried only where the record
+                    // states no action of that half to derive it from. The
+                    // take error, like the response, belongs to a double that
+                    // was offered, so it is read only under a stated Double;
+                    // the value refuses a taker half without one.
+                    unstatedDoublerError: doublerAction is null && cube.ErrorCube > -999.0
+                        ? Math.Abs(cube.ErrorCube)
+                        : null,
+                    unstatedTakerError: doublerAction is CubeAction.Double && takerAction is null && cube.ErrorTake > -999.0
+                        ? Math.Abs(cube.ErrorTake)
+                        : null),
             },
         };
     }
@@ -786,20 +794,22 @@ public static class XgDecisionIterator
     /// <see langword="null"/> when no response is recorded.
     ///
     /// <para>
-    /// Gated on the doubler half rather than on <c>Taken</c> alone. XG
-    /// leaves <c>Taken</c> at its <c>-1</c> "no response" value on every
-    /// undoubled record, so reading it in isolation would happen to satisfy
-    /// the carrier's cross-half producer contract — a recorded taker
-    /// response implies the doubler doubled — by accident of the source
-    /// data rather than by anything this producer guarantees.
+    /// Gated on the doubler half rather than on <c>Taken</c> alone: a
+    /// response belongs to a double that was offered, so this producer reads
+    /// XG's <c>Taken</c> only under a stated double. XG leaves <c>Taken</c>
+    /// at its <c>-1</c> "no response" value on every undoubled record, so
+    /// reading it in isolation would give the same output today, but by
+    /// accident of the source data. <see cref="RecordedCubeActions"/> holds
+    /// the rule — a taker half exists only under a stated double — and
+    /// refuses a record that breaks it (SPEC-scoring §3).
     /// </para>
     ///
     /// <para>
-    /// A recorded double with no response (<c>-1</c>) is a real shape and
-    /// stays null: the corpus holds a handful, each the last record of a
-    /// game that ended by resignation before the opponent formally
-    /// answered. That is exactly the case the per-half carrier exists to
-    /// express — doubler recorded, taker not.
+    /// A recorded double with no response (<c>-1</c>) and no analyser's take
+    /// error stays null: the corpus holds a handful, each the last record of
+    /// a game the opponent ended by resigning rather than answering. The
+    /// value is <see cref="RecordedCubeActions.DoubleUnanswered"/>, a
+    /// decision the taker was offered (SPEC-filtering §8) — not a pass.
     /// </para>
     ///
     /// <para>

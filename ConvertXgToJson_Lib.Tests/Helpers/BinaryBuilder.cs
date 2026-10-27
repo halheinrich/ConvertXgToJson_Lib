@@ -187,6 +187,26 @@ internal static class XgBytesBuilder
         var matchDate = date ?? new DateTime(2024, 1, 15, 14, 30, 0, DateTimeKind.Utc);
 
         byte[] xgBytes = BuildXgStream(player1, player2, matchLength, matchDate, location, maxCubeExponent);
+        return BuildFile(xgBytes);
+    }
+
+    /// <summary>
+    /// Builds a .XG file stream of a 7-point match between Alice and Bob
+    /// whose game records are <paramref name="gameRecords"/>, in order,
+    /// between the match header and the match footer — for tests that need
+    /// a record shape the production builders do not write.
+    /// </summary>
+    public static MemoryStream BuildXgFileWithRecords(params byte[][] gameRecords)
+    {
+        const int matchLength = 7;
+        byte[] header = BuildMatchHeaderRecord(
+            "Alice", "Bob", matchLength, new DateTime(2024, 1, 15, 14, 30, 0, DateTimeKind.Utc));
+        byte[] xgBytes = [.. header, .. gameRecords.SelectMany(r => r), .. BuildMatchFooterRecord(matchLength)];
+        return BuildFile(xgBytes);
+    }
+
+    private static MemoryStream BuildFile(byte[] xgBytes)
+    {
         byte[] xgiBytes = BuildXgiStream(xgBytes);
         byte[] xgcBytes = Encoding.Latin1.GetBytes("Match comment\r\n");
 
@@ -365,7 +385,8 @@ internal static class XgBytesBuilder
         return b.ToArray();
     }
 
-    internal static byte[] BuildGameFooterRecord()
+    /// <param name="termination">XG's termination code: 0–2 a single, gammon or backgammon played out; ≥ 100 the same by resignation.</param>
+    internal static byte[] BuildGameFooterRecord(int termination = 1)
     {
         var b = new BinaryBuilder()
             .UInt32(0).UInt32(0)
@@ -375,7 +396,7 @@ internal static class XgBytesBuilder
          .Bool(false)           // CrawfordApplyg
          .Int32(1)              // Winner (+1 = player1)
          .Int32(3)              // Pointswon
-         .Int32(1)              // Termination (single)
+         .Int32(termination)    // Termination
          .Double(-1000.0)       // ErrResign
          .Double(-1000.0);      // ErrTakeResign
         for (int i = 0; i < 7; i++) b.Double(0.0);  // Eval[0..6]
@@ -384,21 +405,35 @@ internal static class XgBytesBuilder
         return b.ToArray();
     }
 
-    internal static byte[] BuildCubeRecord()
+    /// <summary>
+    /// A 3-ply-analysed cube record for player 1. The defaults are a double
+    /// that was taken, with both errors at XG's −1000 not-analysed sentinel,
+    /// on an empty board.
+    /// </summary>
+    /// <param name="doubled">XG's <c>Doubled</c> pane state: 1 doubled, 0 not, −1 no cube action.</param>
+    /// <param name="taken">XG's <c>Taken</c> pane state: 1 taken, 0 passed, −1 no response.</param>
+    /// <param name="errorCube">XG's doubler error (non-negative), or the sentinel.</param>
+    /// <param name="errorTake">XG's take error (non-positive), or the sentinel.</param>
+    /// <param name="position">The 26-cell position in player 1's frame; empty by default.</param>
+    internal static byte[] BuildCubeRecord(
+        int doubled = 1, int taken = 1, double errorCube = -1000.0, double errorTake = -1000.0,
+        sbyte[]? position = null)
     {
+        position ??= new sbyte[26];
         var b = new BinaryBuilder()
             .UInt32(0).UInt32(0)
             .Byte(2);           // tsCube
         b.Int32(1)              // Actif (player1)
-         .Int32(1)              // double = yes
-         .Int32(1)              // Take = yes
+         .Int32(doubled)        // Double
+         .Int32(taken)          // Take
          .Int32(0)              // BeaverR
          .Int32(0)              // RaccoonR
          .Int32(1)              // CubeB
-         .ZeroPosition();       // Position
+         .WritePosition(position); // Position
 
-        // DoubleD: EngineStructDoubleAction
-        b.ZeroPosition()        // Pos
+        // DoubleD: EngineStructDoubleAction, 4-byte aligned in the record
+        b.AlignTo(4)
+         .WritePosition(position) // Pos
          .Int32(3)              // Level
          .Int32(3).Int32(2)     // Score
          .Int32(2)              // Cube
@@ -416,9 +451,9 @@ internal static class XgBytesBuilder
          .Int16(1);             // DoubleChoice3
         for (int i = 0; i < 7; i++) b.Float(0f);  // EvalDouble
 
-        b.Double(-1000.0)       // ErrCube
+        b.Double(errorCube)     // ErrCube
          .PascalAnsiString("31", 2)
-         .Double(-1000.0)       // ErrTake
+         .Double(errorTake)     // ErrTake
          .Int32(-1)             // RolloutindexD
          .Int32(0)              // CompChoiceD
          .Int32(3)              // AnalyzeC
