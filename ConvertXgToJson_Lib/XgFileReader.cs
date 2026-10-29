@@ -135,8 +135,11 @@ public static class XgFileReader
     /// </summary>
     /// <remarks>
     /// The payload after the outer header is a container read through its
-    /// directory when that directory validates, every inner file it names
-    /// extracted and checked against its manifest entry; otherwise it is the
+    /// directory when that directory validates, each of the four inner files
+    /// this library reads (temp.xg, temp.xgi, temp.xgr, temp.xgc) that it
+    /// names extracted and checked against its manifest entry; an entry
+    /// naming none of them passes the directory's checks and is set aside,
+    /// never extracted (halheinrich/backgammon#419). Otherwise it is the
     /// legacy format when one zlib stream fills it exactly. A payload that
     /// is neither is refused, never guessed at: a multi-stream payload whose
     /// directory is absent or fails a check is not read.
