@@ -22,6 +22,9 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <item>one refusal control per directory check, each refused with the
 /// same <see cref="InvalidDataException"/> by all three read surfaces, the
 /// game-header enumeration's deferred;</item>
+/// <item>that an entry naming none of the four inner files passes the same
+/// per-entry checks and is then set aside, so every surface reads what the
+/// container without it reads (halheinrich/backgammon#419);</item>
 /// <item>the one extraction rule — stored entries read raw, compressed ones
 /// within their extent — and that a metadata read extracts temp.xg alone,
 /// so it neither extracts nor certifies the other inner files.</item>
@@ -363,12 +366,6 @@ public class XgContainerDirectoryTests
             "the manifest inflates to more bytes than the end-record's 1 entries need 532");
 
     [Fact]
-    public void Entry_NamingNoXgInnerFile_IsRefused() =>
-        AssertEverySurfaceRefuses(
-            RawXgContainer.Payload([Xg, Xgi, new Entry("temp.xgz", CommentTable)]),
-            "manifest entry 'temp.xgz' does not name an XG inner file");
-
-    [Fact]
     public void Entry_NamingAnInnerFileTwice_IsRefused_CaseInsensitively() =>
         AssertEverySurfaceRefuses(
             RawXgContainer.Payload([Xg, Xgi, new Entry("TEMP.XG", GameRecords)]),
@@ -468,6 +465,141 @@ public class XgContainerDirectoryTests
             RawXgContainer.Payload([Xg with { Path = "C:/XG/temp", Padding = 0xBEEF }, Xgi, Xgc]));
         file.Comments.Should().Equal("first", "second");
     }
+
+    // -----------------------------------------------------------------------
+    //  An entry naming none of the four — validated, then set aside
+    //  (halheinrich/backgammon#419)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Non-zero bytes for an entry the reader does not know: real files'
+    /// temp.xgr2 has held only zeros so far, which would not show that the
+    /// content is never taken for anything.
+    /// </summary>
+    private static readonly byte[] UnknownContent = [.. Enumerable.Range(1, 3 * 1024).Select(i => (byte)(i * 7 + 1))];
+
+    /// <summary>temp.xgr2, the name real files of save-file version 32 carry.</summary>
+    private static Entry Xgr2 => new("temp.xgr2", UnknownContent);
+
+    /// <summary>
+    /// <paramref name="payload"/> reads on every surface exactly as
+    /// <paramref name="without"/>, the same container without the unknown
+    /// entry, reads: the four extracted inner files, the full model, the
+    /// match info and the game headers.
+    /// </summary>
+    private static void AssertEverySurfaceReadsAsWithout(byte[] payload, byte[] without)
+    {
+        AssertEverySurfaceReadsTheMatch(payload);
+
+        using (var read = XgDecompressor.Decompress(new MemoryStream(payload)))
+        using (var control = XgDecompressor.Decompress(new MemoryStream(without)))
+        {
+            read.GameRecords.ToArray().Should().Equal(control.GameRecords.ToArray());
+            read.IndexRecords.ToArray().Should().Equal(control.IndexRecords.ToArray());
+            read.RolloutContexts.ToArray().Should().Equal(control.RolloutContexts.ToArray());
+            read.Comments.ToArray().Should().Equal(control.Comments.ToArray());
+        }
+        // One outer header for both, since RawXgContainer.File draws a fresh
+        // game id each time.
+        byte[] header = XgBytesBuilder.BuildRichGameHeader();
+        XgFileReader.ToJson(XgFileReader.ReadStream(new MemoryStream([.. header, .. payload]))).Should().Be(
+            XgFileReader.ToJson(XgFileReader.ReadStream(new MemoryStream([.. header, .. without]))));
+
+        using var temp = new TempXgFile(RawXgContainer.File(payload));
+        using var controlTemp = new TempXgFile(RawXgContainer.File(without));
+        var info = XgFileReader.ReadMatchInfo(temp.Path)!;
+        var controlInfo = XgFileReader.ReadMatchInfo(controlTemp.Path)!;
+        (info.Player1, info.Player2, info.Terms).Should().Be((controlInfo.Player1, controlInfo.Player2, controlInfo.Terms));
+        XgFileReader.ReadGameHeaders(temp.Path, new XgIteratorState())
+            .Select(g => (g.IsStandardStart, g.Standing))
+            .Should().Equal(XgFileReader.ReadGameHeaders(controlTemp.Path, new XgIteratorState())
+                .Select(g => (g.IsStandardStart, g.Standing)));
+    }
+
+    [Fact]
+    public void Entry_NamingNoXgInnerFile_IsSetAside_AndEverySurfaceReadsTheRest() =>
+        AssertEverySurfaceReadsAsWithout(
+            RawXgContainer.Payload([Xg, Xgi, Xgr2, Xgc]),
+            RawXgContainer.Payload([Xg, Xgi, Xgc]));
+
+    /// <summary>
+    /// The unknown entry first in the body and stored, as the directory
+    /// allows: the reader relies on no body order, and a stored unknown
+    /// entry is set aside as a compressed one is.
+    /// </summary>
+    [Fact]
+    public void StoredEntry_NamingNoXgInnerFile_AheadOfTempXg_IsSetAside() =>
+        AssertEverySurfaceReadsAsWithout(
+            RawXgContainer.Payload([Xgr2 with { Stored = true }, Xg, Xgi, Xgc]),
+            RawXgContainer.Payload([Xg, Xgi, Xgc]));
+
+    /// <summary>
+    /// The unknown entry's own bytes are no zlib stream and its CRC is
+    /// wrong, so extracting it would fail; the body CRC holds, and every
+    /// surface reads — so it is never extracted.
+    /// </summary>
+    [Fact]
+    public void Entry_NamingNoXgInnerFile_IsNeverExtracted() =>
+        AssertEverySurfaceReadsAsWithout(
+            RawXgContainer.Payload(
+            [
+                Xg, Xgi,
+                Xgr2 with { Body = UnknownContent, Crc32 = System.IO.Hashing.Crc32.HashToUInt32(UnknownContent) ^ 1 },
+                Xgc,
+            ]),
+            RawXgContainer.Payload([Xg, Xgi, Xgc]));
+
+    [Fact]
+    public void Entry_NamingNoXgInnerFile_WithAStorageFlagOtherThanTheTwoEvidenced_IsRefused() =>
+        AssertEverySurfaceRefuses(
+            RawXgContainer.Payload([Xg, Xgi, Xgr2 with { Stored = true, Flag = 2 }]),
+            "manifest entry 'temp.xgr2' has storage flag 2, where only 0 (compressed) and 1 (stored) are known");
+
+    [Fact]
+    public void StoredEntry_NamingNoXgInnerFile_WithUnequalSizes_IsRefused() =>
+        AssertEverySurfaceRefuses(
+            RawXgContainer.Payload([Xg, Xgi, Xgr2 with { Stored = true, UncompressedSize = (uint)UnknownContent.Length + 1 }]),
+            $"manifest entry 'temp.xgr2' is stored, but its stored size ({UnknownContent.Length}) differs from its " +
+            $"uncompressed size ({UnknownContent.Length + 1})");
+
+    [Fact]
+    public void Entry_NamingNoXgInnerFile_EndingPastTheManifest_IsRefused()
+    {
+        uint manifestOffset = ManifestOffsetOf(RawXgContainer.Payload([Xg, Xgi]));
+
+        AssertEverySurfaceRefuses(
+            RawXgContainer.Payload(
+            [
+                Xg, Xgi,
+                new Entry("temp.xgr2", [0x41]) { Stored = true, Body = [], CompressedSize = 1, Offset = manifestOffset },
+            ]),
+            $"manifest entry 'temp.xgr2' spans bytes {manifestOffset} to {manifestOffset + 1L} of the body, " +
+            $"past the manifest at byte {manifestOffset}");
+    }
+
+    [Fact]
+    public void Entry_NamingNoXgInnerFile_Twice_IsRefused_CaseInsensitively() =>
+        AssertEverySurfaceRefuses(
+            RawXgContainer.Payload([Xg, Xgi, Xgr2, new Entry("TEMP.XGR2", CommentTable)]),
+            "the manifest names 'TEMP.XGR2' more than once");
+
+    /// <summary>
+    /// One byte of the unknown entry's body changed after the end-record
+    /// was computed: the body CRC is what checks those bytes, and it fails.
+    /// The entry is stored at byte 0, so the changed byte is its first.
+    /// </summary>
+    [Fact]
+    public void BodyCrc_Mismatch_OverAnEntryNamingNoXgInnerFile_IsRefused()
+    {
+        byte[] payload = RawXgContainer.Payload([Xgr2 with { Stored = true }, Xg, Xgi]);
+        payload[0] ^= 0xFF;
+
+        AssertEverySurfaceRefuses(payload, "the body's CRC32 is");
+    }
+
+    [Fact]
+    public void Manifest_NamingOnlyAnUnknownFileBesideTempXgi_IsRefused_TempXgStaysRequired() =>
+        AssertEverySurfaceRefuses(RawXgContainer.Payload([Xgi, Xgr2]), "the manifest names no temp.xg");
 
     // -----------------------------------------------------------------------
     //  Selection by name

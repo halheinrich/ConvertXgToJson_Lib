@@ -21,6 +21,15 @@ namespace ConvertXgToJson_Lib;
 /// </para>
 ///
 /// <para>
+/// Only the four inner files the model holds are written: temp.xg,
+/// temp.xgi, and temp.xgr and temp.xgc when present. An inner file the
+/// reader set aside — one its manifest named but this library does not
+/// read, such as temp.xgr2 — is not in the model, so reading such a file
+/// and writing it back drops that entry. The equal-model round trip above
+/// cannot show the loss.
+/// </para>
+///
+/// <para>
 /// The record-level surface is format-generic — it serializes whatever
 /// record list the <see cref="XgFile"/> holds, so it handles both
 /// <c>.xgp</c> position content and full <c>.xg</c> match content. Only

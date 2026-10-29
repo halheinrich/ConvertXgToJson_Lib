@@ -13,6 +13,9 @@ namespace ConvertXgToJson_Lib.Parsing;
 ///   temp.xgr  - M x 2184 bytes  (TRolloutContext records, may be absent)
 ///   temp.xgc  - variable         (RTF comments, may be absent)
 ///
+/// A container's manifest may name other inner files too; each is
+/// validated and set aside (the directory, below).
+///
 /// <para><b>Which format: the directory decides first.</b> A payload whose
 /// directory — the end-record and manifest <see cref="XgContainerLayout"/>
 /// describes — passes every check below is a container, read through that
@@ -39,13 +42,25 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// manifest it locates ends where the end-record begins; the body's CRC32
 /// matches it; the manifest is one zlib stream filling exactly its extent
 /// and inflates to exactly one 532-byte entry per counted file. Then each
-/// entry: it names an inner file (case-insensitively), and no other entry names the
-/// same one; its storage flag is 0 (compressed) or 1 (stored), and no other
-/// value is read as either; a stored entry's two sizes are equal; and its
-/// extent lies wholly before the manifest, computed without overflow, so a
-/// zero-length entry lying exactly at the manifest's offset is valid.
-/// Finally the manifest names temp.xg. The compression level is not a gate,
-/// and the path field and padding are never read.</para>
+/// entry: no other entry gives the same name, compared case-insensitively
+/// (the names are Windows file names); its storage flag is 0 (compressed)
+/// or 1 (stored), and no other value is read as either; a stored entry's
+/// two sizes are equal; and its extent lies wholly before the manifest,
+/// computed without overflow, so a zero-length entry lying exactly at the
+/// manifest's offset is valid. Finally the manifest names temp.xg. The
+/// compression level is not a gate, and the path field and padding are
+/// never read.</para>
+///
+/// <para><b>An entry naming none of the four</b> passes every one of those
+/// checks and is then set aside: it is never extracted, and no read surface
+/// returns it, so the body CRC is the only check of its bytes. XG's own
+/// archive unit accepts any entry name and fetches each inner file by name
+/// (<see cref="XgContainerLayout"/> cites it), and real files of save-file
+/// version 32 carry a fifth entry, temp.xgr2, that this library does not
+/// read (Hal's ruling on halheinrich/backgammon#419). Entries are not
+/// checked against one another: two whose extents overlap are not refused,
+/// and the reader relies on neither the entries' body order nor their
+/// tiling the body.</para>
 ///
 /// <para><b>Extraction</b> applies one rule to each inner file a surface
 /// asks for, and to no other: a stored entry is its raw bytes; a compressed
@@ -230,16 +245,20 @@ internal static class XgDecompressor
             if (manifest.Length != manifestLength)
                 return $"the manifest inflates to {manifest.Length} bytes, but {entriesNeed}";
 
+            // Every name the manifest gives, known or not, matched the way
+            // TryParseInnerFileName matches the known ones.
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int pos = 0; pos < manifest.Length; pos += XgContainerLayout.ManifestEntrySize)
             {
                 var entry = XgContainerLayout.ReadManifestEntry(
                     manifest.AsSpan(pos, XgContainerLayout.ManifestEntrySize));
                 string entryName = $"manifest entry '{entry.Name}'";
+                bool known = XgContainerLayout.TryParseInnerFileName(entry.Name, out XgInnerFile file);
 
-                if (!XgContainerLayout.TryParseInnerFileName(entry.Name, out XgInnerFile file))
-                    return $"{entryName} does not name an XG inner file";
-                if (entries.ContainsKey(file))
-                    return $"the manifest names {XgContainerLayout.NameOf(file)} more than once";
+                if (!names.Add(entry.Name))
+                    return known
+                        ? $"the manifest names {XgContainerLayout.NameOf(file)} more than once"
+                        : $"the manifest names '{entry.Name}' more than once";
                 if (!Enum.IsDefined(entry.Storage))
                     return
                         $"{entryName} has storage flag {(byte)entry.Storage}, where only 0 (compressed) and 1 (stored) are known";
@@ -251,7 +270,10 @@ internal static class XgDecompressor
                     return
                         $"{entryName} spans bytes {entry.Offset} to {entry.End} of the body, past the manifest at byte {trailer.ManifestOffset}";
 
-                entries.Add(file, entry);
+                // An entry the reader does not know has passed the same checks
+                // and is set aside here, never extracted (halheinrich/backgammon#419).
+                if (known)
+                    entries.Add(file, entry);
             }
             if (!entries.ContainsKey(XgInnerFile.GameRecords))
                 return $"the manifest names no {XgContainerLayout.NameOf(XgInnerFile.GameRecords)}";

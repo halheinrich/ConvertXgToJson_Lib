@@ -56,3 +56,7 @@ ConvertXgToJson_Lib.Tests/TestData/xg/**/*.xg
 ConvertXgToJson_Lib.Tests/TestData/xgp/*.xgp
 ConvertXgToJson_Lib.Tests/TestData/xgp/**/*.xgp
 *.mat
+
+# XG's archive unit: a local copy only, since its source states no terms
+# for it (docs/xg-format/README.md; halheinrich/backgammon#419).
+docs/xg-format/ZLIBArchive.pas

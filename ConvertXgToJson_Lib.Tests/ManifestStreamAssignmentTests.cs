@@ -1,3 +1,6 @@
+using BgDataTypes_Lib;
+using ConvertXgToJson_Lib.Models;
+
 namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
@@ -5,8 +8,9 @@ namespace ConvertXgToJson_Lib.Tests;
 /// XG-authored files: commentless files get an empty comment table (before
 /// manifest-based assignment, the manifest itself parsed as one garbage
 /// comment), rollout streams stay assigned, files with a real temp.xgc keep
-/// their comments, and the two files that showed stored entries read them raw
-/// (halheinrich/backgammon#343). The synthetic container-level coverage lives
+/// their comments, the two files that showed stored entries read them raw
+/// (halheinrich/backgammon#343), and a file whose manifest names temp.xgr2
+/// reads its match with that entry set aside (halheinrich/backgammon#419). The synthetic container-level coverage lives
 /// in <see cref="DecompressionTests"/> and
 /// <see cref="XgContainerDirectoryTests"/>; these fixtures pin the same
 /// behaviour against bytes real XG wrote.
@@ -116,5 +120,57 @@ public class ManifestStreamAssignmentTests
 
         file.Comments.Should().BeEmpty("its temp.xgc is stored with no bytes");
         file.Rollouts.Should().BeEmpty("its temp.xgr is stored with no bytes");
+    }
+
+    // -----------------------------------------------------------------------
+    //  A fifth inner file (halheinrich/backgammon#419) — local-only by the
+    //  TestData rule; XgContainerDirectoryTests gates the rule
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// A real XG file of save-file version 32 whose manifest names a fifth
+    /// inner file, temp.xgr2 — all zero bytes here — beside temp.xg, temp.xgr
+    /// and temp.xgi. Until halheinrich/backgammon#419 it was refused whole.
+    /// </summary>
+    private const string Xgr2Fixture =
+        "Mikayel Vardanyan (2.40) - Chris Trencher (2.94) 9pt Monte Carlo Open 8-7-2018 Cons R2 013.xg";
+
+    /// <summary>
+    /// With temp.xgr2 set aside the file reads, and what it reads means
+    /// something, not only that it decompressed: the players and match
+    /// length its name states, its nine games on every surface, and its 17
+    /// rollout contexts, each one a rollout that ran, every one referenced
+    /// by a cube or play record and no record referring past them — so
+    /// temp.xgr was read in step with temp.xg.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "RequiresFixtureFiles")]
+    public void Xgr2BearingXg_ReadsItsMatchAndRollouts()
+    {
+        string path = Fixture(Xgr2Fixture);
+        var file = XgFileReader.ReadFile(path);
+
+        var header = file.Records[0].Should().BeOfType<MatchHeaderRecord>().Subject;
+        header.Version.Should().Be(32, "the save-file version that carries temp.xgr2");
+
+        var info = XgFileReader.ReadMatchInfo(path)!;
+        info.Player1.Should().Be("Mikayel Vardanyan");
+        info.Player2.Should().Be("Chris Trencher");
+        info.Terms.Should().Be(new MatchTerms { Length = 9 });
+
+        file.Records.OfType<GameHeaderRecord>().Should().HaveCount(9);
+        XgFileReader.ReadGameHeaders(path, new XgIteratorState()).Should().HaveCount(9);
+        file.Records.OfType<MatchFooterRecord>().Should().ContainSingle("the match was played out");
+
+        file.Rollouts.Should().HaveCount(17);
+        file.Rollouts.Should().OnlyContain(r => r.GamesRolled > 0, "each context is a rollout that ran");
+        int[] cubeRefs = [.. file.Records.OfType<CubeRecord>().Select(c => c.RolloutIndex).Where(i => i >= 0)];
+        int[] moveRefs = [.. file.Records.OfType<MoveRecord>().SelectMany(m => m.RolloutIndices.Where(i => i >= 0))];
+        cubeRefs.Should().NotBeEmpty("a cube decision was rolled out");
+        moveRefs.Should().NotBeEmpty("a play was rolled out");
+        cubeRefs.Concat(moveRefs).Distinct().Should().BeEquivalentTo(Enumerable.Range(0, file.Rollouts.Count),
+            "every reference names one of the contexts, and every context is referenced");
+
+        XgDecisionIterator.IterateDiagramRequests(file, Xgr2Fixture).Should().NotBeEmpty();
     }
 }

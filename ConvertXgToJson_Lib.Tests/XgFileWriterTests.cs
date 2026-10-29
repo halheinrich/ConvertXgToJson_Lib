@@ -1,6 +1,7 @@
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
 using ConvertXgToJson_Lib.Parsing;
+using ConvertXgToJson_Lib.Tests.Helpers;
 using ConvertXgToJson_Lib.Writing;
 
 namespace ConvertXgToJson_Lib.Tests;
@@ -412,6 +413,42 @@ public class XgFileWriterTests
         BitConverter.ToUInt32(trailer, 4).Should().Be(4u, "every inner file is counted, the empty ones included");
         BitConverter.ToUInt32(trailer, 12).Should().Be((uint)(body.Length - manifestOffset));
         BitConverter.ToUInt32(trailer, 16).Should().Be(manifestOffset);
+    }
+
+    /// <summary>
+    /// The write-back limitation (halheinrich/backgammon#419), pinned: a
+    /// container whose manifest names temp.xgr2, which the reader sets
+    /// aside, is written back without it. The written manifest is decoded by
+    /// this class's own decoder, and the model round trip still holds,
+    /// which is why the round-trip oracle above cannot see the loss.
+    /// </summary>
+    [Fact]
+    public void AnInnerFileTheReaderSetsAside_IsNotWrittenBack()
+    {
+        byte[] gameRecords =
+        [
+            .. XgBytesBuilder.BuildMatchHeaderRecord("Alice", "Bob", 7, new DateTime(2024, 1, 15, 12, 0, 0, DateTimeKind.Utc)),
+            .. XgBytesBuilder.BuildGameHeaderRecord(score1: 0, score2: 0, gameNum: 1),
+            .. XgBytesBuilder.BuildMatchFooterRecord(7),
+        ];
+        byte[] indexRecords = [.. gameRecords[..SaveRecordParser.RecordSize], .. gameRecords[^SaveRecordParser.RecordSize..]];
+        byte[] source = RawXgContainer.File(RawXgContainer.Payload(
+        [
+            new("temp.xg", gameRecords),
+            new("temp.xgi", indexRecords),
+            new("temp.xgr2", [.. Enumerable.Range(1, 1024).Select(i => (byte)i)]),
+        ]));
+
+        var original = XgFileReader.ReadStream(new MemoryStream(source));
+        byte[] rewritten = XgFileWriter.ToBytes(original);
+
+        var streams = SplitZlibStreams(rewritten[8232..^EndRecordSize]);
+        streams.Should().HaveCount(3, "xg, xgi, manifest");
+        ParseManifest(streams[2]).Select(e => e.Name).Should().Equal(["temp.xg", "temp.xgi"],
+            "the model holds no temp.xgr2, so the writer writes none");
+        XgFileReader.ToJson(XgFileReader.ReadStream(new MemoryStream(rewritten))).Should().Be(
+            XgFileReader.ToJson(WithNormalizedHeader(original)),
+            "the models are equal, so a model round trip cannot show the dropped entry");
     }
 
     // -----------------------------------------------------------------------

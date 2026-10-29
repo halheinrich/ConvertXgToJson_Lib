@@ -169,7 +169,10 @@ read; the per-source read that returns the failure instead is
   with a usable directory nor the legacy single stream, or whose inner
   file contradicts its manifest entry, is refused as
   `InvalidDataException` naming the failed check ("Container facts" under
-  Writing).
+  Writing). A manifest entry naming an inner file the reader does not
+  know, such as temp.xgr2, is no refusal: it is validated with the rest
+  of the directory and set aside, and the file reads
+  (halheinrich/backgammon#419).
 * `ReadMatchInfo` — fast path. Extracts temp.xg alone — selected by its
   manifest name through the same validated directory the full read uses —
   and stops at the `MatchHeaderRecord`. Used when a caller only needs match
@@ -350,7 +353,11 @@ The reader's mirror. Layered exactly like the read path:
 * **`XgFileWriter`** (public) — record-level serializer: `XgFile` →
   stream / bytes / file. Format-generic by construction (it writes whatever
   record list the model holds, so full-`.xg` output works), but only the
-  `.xgp` shape is validated against real XG imports.
+  `.xgp` shape is validated against real XG imports. It writes only the
+  inner files the model holds, so a file whose manifest named one the
+  reader set aside (temp.xgr2) loses that entry when read and written back;
+  the JSON round trip in `XgFileWriterTests` cannot see that, and
+  preserving such entries is not supported (halheinrich/backgammon#419).
 * **`XgpExporter`** (public) — decision-level export, two surfaces chosen
   by what the caller holds (see below). "Exporter" per the ecosystem
   convention (MatExporter precedent): an Exporter translates semantics, a
@@ -360,11 +367,15 @@ The reader's mirror. Layered exactly like the read path:
 Container facts shared by both sides (decoded from the fixture corpus —
 434 files, `TestData/FixtureFiles/*.xg*` and `TestData/xg/*.xg`, read
 byte by byte 2026-10-05 — and corroborated by xgdatatools' `xgzarc.py`,
-whose field names are used here: reverse engineering, not an XG
-specification. Pinned by `XgFileWriterTests`; byte layout encoded once in
-`XgContainerLayout` — the SSOT `XgContainerWriter` emits through and
-`XgDecompressor` reads through, whose class doc carries the field tables,
-the evidence and the source's pinned URL; halheinrich/backgammon#343):
+whose field names are used here, and by XG's own sources in
+`docs/xg-format/` (its `README.md` says what each is and where it came
+from): the layout matches the archive unit's two records once Delphi's
+record alignment is applied, and the values said to hold in every corpus
+file are observations. Pinned by `XgFileWriterTests`; byte
+layout encoded once in `XgContainerLayout` — the SSOT `XgContainerWriter`
+emits through and `XgDecompressor` reads through, whose class doc carries
+the field tables, the evidence and the sources' URLs;
+halheinrich/backgammon#343):
 
 * Physical stream order is `temp.xg`, `temp.xgr` (only when rollouts exist),
   `temp.xgi`, `temp.xgc` (only when comments exist), then a manifest stream,
@@ -392,17 +403,21 @@ the evidence and the source's pinned URL; halheinrich/backgammon#343):
   holds at least the match header, temp.xgi two records, and temp.xgr and
   temp.xgc are written only when they hold a rollout or a comment, each
   comment at least its CR LF.
-* The end-record is nine little-endian int32s XG seeks to from EOF to find
-  the manifest (so its absence makes the file unloadable even though every
-  other structure validates): `crc`, CRC32 (IEEE) of the entire compressed
-  body (all inner files **and** the manifest stream); `filecount`, the
-  inner files (manifest excluded); `version`, 1; `registrysize`, the
-  manifest stream's compressed size; `archivesize`, the manifest's offset
-  from content start; `compressedregistry`, 1 — the manifest is a zlib
-  stream; then twelve reserved zero bytes. Only those values of `version`,
-  `compressedregistry` and the reserved bytes occur in the corpus, and the
-  reader recognizes an end-record by them. Pinned by `XgFileWriterTests`
-  (writer trailer + `XgCorpus_EndRecord_*` corpus agreement).
+* The end-record is the 36 bytes XG seeks to from EOF to find the manifest
+  (so its absence makes the file unloadable even though every other
+  structure validates): five little-endian int32s — `crc`, CRC32 (IEEE) of
+  the entire compressed body (all inner files **and** the manifest
+  stream); `filecount`, the inner files (manifest excluded); `version`, 1;
+  `registrysize`, the manifest stream's compressed size; `archivesize`,
+  the manifest's offset from content start — then `compressedregistry`, a
+  one-byte Boolean, 1 (the manifest is a zlib stream), twelve reserved
+  bytes and three bytes of record padding, all zero. xgdatatools reads the
+  flag as an int32 over bytes 20..23, and so does the reader; with the
+  bytes after the flag zero, that is the same test. Only those values of
+  `version`, `compressedregistry` and the bytes after it occur in the
+  corpus, and the reader recognizes an end-record by them. Pinned by
+  `XgFileWriterTests` (writer trailer + `XgCorpus_EndRecord_*` corpus
+  agreement).
 * **Reading — refuse, never guess** (Hal, 2026-10-05: "Refuse with clear
   error"; `XgDecompressor`'s class doc states the contract in order). The
   directory decides first: a payload whose directory validates is a
@@ -417,11 +432,18 @@ the evidence and the source's pinned URL; halheinrich/backgammon#343):
   directory is validated before any inner file is extracted: the
   end-record's shape, a non-zero file count, the manifest ending where the
   end-record begins, the body CRC, the manifest exactly one zlib stream of
-  532 bytes per counted file; per entry a known name named once
+  532 bytes per counted file; per entry a name no other entry gives
   (case-insensitively), a storage flag of 0 or 1 (no other value is read as
   either), equal sizes when stored, and an extent wholly before the
   manifest, computed without overflow (a zero-length entry exactly at the
-  manifest's offset is valid); temp.xg named. Each inner file a surface
+  manifest's offset is valid); temp.xg named. An entry whose name is none
+  of the four passes the same checks and is then set aside — never
+  extracted, returned by no surface, its bytes checked only by the body
+  CRC — because XG's archive unit accepts any name and fetches each inner
+  file by name, and real files carry a fifth entry, temp.xgr2 (Hal's
+  ruling on halheinrich/backgammon#419; the evidence is in
+  `XgContainerLayout`'s class doc). Entries are not checked against one
+  another: overlapping extents are not refused. Each inner file a surface
   asks for is extracted by one rule — stored read raw, compressed inflated
   within exactly its extent and never past its declared size — and checked
   against its entry's size and CRC32 (the CRC check, added by

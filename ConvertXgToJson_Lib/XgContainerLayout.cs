@@ -4,9 +4,11 @@ using System.Text;
 namespace ConvertXgToJson_Lib;
 
 /// <summary>
-/// The inner files an XG container can hold, each named in its manifest
-/// (<see cref="XgContainerLayout.NameOf"/>). The reader selects each by
-/// name; the writer names each it writes.
+/// The inner files this library reads from an XG container, each named in
+/// its manifest (<see cref="XgContainerLayout.NameOf"/>). The reader selects
+/// each by name; the writer names each it writes. A manifest may name other
+/// inner files, which the reader validates and sets aside
+/// (<see cref="Parsing.XgDecompressor"/>).
 /// </summary>
 internal enum XgInnerFile
 {
@@ -38,8 +40,32 @@ internal enum XgInnerFile
 /// byte by byte on 2026-10-05 (halheinrich/backgammon#343) — and
 /// corroborated by an independent reader, xgdatatools' <c>xgzarc.py</c>
 /// (https://github.com/oysteijo/xgdatatools/blob/6b6e60667a8d98a3178039ae669c1f117dc5107d/xgzarc.py),
-/// whose names for the fields are given below. This is corroborated reverse
-/// engineering, not an XG specification.</para>
+/// whose names for the fields are given below. XG's own sources, published
+/// at https://www.extremegammon.com/XGformat.aspx, agree with both except
+/// in one field: the format document <c>docs/xg-format/xg_format.pas</c> (last
+/// modified 2013-12-31; committed, its header permitting redistribution),
+/// which names the four inner files and refers the container to its archive
+/// unit; and that unit, ZLBArchive Control 1.52 (<c>ZLIBArchive.pas</c>,
+/// kept as a gitignored local copy, since the page states no terms for it).
+/// Its <c>TZLBFileRec</c> and <c>TZLBArchiveRec</c> are the manifest entry
+/// and the end-record below once Delphi's default record alignment is
+/// applied (by inference: neither is declared <c>packed</c>); the one field
+/// they disagree on is the end-record's compressed-registry flag, given
+/// below as the source declares it. The unit checks the body CRC, reads the
+/// registry without checking any entry's name, and fetches an inner file by
+/// its path and name, compared case-insensitively. What the tables call
+/// "in every corpus file" or "in every corpus entry" is observed, not
+/// specified.</para>
+///
+/// <para><b>A fifth inner file.</b> Eight real files from 2018–2019
+/// tournaments, one of them in <c>TestData/FixtureFiles</c>, carry a fifth
+/// manifest entry, <c>temp.xgr2</c>, and all eight are save-file version 32
+/// (the match header's field after <c>Invert</c>; every other corpus file
+/// is 30 or 24). In each, <c>temp.xgr2</c> is one 3,568-byte block per
+/// rollout context in <c>temp.xgr</c>, every byte zero (measured
+/// 2026-10-28, halheinrich/backgammon#419). What it holds when it is not
+/// zero is not established, and the format document does not mention it;
+/// the reader sets it aside.</para>
 ///
 /// <para><b>Manifest</b> (xgdatatools' <c>FileRecord</c>): one 532-byte entry
 /// per inner file, the manifest itself unlisted. Every corpus file lists its
@@ -72,10 +98,12 @@ internal enum XgInnerFile
 /// compressed corpus entry is smaller than its content is an observation,
 /// not a rule.</para>
 ///
-/// <para><b>End-record</b> (xgdatatools' <c>ArchiveRecord</c>): 36 bytes,
-/// uncompressed, six little-endian int32s then twelve reserved bytes. Real
-/// XG locates the manifest by seeking from EOF through it, so a container
-/// without it is unloadable even though every other structure validates.</para>
+/// <para><b>End-record</b> (xgdatatools' <c>ArchiveRecord</c>, the source's
+/// <c>TZLBArchiveRec</c>): 36 bytes, uncompressed: five little-endian
+/// int32s, a one-byte Boolean, twelve reserved bytes, then three bytes of
+/// record padding. Real XG locates the manifest by seeking from EOF through
+/// it, so a container without it is unloadable even though every other
+/// structure validates.</para>
 /// <code>
 ///   [0..3]   crc: CRC32 (IEEE) of the entire body — every inner file's
 ///            bytes and the manifest stream
@@ -84,14 +112,18 @@ internal enum XgInnerFile
 ///   [12..15] registrysize: the manifest stream's compressed size
 ///   [16..19] archivesize: the manifest's offset from content start (= the
 ///            length of the inner files' region before it)
-///   [20..23] compressedregistry: 1 in every corpus file — the manifest is a
-///            zlib stream
-///   [24..35] reserved: zero in every corpus file
+///   [20]     compressedregistry: a Boolean; 1 in every corpus file — the
+///            manifest is a zlib stream
+///   [21..32] reserved: zero in every corpus file
+///   [33..35] padding: zero in every corpus file
 /// </code>
 /// <para><see cref="TryReadEndRecord"/> treats the version, the
-/// compressed-registry flag and the reserved bytes as the end-record's
+/// compressed-registry flag and the bytes after it as the end-record's
 /// shape: a block whose fields hold other values is not an end-record this
-/// library understands.</para>
+/// library understands. It reads bytes 20..23 as one int32 that must be 1
+/// and bytes 24..35 as zero — xgdatatools' reading, which counts the flag
+/// as an int32 — and that is the same test as byte 20 being 1 and every
+/// byte after it zero; the writer writes those bytes so.</para>
 /// </summary>
 internal static class XgContainerLayout
 {
