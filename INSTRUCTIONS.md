@@ -3,6 +3,7 @@
 > Collaboration contract: [`../AGENTS.md`](../AGENTS.md)
 > Umbrella status & dependency graph: [`../INSTRUCTIONS.md`](../INSTRUCTIONS.md)
 > Mission & principles: [`../VISION.md`](../VISION.md)
+> Open work: the [tracker](https://github.com/halheinrich/backgammon/issues), label `ConvertXgToJson_Lib`.
 
 ## Stack
 
@@ -127,14 +128,6 @@ this assembly (plus its test project via `InternalsVisibleTo`) sees a
 record. `PublicSurfaceTests` pins this; `JsonContractTests` pins that the
 JSON document (XgToJson's output contract) survived the change
 byte-for-byte, against goldens embedded in the test project.
-
-### Pipeline
-
-`XgFileReader` handles binary I/O and zlib decompression; `XgDecisionIterator`
-walks the resulting record stream and yields typed rows. Parsing of individual
-record payloads lives under `Parsing/` (`SaveRecordParser`,
-`RichGameHeaderParser`, `RolloutContextParser`, `CommentParser`,
-`PascalBinaryReader`, `XgDecompressor`).
 
 ### XgFileReader
 
@@ -557,6 +550,18 @@ not a record"); the ecosystem's re-ingestible format for analysis-less decisions
 `BgDecisionData` JSON. A sliced analyzed decision is **visible** — exactly
 one decision, analysis and rollout depth intact — because the panes travel
 with it.
+
+**No analysed export from a record alone.** A caller holding only
+`BgDecisionData` gets the clean export; the slice needs the parsed source.
+Reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from a record is
+a hypothetical, worth revisiting only if a JSON-sourced caller ever needs
+analysed exports. What is known of it: the record carries the candidates'
+equities and probabilities and the cube's; the after-boards are recomputable;
+the sbyte move encoding inverts; static levels invert by `XgDepthFacts`'s
+table (codes 1 and 11 both read as 2-ply, so 11 would come back as 1); and
+rollout contexts are the one piece that cannot be recovered (level 1002 with
+`RolloutIndex = -1` is XG-legal per the `DoubleAnalysis.xgp` fixture,
+unverified for move panes).
 
 Ground-truth oracle beyond round-trips: `XgpExportXgAgreementTests`
 compares exports field-level against two XG-authored `.xgp` saves of
@@ -1368,317 +1373,6 @@ match files:
   walking up from `AppContext.BaseDirectory` to the repo root.
 * All file-touching tests use `[Collection("FileIO")]`.
 
-## Public API
-
-```csharp
-// The opaque handle every surface exchanges. No public members: reading,
-// writing, iterating, exporting, and synthesis all take or return the
-// handle whole. (Namespace ConvertXgToJson_Lib.Models — the model types
-// around it are internal; the namespace placement predates that and moves
-// with the halheinrich/backgammon#19 rename, not before.)
-public sealed class XgFile { }
-
-// Intent-level synthesis — the one public way to make an in-memory XgFile.
-// Positions are 26-cell boards in XG's player-1 frame; plays are
-// BgDataTypes_Lib.Play in the mover's numbering. Eager, loud validation;
-// deterministic output. See "Synthesis" above for semantics.
-public sealed class XgFileBuilder
-{
-    public static XgFileBuilder ForMatch(int matchLength, string player1, string player2);
-    public static XgFileBuilder ForMoneySession(string player1, string player2,
-                                                bool jacoby = true, bool beaver = false);
-
-    public int    MatchLength    { get; }   // 0 = money
-    public bool   IsMoneySession { get; }
-    public string Player1        { get; }
-    public string Player2        { get; }
-    public bool   IsJacoby       { get; }
-    public bool   IsBeaver       { get; }
-
-    public XgGameBuilder AddGame(int score1 = 0, int score2 = 0, bool isCrawford = false,
-                                 IReadOnlyList<int>? initialPosition = null);
-    public XgFile        Build();           // header-only file when no games
-}
-
-public sealed class XgGameBuilder           // from AddGame; methods chain
-{
-    public int  GameNumber { get; }
-    public int  Score1 { get; }
-    public int  Score2 { get; }
-    public bool IsCrawford { get; }
-    public int  DecisionCount { get; }
-
-    public XgGameBuilder AtPosition(IReadOnlyList<int> position);
-
-    // comment: the decision's comment, verbatim; null or empty = none
-    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, Play played,
-                              string? comment = null);
-    public XgGameBuilder Play(XgPlayer player, DiceRoll dice, Play played,
-                              IReadOnlyList<XgPlayCandidate> candidates,
-                              string? comment = null);
-    public XgGameBuilder UnanalysedPlay(XgPlayer player, DiceRoll dice, Play played);
-    public XgGameBuilder Dance(XgPlayer player, DiceRoll dice);
-    public XgGameBuilder IllegalPlay(XgPlayer player, DiceRoll dice);
-
-    public XgGameBuilder CubeDecision(XgPlayer doubler, XgCubeEquities equities,
-                                      int ply = 2,   // 2–7; 1-ply cube is unrepresentable
-                                      CubeAction? doublerAction = null,
-                                      CubeAction? takerAction = null,
-                                      int? requestedPly = null,  // 2–7; null = matches ply
-                                      string? comment = null);
-    public XgGameBuilder UnanalysedCube(XgPlayer doubler,
-                                        CubeAction? doublerAction = null,
-                                        CubeAction? takerAction = null);
-}
-
-public enum XgPlayer { Player1, Player2 }   // header slots, not roles
-
-// One analysed candidate: the play, its equity (mover's perspective), and
-// its depth (1–7 plies). Invalid depth unrepresentable.
-public sealed record XgPlayCandidate(Play Play, double Equity, int Ply = 1);
-
-// The three cubeful equities of an analysed cube decision, doubler's
-// perspective; proper actions and played-action errors derive from these.
-public readonly record struct XgCubeEquities(
-    double NoDouble, double DoubleTake, double DoubleDrop);
-
-public static class XgFileReader
-{
-    // File discovery
-    public static IReadOnlyList<string>   XgFormatExtensions { get; }   // [".xg", ".xgp"]
-    public static bool                    IsXgFormatFile(string path);
-    public static IEnumerable<string>     EnumerateXgFormatFiles(string directory);
-    public static IEnumerable<string>     EnumerateXgFormatFiles(string directory, SearchOption searchOption);
-
-    // Full parse (.xg / .xgp — format detected from content)
-    public static XgFile                ReadFile(string path);
-    public static XgFile                ReadStream(Stream stream);
-
-    // JSON serialization round-trip. ReadJson is load-bearing: XgFilter_Lib's
-    // FilteredDecisionIterator parses each export through it, and
-    // XgSourceReader decodes Json through the same decoder. Every
-    // record variant round-trips, UnknownRecord's two tags included: the
-    // $type mapping is SaveRecordConverter's one table (see XgFileReader
-    // under Architecture).
-    public static string                ToJson(XgFile file, JsonSerializerOptions? options = null);
-    public static Task                  WriteJsonAsync(XgFile file, string outputPath,
-                                            JsonSerializerOptions? options = null,
-                                            CancellationToken cancellationToken = default);
-    public static XgFile                ReadJson(string path);
-
-    // Fast paths (temp.xg only, through the full read's directory validation)
-    public static XgMatchInfo?          ReadMatchInfo(string path);
-    public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state);
-}
-
-// The one read of one source (see "The read operation" under
-// Architecture): acquires, decodes, returns the outcome — never throws for
-// a source that cannot be read. Usage errors throw (the async entry points'
-// from the call itself); an OperationCanceledException propagates. The
-// format is required on every entry point, with no default.
-public static class XgSourceReader
-{
-    // Opens and closes the file. SourceName = path as passed.
-    public static XgSourceRead       ReadFile(string path, XgSourceFormat format,
-                                              bool retainBytes = false);
-    public static Task<XgSourceRead> ReadFileAsync(string path, XgSourceFormat format,
-                                                   bool retainBytes = false,
-                                                   CancellationToken cancellationToken = default);
-
-    // Borrowed: readable, seekable, at position 0; never disposed; no Bytes.
-    public static XgSourceRead       ReadStream(string sourceName, Stream stream, XgSourceFormat format);
-
-    // Owns, buffers and disposes the stream acquire returns (forward-only is fine).
-    public static Task<XgSourceRead> ReadAsync(string sourceName,
-                                               Func<CancellationToken, Task<Stream>> acquire,
-                                               XgSourceFormat format,
-                                               bool retainBytes = false,
-                                               CancellationToken cancellationToken = default);
-}
-
-// Unspecified, the zero value, is refused by every entry point, as an
-// undefined integer is: a usage error, thrown before anything is acquired.
-public enum XgSourceFormat { Unspecified = 0, Xg = 1, Json = 2 }   // .xg/.xgp by content | this library's JSON
-
-// A closed pair, reference semantics; constructed only by XgSourceReader.
-public abstract class XgSourceRead
-{
-    public string SourceName { get; }   // the path or name exactly as passed
-    public abstract TResult Match<TResult>(Func<XgSourceDecoded, TResult> decoded,
-                                           Func<XgSourceFailed, TResult> failed);
-    public abstract void    Switch(Action<XgSourceDecoded> decoded, Action<XgSourceFailed> failed);
-}
-
-public sealed class XgSourceDecoded : XgSourceRead
-{
-    public XgFile                File  { get; }   // complete in memory; outlives the read's resources
-    public ReadOnlyMemory<byte>? Bytes { get; }   // exactly as acquired, only when retainBytes: true
-}
-
-public sealed class XgSourceFailed : XgSourceRead
-{
-    public Exception Exception { get; }   // acquisition's or decoder's; never a cancellation
-}
-
-public static class XgFileWriter
-{
-    // Record-level serializer (reader's mirror). Semantic round-trip, not
-    // byte identity: ReadStream(Write(f)) parses to an equal model.
-    public static void   Write(XgFile file, Stream output);
-    public static byte[] ToBytes(XgFile file);
-}
-
-// A value valid in memory and in JSON that the XG format cannot represent
-// — a limit of the wire, not a bad argument; the read side's mirror is
-// InvalidDataException. Thrown at write (today: a comment the comment
-// table cannot carry). Sealed; the three standard constructors. The data
-// is typed and set only by the library; the message is composed from it.
-public sealed class XgUnrepresentableValueException : Exception
-{
-    public XgUnrepresentableValueReason Reason { get; }   // Unspecified only via a standard ctor
-    public int?  CommentIndex { get; }   // the comment's index in the written table; null = not a comment
-    public Rune? Character    { get; }   // set exactly when Reason is UnencodableCharacter
-}
-
-public enum XgUnrepresentableValueReason
-{
-    Unspecified = 0, UnencodableCharacter = 1, UnpairedSurrogate = 2, ReservedCrlfEscape = 3,
-}
-
-public static class XgpExporter
-{
-    // Clean-position path (caller holds only the decision record):
-    // unanalyzed position, XG-import-only — the iterator yields zero
-    // decisions for these exports, by design.
-    public static void   Write(BgDecisionData decision, Stream output);
-    public static byte[] ToBytes(BgDecisionData decision);
-
-    // Slice path (caller holds the parsed source file + the decision's
-    // XgDecisionId coordinates): analysis carried through — the iterator
-    // yields exactly one decision for a sliced analyzed decision.
-    public static void   Write(XgFile source, int game, int moveNumber, bool isCube, Stream output);
-    public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube);
-
-    // Slice path with options (player-name overrides; everything else
-    // still verbatim).
-    public static void   Write(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options, Stream output);
-    public static byte[] ToBytes(XgFile source, int game, int moveNumber, bool isCube, XgpSliceOptions options);
-
-    // Slice path addressed by the iterator-stamped XgDecisionId
-    // (compile-time contract — XgpDecisionId has no coordinates and does
-    // not fit; id.Filename is not consulted). The only slice surface with
-    // a path transport, matching its external callers.
-    public static byte[] ToBytes(XgFile source, XgDecisionId id);
-    public static byte[] ToBytes(XgFile source, XgDecisionId id, XgpSliceOptions options);
-    public static void   WriteFile(XgFile source, XgDecisionId id, string path);
-    public static void   WriteFile(XgFile source, XgDecisionId id, XgpSliceOptions options, string path);
-
-    // Anonymize-copy: whole-file re-emit with name overrides — every
-    // record, rollout context, and comment verbatim (no slicing, no
-    // comment or rollout remap); only the match header's name fields
-    // rewritten. No overrides = plain re-emit.
-    public static void   Write(XgFile source, XgpSliceOptions options, Stream output);
-    public static byte[] ToBytes(XgFile source, XgpSliceOptions options);
-    public static void   WriteFile(XgFile source, XgpSliceOptions options, string path);
-}
-
-public sealed record XgpSliceOptions
-{
-    // null = no override; non-empty enforced at init (an invalid
-    // instance is unrepresentable). Each resolved override rewrites that
-    // player's Unicode name field and its ANSI twin.
-
-    // Slot-based pair: renames by header slot.
-    public string? Player1Name { get; init; }
-    public string? Player2Name { get; init; }
-
-    // Role-based pair: renames by decision role — the exporter resolves
-    // the decision-maker's slot from ActivePlayer sign. Outranks the
-    // slot names when roles are determinable; ignored (slot fallback)
-    // on a multi-decision copy; role-only options against a
-    // roles-undeterminable source throw NotSupportedException.
-    public string? OnRollName   { get; init; }
-    public string? OpponentName { get; init; }
-
-    // SSOT for anonymized export, both pairs: "On-roll" / "Opponent"
-    // where a single decision defines roles (every slice, every
-    // single-decision .xgp copy), "Player 1" / "Player 2" where roles
-    // are undefined (whole-.xg copy). Never throws.
-    public static XgpSliceOptions Anonymized { get; }
-}
-
-public static class XgDecisionIterator
-{
-    public static IEnumerable<DecisionRow> Iterate(
-        XgFile file, string? sourceFile,
-        XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null,
-        XgIteratorOptions? options = null,
-        ILogger? logger = null);
-
-    public static IEnumerable<BgDecisionData> IterateDiagramRequests(
-        XgFile file, string? sourceFile,
-        XgIteratorState? state = null,
-        XgIteratorCallbacks? callbacks = null,
-        XgIteratorOptions? options = null,
-        ILogger? logger = null);
-
-    public static XgMatchInfo? ExtractMatchInfo(XgFile file);
-}
-
-public sealed record XgIteratorOptions(
-    OpeningBook? OpeningBook = null,
-    PlayRanking  Ranking     = PlayRanking.Equity);   // undefined refused
-
-public sealed class OpeningBook
-{
-    public static OpeningBook Load(string path);
-    public static bool        TryLoad(string path, out OpeningBook? book);
-
-    public int      EntryCount    { get; }
-    public string   Title         { get; }
-    public string   Description   { get; }
-    public string   VersionText   { get; }   // "3.70" in the shipped DB
-    public int      FormatVersion { get; }
-    public DateTime CreatedOn     { get; }
-
-    // The keyed lookup (TryGetEntry / GetEntries over OpeningBookKey) and
-    // OpeningBookEntry are internal: keying needs the internal record
-    // position convention. Public intent is handing the instance to
-    // XgIteratorOptions.OpeningBook for depth enrichment.
-}
-
-public sealed class XgIteratorState
-{
-    public XgMatchInfo? MatchInfo { get; internal set; }
-    public XgGameInfo?  GameInfo  { get; internal set; }
-}
-
-public sealed record XgIteratorCallbacks(
-    Func<XgMatchInfo, bool>?          SkipMatchAt    = null,
-    Func<XgGameInfo,  bool>?          SkipGameAt     = null,
-    Func<IDecisionFilterData, bool>?  StopGameAfter  = null,
-    Func<IDecisionFilterData, bool>?  StopMatchAfter = null);
-
-// The header types (see "The header types" under Architecture). Every
-// member is required on the wire and never null; built only by this library.
-public sealed class XgMatchInfo : IMatchInfo
-{
-    public string       Player1 { get; }
-    public string       Player2 { get; }
-    public SessionTerms Terms   { get; }   // MoneyTerms or MatchTerms
-}
-
-public sealed class XgGameInfo : IGameInfo
-{
-    public bool         IsStandardStart { get; }
-    public GameStanding Standing        { get; }   // MoneyStanding or MatchStanding
-}
-```
-
-Produces types defined in `BgDataTypes_Lib`; see that subproject's
-`INSTRUCTIONS.md` for their shapes and serialization contract.
-
 ## Pitfalls
 
 * **A failed source is an outcome, so a catch around `XgSourceReader` is
@@ -2081,30 +1775,3 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   offsets the sweep lit up were the already-parsed `RolloutIndices` (the
   rolled-out move referencing contexts 0–3) and cube `Taken` fields —
   never a comment reference.
-
-## Subproject-internal next steps
-
-* **Unify `EnumerateXgFormatFiles` ordering** — the single-arg overload
-  keeps its historical extension-major, filesystem-order contract while
-  the `SearchOption` overload sorts by full path (ordinal-insensitive,
-  deterministic). Once ExtractFromXgToCsv consolidates its four private
-  discovery copies onto the sorted overload, consider routing the
-  single-arg form through `(directory, TopDirectoryOnly)` so the class
-  carries one order contract. Deliberate behavior change, not a drive-by:
-  it alters the order a caller's walk over the single-arg overload sees
-  (XgFilter_Lib's) — its own session.
-* **Analysis carry-through landed as the slice exporter** (`XgpExporter`'s
-  `XgFile` + coordinates surface) — the original "Option B"
-  (reconstructing `BestMoveAnalysis` / `DoubleActionAnalysis` from
-  `PlayCandidate` / `DecisionData`) is superseded for every caller that
-  holds the parsed source file, and its open rollout-depth policy question
-  dissolved: the slice carries the real rollout contexts, nothing is
-  fabricated. Reconstruction remains *possible* if a JSON-sourced caller
-  (holding only `BgDecisionData`) ever needs analyzed exports — unbooked;
-  revisit only when such a caller exists. Feasibility notes preserved:
-  eval vectors and per-candidate probabilities/equities are all in
-  `BgDecisionData`; after-boards recomputable; the sbyte move encoding
-  invertible; static levels invert exactly via `XgDepthFacts.OfLevel`;
-  rollout contexts are the one unrecoverable piece (level 1002 with
-  `RolloutIndex = -1` is XG-legal per the `DoubleAnalysis.xgp` fixture,
-  unverified for move panes).
