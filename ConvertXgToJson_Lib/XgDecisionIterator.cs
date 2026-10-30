@@ -758,10 +758,11 @@ public static class XgDecisionIterator
     /// an action that was played. Neither negative value does. <c>-2</c> is
     /// the incidental cube pane XG writes beside a checker play, and
     /// <c>-1</c> is the pane XG writes where a game ended with no cube
-    /// action taken — every analysed <c>-1</c> record in the local corpus
-    /// is the last record of its game, each followed by a game footer whose
+    /// action taken — every analysed <c>-1</c> record in the local corpus of
+    /// the time this mapping was written was the last record of its game,
+    /// each followed by a game footer whose
     /// <see cref="GameFooterRecord.Termination"/> is ≥ 100, XG's
-    /// by-resignation encoding. <c>-1</c> is also the pane state
+    /// by-resignation encoding; the Achim Mueller fixture pins one. <c>-1</c> is also the pane state
     /// <see cref="XgpExporter"/> writes for a curated <c>.xgp</c> cube
     /// problem, which likewise records nothing played. Both map to null —
     /// the carrier's "played action not recorded" — rather than being
@@ -921,7 +922,8 @@ public static class XgDecisionIterator
     /// and its edition — in <see cref="XgDepthFacts.Resolve"/>.
     ///
     /// <para>
-    /// The key is exactly the pane data session 1 proved bitwise:
+    /// The key is exactly the pane data <c>OpeningBookRealDbTests</c> pins
+    /// bitwise, on its fixture decisions:
     /// <c>PositionsPlayed[i]</c> (the candidate's resulting position, in the
     /// mover's frame for either seat) plus the decision's session turned to
     /// the mover, normalized by the <see cref="OpeningBookKey"/> factories

@@ -89,7 +89,7 @@ namespace ConvertXgToJson_Lib.Tests;
 /// </list>
 /// The corpus is gitignored and churns, so the invariants hold for any corpus
 /// and no count is pinned; on an empty corpus every fact passes vacuously, by
-/// design (AGENTS.md, "TestData convention"). This gates nothing.
+/// design (AGENTS.md § Tests). This gates nothing.
 /// </summary>
 /// <remarks>
 /// <para>

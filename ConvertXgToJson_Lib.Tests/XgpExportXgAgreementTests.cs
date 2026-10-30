@@ -142,8 +142,9 @@ public class XgpExportXgAgreementTests
     //  one documented exception: the tutor family (ErrorTutorCube/Take/
     //  Move, TutorPosition). XG initializes those at runtime when a match
     //  is open (-1000 sentinels, a computed tutor board), while imported
-    //  source files carry zeros there; the slice stays source-verbatim,
-    //  which XG demonstrably accepts (it accepted the source .xg).
+    //  source files carry zeros there; the slice stays source-verbatim. XG
+    //  opened those sources with their zeros and saved these fixtures from
+    //  them, so it reads the shape; no slice itself is opened in XG here.
     // ------------------------------------------------------------------ //
 
     [Fact]

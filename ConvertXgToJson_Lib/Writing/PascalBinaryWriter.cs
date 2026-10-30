@@ -16,10 +16,10 @@ namespace ConvertXgToJson_Lib.Writing;
 ///   Integer, Dword, Longword, Single     – 4-byte boundary
 ///   Double, Int64, UInt64, TDateTime     – 8-byte boundary
 ///
-/// Padding bytes are written as zeros — real XG files zero-fill the regions
-/// between fields (verified across the fixture corpus), so explicit zero
-/// padding reproduces the on-disk shape regardless of the target stream's
-/// prior contents.
+/// Padding bytes are written as zeros — the fixture corpus read when this
+/// writer was written zero-filled the regions between fields (the sample was
+/// not kept), so explicit zero padding is taken to reproduce the on-disk shape,
+/// and does so regardless of the target stream's prior contents.
 /// </summary>
 internal sealed class PascalBinaryWriter(Stream stream) : IDisposable
 {

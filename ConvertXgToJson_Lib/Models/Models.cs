@@ -25,9 +25,9 @@ internal enum RecordType : byte
     FooterGame   = 4,
     /// <summary>tsFooterMatch — end-of-match summary.</summary>
     FooterMatch  = 5,
-    /// <summary>tsComment — declared by XG but never observed in files; comments live in temp.xgc.</summary>
+    /// <summary>tsComment — marked unused in XG's format document; comments live in temp.xgc.</summary>
     Comment      = 6,
-    /// <summary>tsMissing — declared by XG but never observed in files.</summary>
+    /// <summary>tsMissing — marked unused in XG's format document.</summary>
     Missing      = 7,
 }
 
@@ -147,10 +147,9 @@ internal sealed class RichGameHeader
     /// <summary>Thumbnail byte length; 0 when no thumbnail.</summary>
     public uint     ThumbnailSize    { get; init; }
     /// <summary>
-    /// Save identity GUID. Real XG stamps one constant into every
-    /// <c>.xgp</c> (2f5af5e1-e021-4832-a423-ef480ec58a0b, stable 2010→
-    /// current — an XG format constant, not a per-file id); the exporter
-    /// reproduces it.
+    /// Save identity GUID. XG stamps one constant here
+    /// (<see cref="XgRecordFactory.XgGameId"/>, whose doc gives the basis);
+    /// the exporter reproduces it.
     /// </summary>
     public Guid     GameId           { get; init; }
     /// <summary>Display name of the game/match as XG stores it.</summary>

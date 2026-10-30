@@ -33,8 +33,9 @@ namespace ConvertXgToJson_Lib;
 /// The record-level surface is format-generic — it serializes whatever
 /// record list the <see cref="XgFile"/> holds, so it handles both
 /// <c>.xgp</c> position content and full <c>.xg</c> match content. Only
-/// the <c>.xgp</c> shape is validated against real XG imports so far; see
-/// <see cref="XgpExporter"/> for the supported decision-level export path.
+/// the <c>.xgp</c> shape has been imported into real XG, by hand; no test can
+/// repeat that. See <see cref="XgpExporter"/> for the supported decision-level
+/// export path.
 /// </para>
 /// </summary>
 public static class XgFileWriter

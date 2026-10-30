@@ -19,10 +19,10 @@ namespace ConvertXgToJson_Lib;
 internal static class XgRecordFactory
 {
     /// <summary>
-    /// The GameId GUID real XG stamps into every RichGameHeader it writes
-    /// (<c>.xg</c> and <c>.xgp</c> alike). Constant across files and XG
-    /// versions in the fixture corpus (2010 through current), so it is an
-    /// XG format constant, not a per-file id.
+    /// The GameId GUID XG stamps into its RichGameHeaders. Constant across the
+    /// fixture corpus read when this writer was written, files from 2010 on
+    /// (the sample was not kept), so it is taken for an XG format constant,
+    /// not a per-file id.
     /// </summary>
     internal static readonly Guid XgGameId = new("2f5af5e1-e021-4832-a423-ef480ec58a0b");
 

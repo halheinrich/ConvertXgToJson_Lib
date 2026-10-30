@@ -202,7 +202,8 @@ public sealed class OpeningBook
     /// <summary>
     /// The selection policy as a comparison over file indices: negative when
     /// <paramref name="a"/> is the better entry. See the class docs for the
-    /// policy and the observed cases it is measured against.
+    /// policy and the tooltip readings it has been compared with, which pull
+    /// opposite ways.
     /// </summary>
     private int CompareSelection(int a, int b)
     {

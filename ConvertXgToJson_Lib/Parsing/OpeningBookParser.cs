@@ -6,9 +6,13 @@ namespace ConvertXgToJson_Lib.Parsing;
 
 /// <summary>
 /// Parses XG's opening-book database (<c>OpeningBookV2.ob</c>): a flat file
-/// of 256-byte blocks with no compression. Byte layout decoded empirically
-/// against XG's own tooltip rendering of book entries (the display oracle);
-/// see the subproject INSTRUCTIONS for the field map and its verification.
+/// of 256-byte blocks with no compression. XG's format document does not
+/// cover this file, so <see cref="ParseEntry"/>'s layout was worked out from
+/// its bytes: every datum XG's tooltip shows for two book entries was matched
+/// to a field, and those two readings are the fixtures in
+/// <c>OpeningBookRealDbTests</c>, which also pins a hit's evaluation
+/// bit-identical to the pane XG copied it into. A field the tooltip does not
+/// show has no such check.
 ///
 /// <para>
 /// Block 0 is the header (magic <c>"OBDB"</c> at offset 4, format version,

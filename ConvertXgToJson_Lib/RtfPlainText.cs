@@ -43,8 +43,8 @@ namespace ConvertXgToJson_Lib;
 /// code page. A backslash before a literal CR or LF is the RTF spec's spelling
 /// of a paragraph break and produces a line break (the contract's list does not
 /// name it; dropping it would silently join two paragraphs, which is the very
-/// defect this type exists to fix, and XG never writes that form, so the rule
-/// cannot misfire on XG's own output). Every other control symbol produces
+/// defect this type exists to fix, and the form is not known to occur in XG's
+/// own output, so the rule is not expected to misfire there). Every other control symbol produces
 /// nothing.</item>
 /// <item><c>\uN</c> produces the UTF-16 code unit <c>N</c> (a negative
 /// <c>N</c> means <c>N + 65536</c>), then skips the fallback that follows it:
@@ -78,7 +78,7 @@ namespace ConvertXgToJson_Lib;
 /// <c>System.Text.Encoding.CodePages</c> package, whose provider has to be
 /// registered process-wide — a global side effect a library may not take on a
 /// caller's behalf — and whose code-page tables would be carried into BgQuiz's
-/// trimmed browser client for a case that has never occurred. The table below
+/// trimmed browser client for a case no comment read so far has shown. The table below
 /// is 32 characters.
 /// </para>
 /// </summary>

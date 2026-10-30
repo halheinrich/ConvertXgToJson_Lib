@@ -339,7 +339,7 @@ Max Cube, with no limit on its terms.
 
 The reader's mirror. Layered exactly like the read path:
 
-* `Writing/` internals mirror `Parsing/` file-for-file:
+* `Writing/` internals mirror the binary parsers under `Parsing/`:
   `PascalBinaryWriter` (alignment-mirroring primitive writes; padding is
   explicit zeros), `SaveRecordWriter` (all six TSaveRec variants → complete
   zero-padded 2560-byte records), `RolloutContextWriter` (2184-byte records),
@@ -351,14 +351,15 @@ The reader's mirror. Layered exactly like the read path:
   not carry its bytes), `XgContainerWriter` (concatenated zlib streams plus
   the trailing manifest).
 * **`XgFileWriter`** (public) — record-level serializer: `XgFile` →
-  stream / bytes / file. Format-generic by construction (it writes whatever
+  stream / bytes. Format-generic by construction (it writes whatever
   record list the model holds, so full-`.xg` output works), but only the
-  `.xgp` shape is validated against real XG imports. It writes only the
+  `.xgp` shape has been imported into real XG, by hand, the sample exports
+  under `TestData/XgpExportSamples`. It writes only the
   inner files the model holds, so a file whose manifest named one the
   reader set aside (temp.xgr2) loses that entry when read and written back;
   the JSON round trip in `XgFileWriterTests` cannot see that, and
   preserving such entries is not supported (halheinrich/backgammon#419).
-* **`XgpExporter`** (public) — decision-level export, two surfaces chosen
+* **`XgpExporter`** (public) — decision-level export, three surfaces chosen
   by what the caller holds (see below). "Exporter" per the ecosystem
   convention (MatExporter precedent): an Exporter translates semantics, a
   Writer/Reader mirrors byte layout. Consumers never touch record
@@ -455,12 +456,13 @@ halheinrich/backgammon#343):
   complete zlib stream, so it cannot be told from a legacy file and reads
   as one.
 * `temp.xgi` holds exactly two records: byte-copies of the first and last
-  records of the emitted stream. (Real XG writes its session's first/last —
-  the "last" often isn't in the `.xgp` at all — so XG demonstrably does not
-  validate the pair; self-consistent first/last is the clean choice.)
-* Real XG stamps one constant GUID into every `.xgp` RichGameHeader
-  (`2f5af5e1-e021-4832-a423-ef480ec58a0b`, stable 2010→current); the
-  exporter reproduces it.
+  records of the emitted stream. (XG's own `.xgp` saves carry its session's
+  first/last, the "last" often not in the `.xgp` at all, so XG evidently does
+  not hold the pair to the file's records. That is inferred from what XG
+  writes; no file has been put to XG to test it. Self-consistent first/last
+  is the clean choice either way.)
+* XG stamps one constant GUID into its RichGameHeaders, and the exporter
+  reproduces it; `XgRecordFactory.XgGameId` holds the value and its basis.
 
 **Clean-position export** (`Write(BgDecisionData, …)`) — for callers that
 hold only the consumer-level decision record (JSON-sourced). Emits a
@@ -550,8 +552,8 @@ The `Anonymized` preset carries both pairs, so it never throws.
 
 **Iterator visibility differs by path, deliberately.** A clean export is
 **XG-import-only**: unanalyzed, so this library's own iterator yields
-**zero** decisions for it (rule 1 of the `.xgp` emission policy); the
-ecosystem's re-ingestible format for analysis-less decisions remains
+**zero** decisions for it (an unanalysed pane is not a record; see "What is
+not a record"); the ecosystem's re-ingestible format for analysis-less decisions remains
 `BgDecisionData` JSON. A sliced analyzed decision is **visible** — exactly
 one decision, analysis and rollout depth intact — because the panes travel
 with it.
@@ -842,7 +844,8 @@ its stored equities — never the `LevelRequest` setting
 optional `XgIteratorOptions` whose `OpeningBook` member carries a loaded
 book database (locating the `.ob` on disk is app configuration — this lib
 takes the instance). For each V2-book-stamped (998) checker-play
-candidate, `LookupBookEntry` builds the session-1-proven key —
+candidate, `LookupBookEntry` builds the key `OpeningBookRealDbTests` pins
+on its fixture decisions —
 `PositionsPlayed[i]` (in the mover's frame, for either seat) + the
 decision's session through the `OpeningBookKey` factories — and hands the
 selected entry to `XgDepthFacts.Resolve`; every
@@ -857,14 +860,14 @@ decisions or candidates are emitted. The bare book facts
 a V1 stamp (999 — the V2 database wasn't its source), a lookup miss, a
 context outside the proven keying (cube not centred at 1), a rollout-backed
 entry being absent — and notably on a **Roller++-evaluation-backed hit**:
-fixture (a) proves XG stamps 998 even when the book's best entry for that
+fixture (a) shows XG stamping 998 even when the book's best entry for that
 position is its Roller++ baseline (Level 1002, zero trials), so there is
 no cached rollout to recover and the fall-through is correct, not a bug.
-Cube decisions never look up: no book-stamped cube decision exists
-anywhere in the fixture corpus (438 files / 23,736 cube records scanned —
-zero 998/999 in cube `Level` or `LevelRequest`), so the cube keying
-convention remains unproven and cube book stamps state the bare facts by
-design.
+Cube decisions never look up: the fixture corpus held no book-stamped cube
+decision when this was built (438 files / 23,736 cube records, zero 998/999
+in cube `Level` or `LevelRequest`; recorded in 9067925, the command not
+kept), so the cube keying convention remains unproven and cube book stamps
+state the bare facts by design.
 
 **Measured against XG.** `XgCorpusAgreementTests` walks the umbrella's
 local `TestData/xg/` and `TestData/xgp/` and holds the converter to XG's
@@ -1070,9 +1073,13 @@ rollout context (`RolloutIndex`), so their labels were already truthful.
 Parser + position-keyed lookup for XG's opening-book database
 (`OpeningBookV2.ob`, installed with XG 2) — the rollout data behind the
 bare 998/999 book level codes that `.xg` files stamp on book-analysed
-candidates. Format decoded empirically; the oracle is XG's own tooltip
-rendering of book entries (two pinned fixtures: the ajhhBG0407 game 9
-Kazaross rollout and a Steven Carey 9-away/9-away rollout).
+candidates. XG's format document does not cover this file. The layout was
+worked out from its bytes (d571b29, 2026-07-18): every datum XG's tooltip
+shows for two entries, the ajhhBG0407 game 9 Kazaross rollout and a Steven
+Carey 9-away/9-away rollout, was matched to a field, and
+`OpeningBookRealDbTests` pins both, with a hit's evaluation bit-identical to
+the pane XG copied it into. A field the tooltip does not show has no such
+check.
 
 **File format.** Flat 256-byte blocks, no compression; file size is an
 exact block multiple. Block 0 is the header (`"OBDB"` magic at +4, format
@@ -1318,13 +1325,13 @@ not a flag — only `1` (doubled) and `0` (no double) record a played action:
 | `0`       | (any)      | `NoDouble` | *null* |
 | `-1`/`-2` | (any)      | *null*     | *null* |
 
-`-2` is the incidental cube pane beside a checker play (never analysed, so
-it never reaches a record); `-1` is the pane XG writes where a game ended with
-no cube action taken — every analysed `-1` record in the corpus is the last
-record of its game, followed by a footer whose `Termination` is ≥ 100
-(by resignation), and it is also what `XgpExporter` writes for a curated
-`.xgp` cube problem. Both map to *null* — "played action not recorded" —
-rather than being flattened into `NoDouble`.
+`-2` is the incidental cube pane beside a checker play; `-1` is the pane XG
+writes where a game ended with no cube action taken — every analysed `-1`
+record in the corpus of the time (e60f9d0, 2026-07-28) was the last record of
+its game, followed by a footer whose `Termination` is ≥ 100 (by resignation),
+and it is also what `XgpExporter` writes for a curated `.xgp` cube problem.
+Both map to *null* — "played action not recorded" — rather than being
+flattened into `NoDouble`.
 
 The mapping is keyed off the pane state alone, **not** off `ErrorCube`'s
 `-999` sentinel: the played action is a game fact, the error an analysis
@@ -1344,7 +1351,8 @@ and pinned corpus-wide in `XgDecisionIteratorCubeActionTests`.
 match files:
 
 * `MoveError` and `ErrorCube` use sentinel value `-1000` to mean "unanalyzed".
-* `IsAnalysed` is gated on the analysis-level field, not on error presence.
+* `IsAnalysed` is not gated on error presence: a cube's reads the pane's
+  `Level`, a move's the pane's move count and evaluations.
 * Error fields are treated as present when `> -999.0` (anything above the
   sentinel).
 * `UnlistedPlayError`, `UnstatedDoublerActionError` and
@@ -1789,10 +1797,10 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   `IterateCore`, whose signature carries the non-nullable
   post-validation invariant. Required because every
   yielded row carries a `DecisionId` stamped from `sourceFile`. The
-  public parameter remains typed `string?` for source-compat with
-  method-group conversions in `XgFilter_Lib.FilteredDecisionIterator`
-  (which uses `Func<XgFile, string?, …>` delegate slots); the runtime
-  contract is strictly non-null. Distinct from the
+  public parameter remains typed `string?` so a method group fits a
+  `Func<XgFile, string?, …>` slot, as XgFilter_Lib's
+  `FilteredDecisionIteratorIdTests` holds it, and so tests can pass null;
+  the runtime contract is strictly non-null. Distinct from the
   `InvalidDataException` for missing match headers below — that throw
   is content-level and remains deferred to first `MoveNext`; this one
   is caller-contract and fires immediately. Unsupported source-file
@@ -1803,25 +1811,22 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   rather than at the API boundary.
 * **Iteration throws on malformed match headers.** Both `Iterate` and
   `IterateDiagramRequests` throw `InvalidDataException` when
-  `ExtractMatchInfo` returns `null` — files without a readable match
-  header are not silently processed with default player names and a
-  zero-length match. The throw is paired with `MatchContext`'s
-  pre-existing `InvalidDataException` on `records[0] is not
-  MatchHeaderRecord`, which fires first on standard fixtures and in
-  practice shadows the iteration-boundary throw. The iteration-boundary
-  throw is the contract-correct fallback for the more permissive scan
-  ordering of `ExtractMatchInfo`. `ExtractMatchInfo` finds a header at
-  any position; `MatchContext` requires one at index 0. Consumers
+  a file's records do not begin with a match header — files without one
+  are not silently processed with default player names and a zero-length
+  match. `MatchContext`'s constructor runs first and requires the header at
+  index 0, so it is what throws; the throw for a null `ExtractMatchInfo`
+  behind it, which finds a header at any position, cannot then be reached.
+  Consumers
   iterating directories of unknown files must catch this if they want
   log-and-skip semantics: `XgSourceReader` covers reading a file, not
   iterating it.
 * **Sentinel-only analyses are filtered at the iterator boundary, not in
-  the leaves.** XG emits two known patterns where the lone "candidate" in
-  `BestMoveAnalysis.Moves[best]` is a non-play sentinel pair:
-  `(-100, -100)` is XG's *illegal-play workaround* (the recorded play in
-  the source file is illegal, XG forces the next position rather than
-  refusing to load), and `(0, 0)` is XG's *no-legal-move* (dance)
-  encoding. Neither is of interest downstream — there is no real
+  the leaves.** XG emits two known patterns where a candidate slot of
+  `BestMoveAnalysis.Moves`, within its `MoveCount`, holds a non-play
+  sentinel: a `from` of `-100` is XG's *illegal-play workaround* (the
+  recorded play in the source file is illegal, XG forces the next position
+  rather than refusing to load), and `(0, 0)` is XG's *no-legal-move*
+  (dance) encoding. Neither is of interest downstream — there is no real
   candidate to evaluate — and feeding either to leaf computation has
   historically produced an `IndexOutOfRangeException` (the `(-100, -100)`
   case, in the since-retired after-board builder) or a "1/1" notation
@@ -1854,8 +1859,8 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   records.
 * **Clean-path exports yield zero iterator decisions — by design.**
   `XgpExporter`'s `BgDecisionData` path writes clean unanalyzed positions;
-  rule 1 of the `.xgp` emission policy ("skip unanalysed") makes them
-  invisible to `Iterate` / `IterateDiagramRequests`. The zero-rows
+  an unanalysed pane is not a record, which makes them invisible to
+  `Iterate` / `IterateDiagramRequests`. The zero-rows
   assertions in `XgpExporterTests` pin that XG-import-only boundary — do
   not "fix" them to expect one row. Callers that want iterator-visible
   analyzed exports use the **slice path** (`Write(XgFile, game,
@@ -2029,12 +2034,12 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
   store zeros there — a zero moves level would decode as a bogus
   "1-ply").
 * **Cube rows never book-enrich — the keying is unproven, so they degrade
-  rather than guess.** Session 1 proved the checker-play keying only; the
+  rather than guess.** Only the checker-play keying is pinned; the
   turned-cube owner-sign convention is unknown and the key factories
-  cover centred-cube contexts only. The full fixture corpus was scanned
-  for an oracle (438 files, 23,736 cube records): **zero** cube analyses
-  carry a book code (998/999) in `Level` or `LevelRequest`, against 3,817
-  book-stamped checker-play candidates. With nothing to pin a cube-row
+  cover centred-cube contexts only. The fixture corpus held no oracle when
+  this was built (438 files, 23,736 cube records, 9067925): **zero** cube
+  analyses carried a book code (998/999) in `Level` or `LevelRequest`,
+  against 3,817 book-stamped checker-play candidates. With nothing to pin a cube-row
   key against, a book-stamped cube resolves to `BookRollout` + `Unknown`
   by design (`BuildCube` passes no entry). If a book-stamped cube
   decision ever surfaces, pin the key against it before wiring cube
@@ -2043,7 +2048,8 @@ Produces types defined in `BgDataTypes_Lib`; see that subproject's
 * **Book selection: deeper rollout levels beat more games — by this
   library's policy, which is not XG's display rule.** One key commonly
   holds several entries (5,113 keys with more than one rollout, 2,099 of
-  them at differing moves levels), and the most rigorous wins: any rollout
+  them at differing moves levels, recorded in c2e7a07 with the #203 work;
+  the command not kept), and the most rigorous wins: any rollout
   over the Roller++ baseline, then the deeper level over more games, with
   recency and file order only final tiebreaks. XG's tooltip agrees on one
   observed key and disagrees on another; both cases and the ruling that

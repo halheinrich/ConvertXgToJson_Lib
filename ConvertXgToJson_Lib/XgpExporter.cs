@@ -18,8 +18,8 @@ namespace ConvertXgToJson_Lib;
 /// on import; the analysis blocks hold XG's own never-analysed sentinels
 /// (<c>Level = -100</c>, error fields <c>-1000</c>), field values mirror an
 /// XG position-editor save, and the on-roll player is normalized to
-/// player 1. <b>XG-import-only, by design:</b> rule 1 of the <c>.xgp</c>
-/// emission policy ("skip unanalysed") makes clean exports invisible to
+/// player 1. <b>XG-import-only, by design:</b> an unanalysed pane builds no
+/// record, which makes clean exports invisible to
 /// this library's own <see cref="XgDecisionIterator"/>; the ecosystem's
 /// re-ingestible format for analysis-less decisions remains
 /// <see cref="BgDecisionData"/> JSON.

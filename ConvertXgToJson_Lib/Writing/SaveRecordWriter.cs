@@ -14,9 +14,11 @@ namespace ConvertXgToJson_Lib.Writing;
 /// only two kinds of content there: uninitialized heap noise (the 8-byte
 /// Previous/Next pointer preamble, Eval/EvalLevel slots beyond MoveCount)
 /// and fields XG's own Delphi source marks unused (`met`). XG rebuilds the
-/// pointers on load and ignores the rest, so zero-fill is both safe and the
-/// cleanest deterministic choice. Verified against the fixture corpus: no
-/// real file carries meaningful data outside the parsed extent.
+/// pointers on load and ignores the rest, so zero-fill is taken to be safe and
+/// is the cleanest deterministic choice. That rests on the fixture corpus read
+/// when this writer was written, which showed nothing meaningful outside the
+/// parsed extent; the sample was not kept, and no test re-checks it, so it is
+/// an assumption for any other file.
 /// </summary>
 internal static class SaveRecordWriter
 {
