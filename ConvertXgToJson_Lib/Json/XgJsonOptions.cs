@@ -61,10 +61,11 @@ internal static class XgJsonOptions
         // whose CanConvert matches wins, so the strict per-enum registrations
         // must precede the blanket one.
         //
-        // (1) The BgDataTypes_Lib wire enums are string-token-exact: they are
-        // this converter's own vocabulary, every writer emits a name, and a
-        // reader that also took ordinals would re-couple a stored document to
-        // member numbering. AnalysisLevel makes that concrete — its declaration
+        // (1) The BgDataTypes_Lib wire enums take names and refuse numeric
+        // ordinals, the token kind StrictJsonStringEnumConverter<TEnum>'s doc
+        // owns: they are this converter's own vocabulary, every writer emits a
+        // name, and a reader that also took ordinals would re-couple a stored
+        // document to member numbering. AnalysisLevel makes that concrete — its declaration
         // order is contractual and its families interleave, so inserting a
         // member renumbers every member above it (Ply3Red, 2026-08-28). These
         // types carry strict type-level attributes of their own, but an
@@ -139,7 +140,7 @@ internal sealed class PositionEngineConverter : JsonConverter<PositionEngine>
 /// <see cref="Read"/> cannot disagree (halheinrich/backgammon#177). Two
 /// tags share one class: <see cref="RecordType.Comment"/> and
 /// <see cref="RecordType.Missing"/> are both <see cref="UnknownRecord"/> —
-/// XG declares the codes but never writes them, and
+/// XG's format document marks the codes unused, and
 /// <see cref="SaveRecordParser"/> tags whatever it does not recognise with
 /// the code it read — and each reads back as an <see cref="UnknownRecord"/>
 /// tagged as it was written. That is also why the mapping is a converter

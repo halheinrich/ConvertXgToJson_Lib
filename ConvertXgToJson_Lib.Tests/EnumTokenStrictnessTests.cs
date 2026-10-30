@@ -7,19 +7,20 @@ namespace ConvertXgToJson_Lib.Tests;
 
 /// <summary>
 /// Pins <see cref="XgJsonOptions"/>' two-population enum token policy
-/// (halheinrich/backgammon#164). The BgDataTypes_Lib wire enums are
-/// string-token-exact — names in, names out, ordinals rejected. The XG-native
-/// enums are deliberately integer-tolerant, because they mirror fields of a
-/// third-party binary format whose value space exceeds the named members. Both
-/// halves are pinned, so a future blanket tightening of either fails loudly
-/// rather than silently breaking the other.
+/// (halheinrich/backgammon#164). The BgDataTypes_Lib wire enums need the token
+/// kind of <see cref="StrictJsonStringEnumConverter{TEnum}"/>, whose doc owns
+/// the rule: names in, names out, ordinals rejected, spelled camelCase in this
+/// document. The XG-native enums are deliberately integer-tolerant, because
+/// they mirror fields of a third-party binary format whose value space exceeds
+/// the named members. Both halves are pinned, so a future blanket tightening of
+/// either fails loudly rather than silently breaking the other.
 /// </summary>
 public class EnumTokenStrictnessTests
 {
     private static readonly JsonSerializerOptions Options = XgJsonOptions.Default;
 
     // ------------------------------------------------------------------ //
-    //  (1) The wire enums: string-token-exact
+    //  (1) The wire enums: names, never ordinals
     // ------------------------------------------------------------------ //
 
     /// <summary>
@@ -27,7 +28,7 @@ public class EnumTokenStrictnessTests
     /// document writes deserializes to its member, while the member's own
     /// ordinal — and an undefined one — are rejected.
     /// </summary>
-    private static void AssertStringTokenExact<TEnum>(string expectedToken, TEnum member)
+    private static void AssertNamesNotOrdinals<TEnum>(string expectedToken, TEnum member)
         where TEnum : struct, Enum
     {
         JsonSerializer.Serialize(member, Options).Should().Be($"\"{expectedToken}\"");
@@ -40,20 +41,20 @@ public class EnumTokenStrictnessTests
     }
 
     [Fact]
-    public void AnalysisLevel_IsStringTokenExact() =>
-        AssertStringTokenExact("ply3", AnalysisLevel.Ply3);
+    public void AnalysisLevel_TakesNamesNotOrdinals() =>
+        AssertNamesNotOrdinals("ply3", AnalysisLevel.Ply3);
 
     [Fact]
-    public void AnalysisMode_IsStringTokenExact() =>
-        AssertStringTokenExact("bookRollout", AnalysisMode.BookRollout);
+    public void AnalysisMode_TakesNamesNotOrdinals() =>
+        AssertNamesNotOrdinals("bookRollout", AnalysisMode.BookRollout);
 
     [Fact]
-    public void CubeAction_IsStringTokenExact() =>
-        AssertStringTokenExact("take", CubeAction.Take);
+    public void CubeAction_TakesNamesNotOrdinals() =>
+        AssertNamesNotOrdinals("take", CubeAction.Take);
 
     [Fact]
-    public void CubeOwner_IsStringTokenExact() =>
-        AssertStringTokenExact("onRoll", CubeOwner.OnRoll);
+    public void CubeOwner_TakesNamesNotOrdinals() =>
+        AssertNamesNotOrdinals("onRoll", CubeOwner.OnRoll);
 
     /// <summary>
     /// The kind a metadata DTO's terms and standing state
@@ -62,8 +63,8 @@ public class EnumTokenStrictnessTests
     /// read as a kind this options object should never admit.
     /// </summary>
     [Fact]
-    public void SessionKind_IsStringTokenExact() =>
-        AssertStringTokenExact("money", SessionKind.Money);
+    public void SessionKind_TakesNamesNotOrdinals() =>
+        AssertNamesNotOrdinals("money", SessionKind.Money);
 
     /// <summary>
     /// The camelCase spelling is the document's pinned wire contract, and it
