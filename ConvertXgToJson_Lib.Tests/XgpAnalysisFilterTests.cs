@@ -15,9 +15,10 @@ namespace ConvertXgToJson_Lib.Tests;
 ///   </description></item>
 ///   <item><description>
 ///     <b>At most one decision per file.</b> Emit the analysed checker-play if
-///     the file has one; otherwise the analysed cube, if any. XG always writes
-///     a cube pane, so an <c>.xgp</c> saved after the dice were rolled can carry
-///     analysis in both panes — but the decision the file records is the play.
+///     the file has one; otherwise the analysed cube, if any. The post-roll
+///     fixtures below hold a cube pane too, so an <c>.xgp</c> saved after the
+///     dice were rolled can carry analysis in both panes — but the decision
+///     the file records is the play.
 ///     Depth is not compared: an analysed play wins even against a
 ///     deeper-analysed cube.
 ///   </description></item>

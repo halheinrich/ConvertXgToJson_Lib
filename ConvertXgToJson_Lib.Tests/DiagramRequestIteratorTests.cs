@@ -28,10 +28,12 @@ public class DiagramRequestIteratorTests
 
     /// <summary>
     /// Every cube decision states XG's cube equities, and its stored win
-    /// probabilities read as probabilities — to within XG's single-precision
-    /// rounding, which leaves a probability of zero a few millionths either
-    /// side (the corpus holds one at −4.9e-6). The records store XG's numbers
-    /// verbatim and check no range.
+    /// probabilities read as probabilities — to within
+    /// <see cref="RoundingSlack"/>, since a stored probability can sit a few
+    /// millionths outside the range: commit 194b185 records one at −4.9e-6,
+    /// naming no file. That is an instance, not a bound, and single-precision
+    /// rounding is the inferred cause. The records store XG's numbers verbatim
+    /// and check no range.
     /// </summary>
     [Fact]
     public void IterateDiagramRequests_CubeRequest_EquityFieldsPopulated()

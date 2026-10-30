@@ -470,7 +470,7 @@ public sealed class XgGameBuilder
 
     /// <summary>
     /// Records a cube decision that was never analysed — XG's incidental
-    /// cube pane, which it writes before every roll. The iterator skips
+    /// cube pane, as it writes before a roll. The iterator skips
     /// it; the played actions still move the cube.
     /// </summary>
     /// <param name="doubler">The player on roll, deciding whether to double.</param>

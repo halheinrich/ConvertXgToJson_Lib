@@ -643,9 +643,9 @@ public class XgDecisionIteratorTests
     /// XG files where every game starts from the canonical opening
     /// position. Every emitted DecisionRow must therefore carry
     /// <c>IsStandardStart == true</c>. Pins MatchContext-&gt;DecisionRow
-    /// flow for the new field; a regression here would manifest as
-    /// downstream MoveNumberFilter (Session 3) silently rejecting all
-    /// match decisions.
+    /// flow for that field; a regression here would make XgFilter_Lib's
+    /// MoveNumberFilter, which passes only standard starts, silently
+    /// reject every match decision.
     /// </summary>
     [Theory]
     [InlineData("match35041658.xg")]

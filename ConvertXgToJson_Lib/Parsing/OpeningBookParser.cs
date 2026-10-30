@@ -136,8 +136,11 @@ internal static class OpeningBookParser
         // +152: entry level; +160/+164: engine version pair; +168: trials;
         // +172: per-game equity std dev; +176/+180: rollout sub-levels;
         // +188: dice seed; +196: duration seconds; +200/+208: TDateTimes.
-        // (+156 is always zero; +184 and +192 hold small unidentified values
-        // on ~2% of rollout entries and are deliberately not surfaced.)
+        // (+156, +184 and +192 are deliberately not surfaced. In the one book
+        // decoded here, the FixtureFiles copy of OpeningBookV2.ob, +156 read
+        // zero and +184 and +192 held small unidentified values on about 2% of
+        // rollout entries: commit d571b29's reading, its count not kept and
+        // nothing pinning it.)
         return new OpeningBookEntry
         {
             Contributor = contributor,

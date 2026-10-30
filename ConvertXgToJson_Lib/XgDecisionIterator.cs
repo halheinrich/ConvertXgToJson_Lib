@@ -294,11 +294,14 @@ public static class XgDecisionIterator
     ///
     /// <para>
     /// An <c>.xgp</c>'s move pane exists only because dice were rolled, so
-    /// dice in the file mean the saved decision <em>is</em> the play. XG
-    /// nonetheless always writes a cube pane, which is incidental — a
-    /// curated cube problem is a pre-roll position and carries no move pane
-    /// at all. Analysis depth is deliberately not compared: an analysed play
-    /// wins even against a more deeply analysed cube.
+    /// dice in the file mean the saved decision <em>is</em> the play. XG's
+    /// post-roll saves that the tests read hold a cube pane as well
+    /// (<c>XgpAnalysisFilterTests</c>' fixtures, <c>MTCH4064_1_22.xgp</c>;
+    /// commit 898feb0), taken to be XG's habit, an inference from those
+    /// files. That pane is incidental: the curated cube problems among the
+    /// same fixtures are pre-roll positions with no move pane at all.
+    /// Analysis depth is deliberately not compared: an analysed play wins
+    /// even against a more deeply analysed cube.
     /// </para>
     ///
     /// <para>
@@ -976,9 +979,9 @@ public static class XgDecisionIterator
     ///   <item><description>
     ///     <c>.xgp</c> → <see cref="XgpDecisionId"/> keyed on the bare
     ///     filename, with no within-file coordinates. XG itself does
-    ///     <em>not</em> guarantee one decision per <c>.xgp</c> — it always
-    ///     writes a cube pane alongside the move pane, and both can carry
-    ///     analysis. What makes the bare filename a valid key is
+    ///     <em>not</em> guarantee one decision per <c>.xgp</c> — a cube pane
+    ///     and a move pane can both carry analysis. What makes the bare
+    ///     filename a valid key is
     ///     <see cref="SelectXgpDecision"/>, the iterator's emission policy,
     ///     which reduces every <c>.xgp</c> to at most one decision.
     ///   </description></item>

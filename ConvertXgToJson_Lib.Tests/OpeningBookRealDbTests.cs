@@ -61,8 +61,8 @@ public class OpeningBookRealDbTests
     /// book returns the policy's entry — on this key, also the one XG's
     /// tooltip shows — and its stored eval
     /// vector is bit-identical to the one XG copied into the <c>.xg</c>
-    /// analysis pane (level 998 book stamp). This is the keying convention
-    /// session 3's depth stamping will rely on.
+    /// analysis pane (level 998 book stamp). This is the keying the iterator's
+    /// book enrichment uses.
     /// </summary>
     [Fact]
     [Trait("Category", "FileIO")]

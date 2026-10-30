@@ -278,10 +278,7 @@ public static class XgFileReader
     /// <returns>
     /// An <see cref="XgMatchInfo"/> populated from the first
     /// <see cref="MatchHeaderRecord"/>, or <c>null</c> if temp.xg is shorter
-    /// than one record or does not begin with a match header record. Callers
-    /// that previously relied on a default-constructed return (empty strings,
-    /// <c>MatchLength = 0</c>) should treat <c>null</c> as "skip this file"
-    /// rather than as a zero-length money match.
+    /// than one record or does not begin with a match header record.
     /// </returns>
     /// <exception cref="InvalidDataException">
     /// The payload is not one zlib stream and its container directory cannot

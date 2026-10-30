@@ -445,10 +445,11 @@ public static class XgpExporter
         }
         else
         {
-            // XG always writes a cube pane beside a move pane: the real
-            // same-turn cube record when the source has one (Joe Russell
-            // shape), else the incidental unanalysed pane (PlayAnalysis
-            // shape) carrying the roll.
+            // A cube pane beside the move pane, as XG's own saves hold
+            // (SelectXgpDecision states the basis): the real same-turn cube
+            // record when the source has one (Joe Russell shape), else the
+            // incidental unanalysed pane (PlayAnalysis shape) carrying the
+            // roll.
             records.Add(cube != null
                 ? SliceCubeRecord(cube, RemapCubeRollout, RemapComment)
                 : XgRecordFactory.UnanalysedCubeRecord(

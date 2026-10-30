@@ -69,11 +69,17 @@ namespace ConvertXgToJson_Lib.Tests;
 ///     after the played move.
 ///   </description></item>
 ///   <item><description>
-///     <b>XG's error for the player's move is the depth-first error</b> of the
-///     played candidate (SPEC-scoring §2a) — except where the depth-first best
+///     <b>XG's error for the player's move</b> — the rule under test, with one
+///     counterexample unresolved. The rule: it is the depth-first error of the
+///     played candidate (SPEC-scoring §2a), except where the depth-first best
 ///     is an opening-book candidate, which XG's recorded analysis evidently
 ///     did not rank (the umbrella's measurement on halheinrich/backgammon#282,
-///     2026-09-26: 23 such opening moves in 36,101).
+///     2026-09-26: 23 such opening moves in 36,101). The counterexample:
+///     <c>gobetzu_arash79_18072026_42274679.xg</c>, game 1 move 3, depth-first
+///     error 0.04418 against XG's stored 0.00000, its best not a book candidate
+///     (halheinrich/backgammon#457). Neither arm explains it, so the rule's
+///     test fails on a corpus holding that file; whether the rule lacks an arm
+///     or that record's stored error is wrong is open.
 ///   </description></item>
 ///   <item><description>
 ///     <b>XG's cube errors are the scoring policy's</b> errors of the stated
@@ -87,9 +93,10 @@ namespace ConvertXgToJson_Lib.Tests;
 ///     is read from the production API and never restated here.
 ///   </description></item>
 /// </list>
-/// The corpus is gitignored and churns, so the invariants hold for any corpus
-/// and no count is pinned; on an empty corpus every fact passes vacuously, by
-/// design (AGENTS.md § Tests). This gates nothing.
+/// The corpus is gitignored and churns, so the invariants are stated for any
+/// corpus and no count is pinned; a file added to it can break one, as above,
+/// and on an empty corpus every fact passes vacuously, by design (AGENTS.md
+/// § Tests). This gates nothing.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -155,9 +162,10 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
     }
 
     /// <summary>
-    /// XG's recorded error for the player's move is the played candidate's
-    /// error under depth first; where it is not, the depth-first best is an
-    /// opening-book candidate — the one exception, stated as a rule.
+    /// The rule under test: XG's recorded error for the player's move is the
+    /// played candidate's error under depth first, save where the depth-first
+    /// best is an opening-book candidate. One record breaks it, unresolved
+    /// (the class doc; halheinrich/backgammon#457).
     /// </summary>
     [Fact]
     public void PlayersError_IsTheDepthFirstError_SaveWhereTheDepthFirstBestIsABookCandidate()

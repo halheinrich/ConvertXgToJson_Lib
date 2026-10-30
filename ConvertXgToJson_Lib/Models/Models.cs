@@ -1045,10 +1045,11 @@ public sealed class XgFile
     /// <summary>
     /// The comment table (temp.xgc on the wire), joined by the records'
     /// comment indices: RTF in XG-authored files, the caller's text verbatim
-    /// in <see cref="XgFileBuilder"/> output. May carry unreferenced leftovers —
-    /// XG bundles its working temp files wholesale, so orphaned entries are
-    /// format reality, not a parse failure. An interior empty entry is a
-    /// real (empty) comment; skipping it desyncs every later index.
+    /// in <see cref="XgFileBuilder"/> output. May carry unreferenced leftovers,
+    /// inferred to ride in on XG bundling its working temp files wholesale;
+    /// orphaned entries are format reality, not a parse failure. An interior
+    /// empty entry is a real (empty) comment; skipping it desyncs every later
+    /// index.
     /// </summary>
     [JsonInclude]
     internal List<string>     Comments        { get; init; } = [];

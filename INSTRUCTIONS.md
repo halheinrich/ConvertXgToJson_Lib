@@ -83,7 +83,9 @@ local corpus on 2026-10-30. Three kinds of test read differently:
   the corpus some pass vacuously, by design (`XgCorpusAgreementTests`,
   `ReadMatchInfoTests`, `ReadGameHeadersTests`), and others fail, asserting
   they saw at least one decision (`XgDecisionIdStampingTests`). A file added
-  to the corpus can fail one: it holds the invariant, not the sample.
+  to the corpus can fail one: it holds the invariant, not the sample. One
+  does, unresolved: halheinrich/backgammon#457, stated in
+  `XgCorpusAgreementTests`' class doc.
 * Fixture tests name files under `TestData/FixtureFiles` and fail when a file
   is missing (`TooGoodPassFixtureTests`, `OpeningBookRealDbTests`,
   `XgpExportXgAgreementTests`).
@@ -1021,20 +1023,22 @@ and `XgDecisionIteratorCubeActionTests` pins it corpus-wide.
   entry and silently desyncs all subsequent comment joins — it once
   shipped that way.
 * **`temp.xgc` may carry unreferenced leftovers — orphaned comment-table
-  entries are format reality, not a parse failure.** XG saves by bundling
-  its working-directory temp files wholesale, so a stale comment table
-  from an earlier commented session rides into unrelated saves.
-  `match35041658.xg` and `MoneyTest.xg` each parse with three real RTF
-  comment-table entries (two URLs + XG rollout-settings text, same
+  entries are format reality, not a parse failure.** The inferred mechanism,
+  from the identical tables below: XG saves by bundling its working-directory
+  temp files wholesale, so a stale comment table from an earlier commented
+  session rides into unrelated saves. `match35041658.xg` and `MoneyTest.xg`
+  each parse with three real RTF comment-table entries (two URLs + XG
+  rollout-settings text, same
   Japanese-locale RTF — *identical* across the two different matches)
   referenced by nothing: every parsed `CommentIndex` / header-footer
   comment index in both files is `-1`. **Never assert comment-table
   emptiness for a "commentless" match file, and don't "fix" orphans** —
   whole-file copy preserves them, slice drops them (only *referenced* comments
-  are carried); both are correct. The footer-record hypothesis (an undecoded
-  comment-index field on `GameFooterRecord` / `MatchFooterRecord`) was
-  **refuted** by a byte-level sweep: footer records contain no −1-defaulted
-  dwords at any common offset, so there is no hidden comment-index field there.
+  are carried); both are correct. An undecoded comment-index field on
+  `GameFooterRecord` / `MatchFooterRecord` does not explain them, on one
+  sweep's evidence (commit efd2264, its script not kept): no 4-byte offset of
+  a footer record read −1 across the known-commentless references and a
+  plausible comment index in these two files.
 
 ### Iteration
 

@@ -28,12 +28,9 @@ namespace ConvertXgToJson_Lib;
 /// </para>
 ///
 /// <para>
-/// This type replaces the imperative <c>AdvanceNextMatch</c> /
-/// <c>AdvanceNextGame</c> field setters that previously lived on
-/// <see cref="XgIteratorState"/>. Skip semantics belong to the caller's
-/// filter / consumer concern, not the producer's iteration state; moving
-/// them into a single pre-registered predicate record keeps
-/// <see cref="XgIteratorState"/> a pure read-only observer.
+/// Skip semantics belong to the caller's filter / consumer concern, not the
+/// producer's iteration state, so they live in this pre-registered predicate
+/// record and <see cref="XgIteratorState"/> stays a read-only observer.
 /// </para>
 /// </summary>
 /// <param name="SkipMatchAt">Evaluated once per match at the match header,
