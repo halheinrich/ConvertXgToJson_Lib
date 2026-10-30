@@ -15,8 +15,8 @@ namespace ConvertXgToJson_Lib.Tests;
 ///   <item><description>
 ///     <c>Moves[best] = [-100, -100, …]</c> — XG's <b>illegal-play
 ///     workaround</b>. Source play was illegal, XG forces the next
-///     position rather than refusing to load and emits this as the
-///     lone "candidate." Without the iterator skip, this used to
+///     position rather than refusing to load and emits this in a
+///     candidate slot. Without the iterator skip, this used to
 ///     reach the since-retired after-board builder and throw
 ///     <see cref="IndexOutOfRangeException"/> on
 ///     <c>board[from + 1] = board[-99]</c>.

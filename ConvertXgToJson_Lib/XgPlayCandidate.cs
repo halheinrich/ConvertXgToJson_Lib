@@ -39,9 +39,9 @@ public sealed record XgPlayCandidate
     public Play Play { get; init; }
 
     /// <summary>
-    /// The candidate's equity from the mover's perspective. The iterator
-    /// reports the highest-equity candidate as the best play, so the order
-    /// candidates are given to the builder in does not matter.
+    /// The candidate's equity from the mover's perspective. The builder keeps
+    /// the candidates in the order given, as XG's order is kept; which is best
+    /// is a ranking's (<c>RankedBy</c>), under which the order breaks a tie.
     /// </summary>
     public double Equity { get; init; }
 
