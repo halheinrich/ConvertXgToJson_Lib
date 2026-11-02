@@ -32,6 +32,7 @@ this table says where to start.
 | read only the players and terms, or the games' standings | `XgFileReader.ReadMatchInfo`, `ReadGameHeaders` |
 | get the decisions of a parsed file | `XgDecisionIterator.IterateDiagramRequests` (records) or `Iterate` (rows for a ranking) |
 | observe, stop or configure a walk | `XgIteratorState`, `XgIteratorCallbacks`, `XgIteratorOptions` |
+| learn what a walk left out of a file, and why | `XgIteratorState.Omissions` (each an `XgOmission`) and `ForcedPlayCount`, or the walk's logger (see "The iterator's parameters") |
 | say which rollout stands behind a book-stamped candidate | `OpeningBook.Load` / `TryLoad`, handed to `XgIteratorOptions.OpeningBook` |
 | write or read the JSON document | `XgFileReader.ToJson`, `WriteJsonAsync`, `ReadJson` |
 | write an `XgFile` back to XG binary | `XgFileWriter` |
@@ -110,6 +111,11 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
   serialization contract. The test project also references
   `BgDataTypes_Lib.TestSupport`, whose `TestRecords` builds the records a
   test needs by hand.
+* **BgMoveGen** — one rule, the forced play: `MoveGenerator.GeneratePlays`
+  says whether a checker play's position offers exactly one legal play
+  (halheinrich/backgammon#514, Hal's ruling of 2026-11-01 on the
+  reference). BgMoveGen references BgDataTypes_Lib alone, so the edge makes
+  no cycle; it reaches every consumer of this library.
 
 ## Layout
 
@@ -489,8 +495,26 @@ played candidate is found by resulting position: the candidate whose
 
 **What is not a record.** The emission rules sit at the one dispatch both
 surfaces share (`IterateAnalysedDecisions`), so the two can never disagree
-about which source decisions become records:
+about which source decisions become records. The goal is Hal's
+(halheinrich/backgammon#514, 2026-11-01): every legitimate decision, and
+every problem brought to the user. So what is left out is one of three
+things — ordinary data that is no decision, passed by silently; a forced
+play, counted; or a problem in XG's data, omitted and *reported* as an
+`XgOmission` (through the caller's logger and `XgIteratorState.Omissions`;
+see "The iterator's parameters") — and the walk goes on in every case:
 
+* **A game whose header states a standing its session refuses** — a match
+  game in which a player needs 0 points or less, or more than the match's
+  length, or a Crawford flag at a standing where not exactly one player is
+  1-away. `MatchContext.Update` pairs each header at the header, through the
+  standing's constructors (`XgGameInfo.From`) and `GameSession.Create`
+  (halheinrich/backgammon#310, site 1), and a refusal leaves `GameInfo`
+  null and the refusal's sentence in `GameRefusal`. The whole game is
+  omitted and reported (`XgOmissionKind.InvalidStanding`); `SkipGameAt` is
+  not asked; the game number still advances, so the games around it keep
+  their numbers; and the walk resumes at the next header. A money game is
+  outside the rule, and a negative money score is accepted and not
+  reported (Hal's ruling of 2026-11-01).
 * **Unanalysed panes** — a move record without a move count and an
   evaluation (`IsAnalysed(MoveRecord)`), a cube pane whose `Level` is not
   above 0 (`IsAnalysed(CubeRecord)`; see "Level semantics").
@@ -506,23 +530,50 @@ about which source decisions become records:
   Legitimate XG/XGP data, simply not a decision in the record model:
   passed by silently, as ordinary filtering, for both kinds. The rule is
   `PositionData.IsDecisionPosition`'s, asked, never restated.
-* **XG's two non-play sentinels** — the illegal-play marker, skipped with
-  a warning naming the file, game, move and roll, and the dance, skipped
-  silently (see Pitfalls).
-* **A move record that states no roll** (`StatesRoll`).
-* **A corrupt candidate** — a candidate invalid from its own position,
-  which the record would refuse (Hal's ruling of 2026-09-25 on invalid
-  plays, applied to stored candidates). `ReadCheckerPlay` tests every
-  candidate with `BoardState.TryApplyPlay` on a **fresh board per
-  candidate**, since the method applies a valid play and turns the board,
-  so a shared one would test later candidates from the wrong position. The
-  decision is skipped the way the illegal-play marker is, with a warning
-  listing each invalid candidate; the rest of the file still emits.
+* **Every checker-play kind but a decision.** Each analysed move record
+  has one kind, `CheckerPlayKind`, given by `ClassifyCheckerPlay` — the one
+  classification, asked in this order, problems before the forced test so
+  that recognized bad data at a forced position is reported and not
+  counted:
+  * **A move record that states no roll** (`StatesRoll`): passed by.
+  * **XG's illegal-play marker** among the candidates
+    (`ClassifySentinelAnalysis`): the play made in the source was illegal.
+    Omitted and reported (`XgOmissionKind.IllegalPlay`), by Hal's ruling of
+    2026-11-01; see Pitfalls for the sentinels.
+  * **A corrupt candidate** — a candidate invalid from its own position,
+    which the record would refuse (Hal's ruling of 2026-09-25 on invalid
+    plays, applied to stored candidates). Every candidate is tested with
+    `BoardState.TryApplyPlay` on a **fresh board per candidate**, since the
+    method applies a valid play and turns the board, so a shared one would
+    test later candidates from the wrong position. XG's dance sentinel is
+    read as the empty play, never translated, and is corrupt where a legal
+    play exists. Omitted and reported (`XgOmissionKind.CorruptCandidate`),
+    with the reason naming each invalid candidate.
+  * **A forced play** — exactly one legal play from the position, by
+    BgMoveGen's `MoveGenerator.GeneratePlays`, which returns the distinct
+    legal plays and a dance as one empty play; so a dance is a forced play
+    with no kind of its own (Hal's ruling of 2026-11-01). No decision for
+    any caller: counted on `XgIteratorState.ForcedPlayCount`, never
+    reported. The candidate count XG stored is no part of the rule: a
+    position with several legal plays and one stored candidate is a
+    decision.
 
-Nothing is caught to find any of these, and nothing else is caught or
-skipped: any other refusal from BgDataTypes_Lib fails loud. For an `.xgp`
-every rule acts upstream of the single-decision policy, so a play skipped
-for any reason never suppresses the file's analysed cube.
+  Each omitted checker play is omitted alone: each decision is read from
+  its own record, and XG's next record states the next position, so the
+  rest of the game goes on (Hal's ruling, per decision).
+
+Recovery is as narrow as the rule: the one thing caught is the
+`ArgumentException` the standing's constructors and `GameSession.Create`
+refuse a header's values with, at that pairing call in `MatchContext` alone
+(a null argument there is a programming failure and propagates). Nothing
+is caught to find any other kind, and nothing else is caught or skipped:
+any other refusal from BgDataTypes_Lib, a callback's exception, a file
+without a match header, all fail loud as before. For an `.xgp` every rule
+acts upstream of the single-decision policy, so a play left out for any
+reason never suppresses the file's analysed cube: an `.xgp` holding a
+forced play and an analysed cube yields the cube. The raw records stay as
+read, so what the walk leaves out is still in the `XgFile`; a public
+whole-game walk over the same classification is halheinrich/backgammon#519.
 
 **The ranking.** `XgIteratorOptions.Ranking` is the `PlayRanking` the walk
 judges decisions under, `PlayRanking.Equity` by default (SPEC-scoring §2a:
@@ -629,7 +680,15 @@ Double / Pass 580 and the fourth answer 925, which reads Too good in 902
 and No double / Pass in 23. Measured 2026-10-02 (UTC) over the 21 `.xg`
 fixtures, all of which parsed (none failed): 133 cube records, across
 eleven of the files, have the fourth answer as their truth, 129 reading
-Too good and 4 No double / Pass. Dated evidence, not pins.
+Too good and 4 No double / Pass. Measured 2026-11-01 over the 612-file
+corpus of that day (419 `.xg`, 193 `.xgp`), the first measurement under the
+one classification (halheinrich/backgammon#514): 69,504 analysed records,
+60,468 built (39,114 plays, 21,354 cubes), 4 passed by as not decisions,
+9,032 forced plays, no illegal play, no corrupt candidate and no game
+omitted for its standing in that corpus; candidate after-boards
+323,716/323,716 and player after-boards 39,080/39,080 equal to XG's. The
+dance and several-candidate shares of the forced plays are in the
+`Summary` output. Dated evidence, not pins.
 
 ### Level semantics: `LevelRequest` vs `Level`
 
@@ -785,9 +844,23 @@ concern each: `XgIteratorState` observes, `XgIteratorCallbacks` controls
 iteration, `XgIteratorOptions` configures how rows are built. Null means the
 defaults, and each type's doc states its members.
 
-* `XgIteratorState` is a pure read-only observer of per-row context: `MatchInfo`
-  is populated at the file boundary and `GameInfo` at each game header. It
-  carries no caller-mutable surface and takes no part in iteration control.
+* `XgIteratorState` is a pure read-only observer: `MatchInfo` is populated at
+  the file boundary and `GameInfo` at each game header (null while the walk
+  is in a game it omitted), and the walk records what it leaves out as it
+  goes — each `XgOmission` on `Omissions` (an omitted game, or an omitted
+  checker play with its move and roll, each with its kind and the rule
+  owner's reason) and the forced plays on `ForcedPlayCount`, information
+  and not a problem. It carries no caller-mutable surface and takes no part
+  in iteration control. **It resets, and does not refuse reuse**: every
+  member is cleared at the first `MoveNext` of each enumeration (and by
+  `ReadGameHeaders`), so one state serves a whole directory and nothing
+  leaks from one file, or one enumeration, into the next; `Omissions` is
+  replaced rather than cleared, so a list kept from an earlier walk stands.
+  The omissions and the count are truthful about the walk: a game the
+  caller skipped or never reached is not examined, and nothing here says it
+  is clean. Each omission is also logged at `Warning` through the walk's
+  logger, which defaults to `NullLogger`, so a caller supplying neither a
+  state nor a logger hears nothing.
 * `XgIteratorCallbacks` holds four predicates: `SkipMatchAt` and `SkipGameAt`
   at the headers, before any row yields; `StopGameAfter` and `StopMatchAfter`
   after a decision has yielded.
@@ -1077,13 +1150,23 @@ and `XgDecisionIteratorCubeActionTests` pins it corpus-wide.
   sentinel: a `from` of `-100` is XG's *illegal-play workaround* (the
   recorded play in the source file is illegal, XG forces the next position
   rather than refusing to load), and `(0, 0)` is XG's *no-legal-move*
-  (dance) encoding. Neither is of interest downstream, and feeding either to
-  leaf computation has historically produced an `IndexOutOfRangeException` or
-  a "1/1" notation glitch. Both surfaces gate emission in `ReadCheckerPlay`
-  (`ClassifySentinelAnalysis`), so the translator never sees a sentinel. Do not
-  add a sentinel branch to the translator: sentinel semantics belong with the
-  iterator that decides what to emit, not with the leaf that operates on the
-  move encoding.
+  (dance) encoding. Feeding either to leaf computation has historically
+  produced an `IndexOutOfRangeException` or a "1/1" notation glitch. The one
+  classification reads both before any candidate is translated
+  (`ClassifyCheckerPlay`, through `ClassifySentinelAnalysis`): the marker
+  is an omission, the dance the empty play, forced where no play is legal
+  and corrupt where one is. Do not add a sentinel branch to the translator:
+  sentinel semantics belong with the iterator that decides what to emit,
+  not with the leaf that operates on the move encoding.
+* **A one-checker test position is a forced play.** One checker on the
+  24-point against a 3-1 reaches one position however the dice are played,
+  so `GeneratePlays` returns one play and the walk counts the record as
+  forced and yields nothing. A test that needs a decision gives the mover a
+  choice (two checkers, say, on 24 and 13); a test of the forced count uses
+  the one-checker position on purpose. The builder's `Dance` likewise is a
+  forced play only at a position with no legal play (on the bar against a
+  closed board); at the opening position the walk reports it as a corrupt
+  candidate, which is right.
 * **`StopGameAfter` / `StopMatchAfter` fire *after* the yield.** The
   consumer sees the just-yielded row, *then* the predicate runs on the
   producer's next `MoveNext`. To suppress a row entirely, return `true` from
