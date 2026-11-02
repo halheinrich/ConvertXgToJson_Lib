@@ -32,7 +32,7 @@ this table says where to start.
 | read only the players and terms, or the games' standings | `XgFileReader.ReadMatchInfo`, `ReadGameHeaders` |
 | get the decisions of a parsed file | `XgDecisionIterator.IterateDiagramRequests` (records) or `Iterate` (rows for a ranking) |
 | observe, stop or configure a walk | `XgIteratorState`, `XgIteratorCallbacks`, `XgIteratorOptions` |
-| learn what a walk left out of a file, and why | `XgIteratorState.Omissions` (each an `XgOmission`) and `ForcedPlayCount`, or the walk's logger (see "The iterator's parameters") |
+| learn what problems a walk left out of a file, and why, and how many forced plays it passed by | `XgIteratorState.Omissions` (each an `XgOmission`) and `ForcedPlayCount`, or the walk's logger (see "The iterator's parameters") |
 | say which rollout stands behind a book-stamped candidate | `OpeningBook.Load` / `TryLoad`, handed to `XgIteratorOptions.OpeningBook` |
 | write or read the JSON document | `XgFileReader.ToJson`, `WriteJsonAsync`, `ReadJson` |
 | write an `XgFile` back to XG binary | `XgFileWriter` |
@@ -536,17 +536,18 @@ see "The iterator's parameters") — and the walk goes on in every case:
   `PositionData.IsDecisionPosition`'s, asked, never restated.
 * **Every checker-play kind but a decision.** Each analysed move record
   has one kind, `CheckerPlayKind`, given by `ClassifyCheckerPlay` — the one
-  classification, asked in this order, problems before the forced test so
-  that recognized bad data at a forced position is reported and not
-  counted:
+  classification, asked in this order. The marker comes first because it
+  is no play: it must never reach the translator, and the dice beside it
+  are never used, so dice that are no roll pass by with it rather than
+  being refused. A corrupt candidate comes before the forced test, so that
+  recognized bad data at a forced position is reported and not counted:
   * **XG's illegal-play marker** among the candidates
     (`ClassifySentinelAnalysis`): the play made in the source was illegal.
-    Omitted and reported (`XgOmissionKind.IllegalPlay`), by Hal's ruling of
-    2026-11-01, whatever the record's dice say — read before the roll, as
-    the old walk read it — and where the dice are no roll (both 0, one 0, a
-    face above 6) the omission names its move and no roll, inventing no
-    dice (`RollOf`, through `DiceRoll.TryParse`); see Pitfalls for the
-    sentinels.
+    No decision and no problem, by Hal's rulings: "Skip decisions where an
+    illegal play was made" (2026-11-01) and "Do not report illegal plays;
+    they occur and are legit" (2026-11-02). It passes by in silence, with
+    no omission, no log line and no count, whatever the position or the
+    dice; see Pitfalls for the sentinels.
   * **A move record that states no roll** (`StatesRoll`): passed by, its
     candidates unjudged.
   * **A corrupt candidate** — a candidate invalid from its own position,
@@ -560,7 +561,9 @@ see "The iterator's parameters") — and the walk goes on in every case:
     the record can be called forced, and the sentinel itself is corrupt
     where a legal play exists. Omitted and reported
     (`XgOmissionKind.CorruptCandidate`), with the reason naming each
-    invalid candidate.
+    invalid candidate and the omission its move and roll: a roll is always
+    there, since a record with no roll never reaches the candidates and
+    `GeneratePlays` refuses dice that are no roll, loud.
   * **A forced play** — exactly one legal play from the position, by
     BgMoveGen's `MoveGenerator.GeneratePlays`, which returns the distinct
     legal plays and a dance as one empty play; so a dance is a forced play
@@ -570,7 +573,7 @@ see "The iterator's parameters") — and the walk goes on in every case:
     position with several legal plays and one stored candidate is a
     decision.
 
-  Each omitted checker play is omitted alone: each decision is read from
+  A checker play left out is left out alone: each decision is read from
   its own record, and XG's next record states the next position, so the
   rest of the game goes on (Hal's ruling, per decision).
 
@@ -860,10 +863,10 @@ defaults, and each type's doc states its members.
   the file boundary and `GameInfo` at each game header (null while the walk
   is in a game it omitted), and the walk records what it leaves out as it
   goes — each `XgOmission` on `Omissions` (an omitted game, or an omitted
-  checker play with its move and, where the record states one, its roll,
-  each with its kind and the refusing rule's complete message as its
-  reason) and the forced plays on `ForcedPlayCount`, information
-  and not a problem. It carries no caller-mutable surface and takes no part
+  checker play with its move and its roll, each with its kind and the
+  refusing rule's complete message as its reason) and the forced plays on
+  `ForcedPlayCount`, information and not a problem. An illegal play is on
+  neither. It carries no caller-mutable surface and takes no part
   in iteration control. **It resets, and does not refuse reuse**: every
   member is cleared at the first `MoveNext` of each enumeration (and by
   `ReadGameHeaders`), so one state serves a whole directory and nothing
@@ -1167,10 +1170,10 @@ and `XgDecisionIteratorCubeActionTests` pins it corpus-wide.
   produced an `IndexOutOfRangeException` or a "1/1" notation glitch. The one
   classification reads both before any candidate is translated
   (`ClassifyCheckerPlay`, through `ClassifySentinelAnalysis`): the marker
-  is an omission, the dance the empty play, forced where no play is legal
-  and corrupt where one is. Do not add a sentinel branch to the translator:
-  sentinel semantics belong with the iterator that decides what to emit,
-  not with the leaf that operates on the move encoding.
+  passes by in silence, the dance is the empty play, forced where no play
+  is legal and corrupt where one is. Do not add a sentinel branch to the
+  translator: sentinel semantics belong with the iterator that decides what
+  to emit, not with the leaf that operates on the move encoding.
 * **A one-checker test position is a forced play.** One checker on the
   24-point against a 3-1 reaches one position however the dice are played,
   so `GeneratePlays` returns one play and the walk counts the record as
