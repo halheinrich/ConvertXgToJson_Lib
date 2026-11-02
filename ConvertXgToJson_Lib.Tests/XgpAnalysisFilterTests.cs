@@ -390,11 +390,16 @@ public class XgpAnalysisFilterTests
         return file;
     }
 
-    /// <summary>A checker of each side — a decision position — the mover's on 24.</summary>
+    /// <summary>
+    /// A checker of each side — a decision position — the mover's on 24 and
+    /// 13, so the 3-1 has several legal plays and the analysed play is a
+    /// decision, not a forced play (halheinrich/backgammon#514).
+    /// </summary>
     private static sbyte[] BoardWithCheckerOn24()
     {
         var pts = new sbyte[26];
         pts[24] = 1;
+        pts[13] = 1;
         pts[1] = -1;
         return pts;
     }

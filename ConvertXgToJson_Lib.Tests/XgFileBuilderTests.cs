@@ -244,15 +244,27 @@ public class XgFileBuilderTests
     [Fact]
     public void AddGame_CustomStart_IsNotAStandardStart_AndIsTheDecisionBoard()
     {
-        int[] oneCheckerOn24 = new int[26];
-        oneCheckerOn24[24] = 1;
-        oneCheckerOn24[1] = -1;
+        int[] checkersOn24And13 = CheckersOn24And13();
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
-        builder.AddGame(initialPosition: oneCheckerOn24).Play(XgPlayer.Player1, ThreeOne, Play24To23);
+        builder.AddGame(initialPosition: checkersOn24And13).Play(XgPlayer.Player1, ThreeOne, Play24To23);
 
         var row = Rows(builder.Build()).Single();
         row.IsStandardStart.Should().BeFalse();
-        row.Board.Should().Be(new BoardPosition(oneCheckerOn24));
+        row.Board.Should().Be(new BoardPosition(checkersOn24And13));
+    }
+
+    /// <summary>
+    /// A checker of each side — a decision position — the mover's on 24 and
+    /// 13: a 3-1 has several legal plays, so a play recorded here is a
+    /// decision and not a forced play (halheinrich/backgammon#514).
+    /// </summary>
+    private static int[] CheckersOn24And13()
+    {
+        int[] position = new int[26];
+        position[24] = 1;
+        position[13] = 1;
+        position[1] = -1;
+        return position;
     }
 
     public static TheoryData<string, int[]> InvalidPositions => new()
@@ -452,17 +464,15 @@ public class XgFileBuilderTests
     [Fact]
     public void AtPosition_ResetsTheTrackedPosition()
     {
-        int[] oneCheckerOn24 = new int[26];
-        oneCheckerOn24[24] = 1;
-        oneCheckerOn24[1] = -1;                  // a checker of each side: a decision position
+        int[] checkersOn24And13 = CheckersOn24And13();
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGame()
             .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint)
-            .AtPosition(oneCheckerOn24)
+            .AtPosition(checkersOn24And13)
             .Play(XgPlayer.Player1, ThreeOne, Play24To23);
 
         var rows = Rows(builder.Build());
-        rows[1].Board.Should().Be(new BoardPosition(oneCheckerOn24));
+        rows[1].Board.Should().Be(new BoardPosition(checkersOn24And13));
         rows[1].IsStandardStart.Should().BeTrue("the game header is untouched by a mid-game override");
     }
 

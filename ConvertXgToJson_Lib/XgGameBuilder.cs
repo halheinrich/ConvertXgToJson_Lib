@@ -19,11 +19,11 @@ namespace ConvertXgToJson_Lib;
 /// (<see cref="Play(XgPlayer, DiceRoll, BgDataTypes_Lib.Play, string)"/>
 /// and its explicit-candidates overload), an unanalysed play
 /// (<see cref="UnanalysedPlay"/>; the iterator skips it), a dance
-/// (<see cref="Dance"/>) and XG's illegal-play marker
-/// (<see cref="IllegalPlay"/>) — and cube decisions in two
-/// (<see cref="CubeDecision"/>, <see cref="UnanalysedCube"/>). See
-/// <see cref="XgFileBuilder"/> for the position frame and the validation
-/// contract.
+/// (<see cref="Dance"/>; a forced play to the iterator) and XG's
+/// illegal-play marker (<see cref="IllegalPlay"/>; an omission the iterator
+/// reports) — and cube decisions in two (<see cref="CubeDecision"/>,
+/// <see cref="UnanalysedCube"/>). See <see cref="XgFileBuilder"/> for the
+/// position frame and the validation contract.
 /// </para>
 /// <para>
 /// An analysed play or cube decision may carry the decision's comment —
@@ -119,7 +119,10 @@ public sealed class XgGameBuilder
     /// Records an analysed checker play whose analysis holds the played
     /// move as its only candidate — at 1-ply with equity 0, the minimal
     /// analysed decision (what XG stores for a forced play). The iterator
-    /// emits it as a decision.
+    /// emits it as a decision when the position offers a choice of legal
+    /// plays, and counts it as forced when the played move is the only one
+    /// (halheinrich/backgammon#514): the rule is the position's, not the
+    /// candidate count's.
     /// </summary>
     /// <param name="player">Who rolled.</param>
     /// <param name="dice">The roll.</param>
@@ -263,8 +266,11 @@ public sealed class XgGameBuilder
     /// <summary>
     /// Records a dance: the player rolled and had no legal move. Stored as
     /// XG stores it — an analysed pane whose only candidate is the
-    /// no-legal-move sentinel — so the iterator skips it silently and the
-    /// position is unchanged.
+    /// no-legal-move sentinel — and the position is unchanged. The iterator
+    /// counts it as a forced play when the position indeed admits no legal
+    /// play, and reports it as a corrupt candidate when it does
+    /// (halheinrich/backgammon#514); the builder does not check which, so a
+    /// test of the forced count records its dance at a closed-out position.
     /// </summary>
     /// <param name="player">Who rolled.</param>
     /// <param name="dice">The roll.</param>
@@ -275,15 +281,88 @@ public sealed class XgGameBuilder
     /// <summary>
     /// Records XG's illegal-play marker: the play recorded in the source
     /// was illegal, and XG stamped the marker in place of a candidate when
-    /// it forced the next position. The iterator skips the decision with a
-    /// warning; the tracked position is left unchanged, as the real result
-    /// is unknowable.
+    /// it forced the next position. The iterator omits the decision and
+    /// reports it (<see cref="XgOmissionKind.IllegalPlay"/>); the tracked
+    /// position is left unchanged, as the real result is unknowable.
     /// </summary>
     /// <param name="player">Who rolled.</param>
     /// <param name="dice">The roll.</param>
     /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
     public XgGameBuilder IllegalPlay(XgPlayer player, DiceRoll dice) =>
         SentinelPlay(player, dice, [XgMoveEncoding.IllegalPlayMarker, XgMoveEncoding.IllegalPlayMarker]);
+
+    /// <summary>
+    /// Records an analysed checker play whose candidate list holds, beside
+    /// the played move, a candidate that cannot be played from the position
+    /// — the shape the iterator reports as a corrupt candidate
+    /// (<see cref="XgOmissionKind.CorruptCandidate"/>). No XG file in hand
+    /// holds one, so this is the one way a test synthesizes it; the public
+    /// surface refuses an unplayable candidate at the call. The corrupt
+    /// candidate's stored resulting position is the position unchanged, as
+    /// XG stores a sentinel's: what it would reach is unknowable. The played
+    /// move is validated and advances the position as
+    /// <see cref="Play(XgPlayer, DiceRoll, BgDataTypes_Lib.Play, string)"/>
+    /// does.
+    /// </summary>
+    /// <param name="player">Who rolled.</param>
+    /// <param name="dice">The roll.</param>
+    /// <param name="played">The play made, in the mover's numbering; a legal play from the position.</param>
+    /// <param name="corrupt">
+    /// The corrupt candidate, in the mover's numbering: a play from a point
+    /// the mover does not hold, or past a block, encoded as stated and never
+    /// applied. Stored as the second candidate.
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="played"/> cannot be made from the current position, or <paramref name="corrupt"/> holds more moves than a candidate can.</exception>
+    /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
+    internal XgGameBuilder PlayWithCorruptCandidate(
+        XgPlayer player, DiceRoll dice, BgDataTypes_Lib.Play played, BgDataTypes_Lib.Play corrupt)
+    {
+        ThrowIfEnded();
+        int sign = player.ToSign();
+        var before = new PositionEngine { Points = (sbyte[])_position.Clone() };
+        var applied = ApplyPlay(played, sign, nameof(played));
+        var unchanged = new PositionEngine { Points = MoversFrame(_position, sign) };
+
+        _records.Add(new MoveRecord
+        {
+            EntryType = RecordType.Move,
+            InitialPosition = before,
+            FinalPosition = new PositionEngine { Points = applied.Stored },
+            ActivePlayer = sign,
+            MoveList = ToMoveList(applied.Encoded),
+            Dice = [dice.High, dice.Low],
+            CubeValue = CubeValueRaw,
+            ErrorMove = 0.0,
+            CandidateCount = 2,
+            Analysis = new BestMoveAnalysis
+            {
+                Position = before,
+                Dice = [dice.High, dice.Low],
+                Level = ToLevelCode(1),
+                Score = [Score1, Score2],
+                Cube = _cubeSize,
+                CubePosition = _cubeOwnerSign,
+                Crawford = IsCrawford ? 1 : 0,
+                Jacoby = _match.IsMoneySession && _match.IsJacoby ? 1 : 0,
+                MoveCount = 2,
+                PositionsPlayed = [new PositionEngine { Points = applied.Stored }, unchanged],
+                Moves = [applied.Encoded, Encode(corrupt, nameof(corrupt))],
+                EvalLevels = [new EvalLevel { Level = ToLevelCode(1) }, new EvalLevel { Level = ToLevelCode(1) }],
+                Evals = [new EvalResult(), new EvalResult()],
+            },
+            Played = true,
+            MoveError = 0.0,
+            LuckError = XgRecordFactory.UnanalysedError,
+            RolloutIndices = XgRecordFactory.NoRolloutIndices(),
+            AnalyzeLevel = ToLevelCode(1),
+            AnalyzeLevelLuck = -1,
+            TutorMoveIndex = -1,
+            ErrorTutorMove = XgRecordFactory.UnanalysedError,
+            CommentIndex = -1,
+        });
+        _position = applied.Tracked;
+        return this;
+    }
 
     private XgGameBuilder SentinelPlay(XgPlayer player, DiceRoll dice, ReadOnlySpan<sbyte> sentinelPair)
     {
@@ -576,25 +655,42 @@ public sealed class XgGameBuilder
     private (sbyte[] Tracked, sbyte[] Stored, sbyte[] Encoded) ApplyPlay(
         BgDataTypes_Lib.Play play, int moverSign, string paramName)
     {
-        if (play.Count > MoveListSlots / 2)
-            throw new ArgumentException($"A play holds at most {MoveListSlots / 2} moves.", paramName);
-
         var board = new BoardState(MoversView(_position, moverSign));
 
-        var encoded = TerminatorFilled();
+        var encoded = Encode(play, paramName);
         for (int i = 0; i < play.Count; i++)
         {
             var move = play[i];
             ValidateMove(board, move, paramName);
             board.ApplyMove(move);
-            encoded[2 * i] = move.FrPt == BarPoint ? XgMoveEncoding.Bar : (sbyte)(move.FrPt - 1);
-            encoded[2 * i + 1] = move.ToPt == 0 ? XgMoveEncoding.Terminator : (sbyte)(Math.Abs(move.ToPt) - 1);
         }
 
         // BoardState moves the mover's checkers without turning the board,
         // so the reached position is in the mover's frame.
         var reached = board.ToPosition();
         return (PointsOf(moverSign < 0 ? reached.Flipped() : reached), PointsOf(reached), encoded);
+    }
+
+    /// <summary>
+    /// A play in XG's candidate encoding, as stated: each move's from-point
+    /// and to-point as XG's 0-based indices, the bar and a bear-off as their
+    /// codes, the unused slots the terminator. Encodes without judging the
+    /// play against any position; <see cref="ApplyPlay"/> validates.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="play"/> holds more moves than a candidate's slots carry.</exception>
+    private static sbyte[] Encode(BgDataTypes_Lib.Play play, string paramName)
+    {
+        if (play.Count > MoveListSlots / 2)
+            throw new ArgumentException($"A play holds at most {MoveListSlots / 2} moves.", paramName);
+
+        var encoded = TerminatorFilled();
+        for (int i = 0; i < play.Count; i++)
+        {
+            var move = play[i];
+            encoded[2 * i] = move.FrPt == BarPoint ? XgMoveEncoding.Bar : (sbyte)(move.FrPt - 1);
+            encoded[2 * i + 1] = move.ToPt == 0 ? XgMoveEncoding.Terminator : (sbyte)(Math.Abs(move.ToPt) - 1);
+        }
+        return encoded;
     }
 
     /// <summary>

@@ -42,7 +42,10 @@ namespace ConvertXgToJson_Lib;
 ///   before any rows are yielded from the game. Return <c>true</c> to
 ///   skip the rest of the current game. Use case: game's entry-state
 ///   (away scores, Crawford, non-standard start) does not match the
-///   filter's sought target.</param>
+///   filter's sought target. Not evaluated for a game the walk omits
+///   because its header's standing is refused
+///   (<see cref="XgOmissionKind.InvalidStanding"/>): there is no standing
+///   to judge, and the game is skipped whatever the predicate would say.</param>
 /// <param name="StopGameAfter">Evaluated after each decision yielded to the
 ///   caller — after the <c>.xgp</c> selection (see above). Return
 ///   <c>true</c> to advance to the next game without yielding any more

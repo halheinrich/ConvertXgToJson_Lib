@@ -9,10 +9,12 @@ namespace ConvertXgToJson_Lib.Tests;
 /// Behavioural tests for the illegal-play path through
 /// <see cref="XgDecisionIterator.Iterate"/> /
 /// <see cref="XgDecisionIterator.IterateDiagramRequests"/>: the decision
-/// carrying XG's illegal-play marker is skipped (never reaching a move leaf,
+/// carrying XG's illegal-play marker is omitted (never reaching a move leaf,
 /// so the historical <see cref="IndexOutOfRangeException"/> can't fire), the
 /// decisions surrounding it still emit, and a contextual <c>Warning</c> is
-/// logged. Dance ((0, 0)) and the regression cases stay covered by
+/// logged; the omission record itself is
+/// <see cref="XgDecisionIteratorOmissionTests"/>' (halheinrich/backgammon#514).
+/// Dance ((0, 0)) and the regression cases stay covered by
 /// <see cref="XgDecisionIteratorSentinelTests"/>; this file adds the
 /// surrounding-decisions behaviour and the logging contract. (The broadened
 /// <c>(-100, X)</c> marker shape seen in tournament files is an encoding

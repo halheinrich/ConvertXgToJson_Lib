@@ -185,6 +185,28 @@ public sealed class XgFileBuilder
                     nameof(isCrawford));
         }
 
+        return AddGameAsRecorded(score1, score2, isCrawford, initialPosition);
+    }
+
+    /// <summary>
+    /// Adds the next game with its header as XG would record it, whatever
+    /// standing the scores and the flag state: a score past the match's
+    /// length, a negative score, a Crawford flag where neither player is
+    /// 1-away. <see cref="AddGame"/> refuses those at the call; XG's files
+    /// hold them (halheinrich/backgammon#514, three of Hal's), and this is
+    /// the one way a test synthesizes a game the decision walk omits for its
+    /// standing (<see cref="XgOmissionKind.InvalidStanding"/>), or a money
+    /// game with a negative tally. The position is validated as
+    /// <see cref="AddGame"/> validates it.
+    /// </summary>
+    /// <param name="score1">Player 1's score entering the game, as recorded.</param>
+    /// <param name="score2">Player 2's score entering the game, as recorded.</param>
+    /// <param name="isCrawford">The header's Crawford flag, as recorded.</param>
+    /// <param name="initialPosition">The position the game starts from, in the player-1 frame; null for the standard opening position.</param>
+    /// <exception cref="ArgumentException"><paramref name="initialPosition"/> is not a valid 26-element board.</exception>
+    internal XgGameBuilder AddGameAsRecorded(
+        int score1, int score2, bool isCrawford = false, IReadOnlyList<int>? initialPosition = null)
+    {
         sbyte[] position = initialPosition is null
             ? XgGameBuilder.PointsOf(BoardPosition.Standard)
             : XgGameBuilder.ValidatePosition(initialPosition, nameof(initialPosition));

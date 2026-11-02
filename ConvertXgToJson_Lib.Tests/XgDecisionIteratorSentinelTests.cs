@@ -30,8 +30,13 @@ namespace ConvertXgToJson_Lib.Tests;
 /// </list>
 ///
 /// <para>
-/// Both are filtered at the iterator boundary because neither is of
-/// interest downstream — there is no real candidate to evaluate.
+/// Both are read at the iterator boundary, before any candidate reaches the
+/// translator (halheinrich/backgammon#514): the marker is an omission,
+/// reported; the dance is a forced play where no play is legal, counted and
+/// not reported. Neither yields a decision on either surface, which is what
+/// this class pins; the omission and the count are
+/// <see cref="XgDecisionIteratorOmissionTests"/>' and
+/// <see cref="XgDecisionIteratorForcedPlayTests"/>'.
 /// </para>
 /// </summary>
 [Collection("FileIO")]
@@ -81,10 +86,11 @@ public class XgDecisionIteratorSentinelTests
     [Fact]
     public void Iterate_RealCandidate_RowEmitted()
     {
-        // 24/23 — a benign single-checker move with no hits and no bear-offs.
+        // 24/23 — a benign single-checker move with no hits and no bear-offs,
+        // at a position where the 3-1 has other plays, so it is a decision.
         var play = Play.Create(new Move(24, 23));
         var builder = XgFileBuilder.ForMatch(7, "P1", "P2");
-        builder.AddGame(initialPosition: OneCheckerOn24()).Play(XgPlayer.Player1, new DiceRoll(3, 1), play);
+        builder.AddGame(initialPosition: CheckersOn24And13()).Play(XgPlayer.Player1, new DiceRoll(3, 1), play);
 
         var rows = XgDecisionIterator.Iterate(builder.Build(), sourceFile: "synthetic.xg").ToList();
 
@@ -156,28 +162,44 @@ public class XgDecisionIteratorSentinelTests
     private static XgFile BuildFileWithSentinelOnlyMove(string kind)
     {
         var builder = XgFileBuilder.ForMatch(7, "P1", "P2");
-        var game = builder.AddGame(initialPosition: OneCheckerOn24());
-        var dice = new DiceRoll(3, 1);
         switch (kind)
         {
-            case "illegal play": game.IllegalPlay(XgPlayer.Player1, dice); break;
-            case "dance": game.Dance(XgPlayer.Player1, dice); break;
-            default: throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown sentinel kind.");
+            case "illegal play":
+                builder.AddGame(initialPosition: CheckersOn24And13()).IllegalPlay(XgPlayer.Player1, new DiceRoll(3, 1));
+                break;
+            case "dance":
+                // A dance where it is one: on the bar against a closed board.
+                // Elsewhere the walk reads XG's dance as a corrupt candidate
+                // (halheinrich/backgammon#514).
+                builder.AddGame(initialPosition: OnTheBarAgainstAClosedBoard()).Dance(XgPlayer.Player1, new DiceRoll(6, 6));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown sentinel kind.");
         }
         return builder.Build();
     }
 
     /// <summary>
-    /// A board with one player-1 checker on point 24 — enough that a
-    /// synthetic non-sentinel test move (24/23) is plausible without the
-    /// test having to model a full game position.
+    /// A checker of each side — a decision position — the mover's on 24 and
+    /// 13, so a 3-1 has several legal plays and a play here is a decision,
+    /// not a forced play (halheinrich/backgammon#514).
     /// </summary>
-    /// <summary>A checker of each side — a decision position — the mover's on 24.</summary>
-    private static int[] OneCheckerOn24()
+    private static int[] CheckersOn24And13()
     {
         var pts = new int[26];
         pts[24] = 1;
+        pts[13] = 1;
         pts[1] = -1;
+        return pts;
+    }
+
+    /// <summary>Player 1 on the bar, player 2 holding every point of their home board: no roll enters.</summary>
+    private static int[] OnTheBarAgainstAClosedBoard()
+    {
+        var pts = new int[26];
+        pts[25] = 1;
+        for (int point = 19; point <= 24; point++)
+            pts[point] = -2;
         return pts;
     }
 

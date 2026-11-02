@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Parsing;
 using ConvertXgToJson_Lib.Tests.Helpers;
 using Xunit.Abstractions;
 
@@ -49,24 +50,27 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <para>The facts XG stores, each asserted:</para>
 /// <list type="bullet">
 ///   <item><description>
-///     <b>Every analysed decision has one of three outcomes</b> — it builds a
-///     record, it is passed by as not a decision (a side borne off), or it is
-///     skipped for a candidate invalid from its position, with a warning
-///     naming it. Nothing else fails.
+///     <b>Every analysed record has one kind, and the walk honours it</b>
+///     (halheinrich/backgammon#514): the walk builds a record for exactly
+///     the records <see cref="XgDecisionIterator.ClassifyCheckerPlay"/> calls
+///     a decision, counts exactly the forced plays, and reports as an
+///     omission exactly each illegal play, each corrupt candidate and each
+///     game whose standing the context refuses. Nothing else fails.
 ///   </description></item>
 ///   <item><description>
 ///     <b>The after-boards are XG's.</b> XG stored a resulting position for
 ///     every candidate it analysed, in every analysed decision position, and
 ///     each is the candidate's derived after-board — so the count is XG's,
-///     not the built records'. A decision skipped for a corrupt candidate
-///     states no after-board for any of its candidates, so its skip is a
+///     not the built records'. A decision omitted for a corrupt candidate
+///     states no after-board for any of its candidates, so its omission is a
 ///     disagreement with XG, and fails this invariant naming the decision
 ///     (the umbrella's ruling on halheinrich/backgammon#273: otherwise a
 ///     translation regression turns candidates corrupt and leaves the
-///     comparison, and the summary still reads "agree"). The production skip
-///     and its warning are unchanged; the three-outcome invariant still pins
-///     that nothing else fails. The player's after-board is XG's position
-///     after the played move.
+///     comparison, and the summary still reads "agree"). A forced play's
+///     candidates are not compared: the walk builds no record for it by rule,
+///     and a translation regression on one is still caught, since a corrupt
+///     candidate outranks a forced position. The player's after-board is XG's
+///     position after the played move.
 ///   </description></item>
 ///   <item><description>
 ///     <b>XG's error for the player's move</b> — the rule under test, with one
@@ -102,13 +106,17 @@ namespace ConvertXgToJson_Lib.Tests;
 /// <para>
 /// <b>How the outcomes are observed without restating a rule.</b> The corpus
 /// is walked twice. The mirror walk drives a <see cref="MatchContext"/> record
-/// by record, as the iterator does, and asks the iterator's own emission
-/// predicates which records are analysed decisions — and
-/// <see cref="PositionData.IsDecisionPosition"/> which of those are not
-/// decisions (its answer does not depend on the frame, so it is asked of the
-/// stored position). The iterator walk runs the real iterator; each file is
-/// named as an <c>.xg</c> there, so an <c>.xgp</c>'s decisions are seen
-/// before its single-decision policy, which is checked on its own.
+/// by record, as the iterator does — a refused header leaves its
+/// <see cref="MatchContext.GameRefusal"/>, and the mirror reads nothing of
+/// that game, as the walk does not — and asks the iterator's own
+/// classification of each analysed move record
+/// (<see cref="XgDecisionIterator.ClassifyCheckerPlay"/>), and of each
+/// analysed cube pane <see cref="PositionData.IsDecisionPosition"/> (its
+/// answer does not depend on the frame, so it is asked of the stored
+/// position). The iterator walk runs the real iterator with a state, and
+/// reads the omissions and the forced count off it; each file is named as an
+/// <c>.xg</c> there, so an <c>.xgp</c>'s decisions are seen before its
+/// single-decision policy, which is checked on its own.
 /// </para>
 /// <para>
 /// <b>Frames.</b> XG stores a move's starting position in player 1's frame and
@@ -142,14 +150,17 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
     internal const double ErrorTolerance = 1e-4 + 1e-9;
 
     [Fact]
-    public void EveryAnalysedDecision_BuildsARecord_IsPassedBy_OrIsSkippedForACorruptCandidate()
+    public void EveryAnalysedDecision_HasOneKind_AndTheWalkHonoursIt()
     {
-        corpus.Unclassified.Should().BeEmpty("every analysed decision has exactly one of the three outcomes");
-        corpus.UnexpectedRecords.Should().BeEmpty("a record comes only from an analysed decision");
-        corpus.CorruptWarningsNamingNoDecision.Should().BeEmpty(
-            "each corrupt-candidate warning names an analysed decision the iterator built no record for");
+        corpus.Unclassified.Should().BeEmpty("the walk builds a record for exactly the decisions the classification names");
+        corpus.UnexpectedRecords.Should().BeEmpty("a record comes only from an analysed record classified a decision");
+        corpus.OmissionsNamingNoProblem.Should().BeEmpty(
+            "each omission names a refused game or a problem the classification found, once");
+        corpus.ProblemsNotReported.Should().BeEmpty("every refused game and every problem is reported as an omission");
+        corpus.ForcedCountDisagreements.Should().BeEmpty("the walk's forced count is the classification's");
         corpus.Failures.Should().BeEmpty("nothing else fails");
-        (corpus.Built + corpus.NotADecision + corpus.CorruptCandidate).Should().Be(corpus.AnalysedDecisions);
+        (corpus.Built + corpus.NotADecision + corpus.ForcedPlays + corpus.IllegalPlays + corpus.CorruptCandidate)
+            .Should().Be(corpus.AnalysedDecisions);
     }
 
     [Fact]
@@ -227,11 +238,21 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
         public int BuiltPlays { get; private set; }
         public int BuiltCubes { get; private set; }
         public int NotADecision { get; private set; }
+        public int ForcedPlays { get; private set; }
+        /// <summary>Of <see cref="ForcedPlays"/>, the dances XG recorded as its sentinel: reported, never asserted.</summary>
+        public int ForcedDances { get; private set; }
+        /// <summary>Of <see cref="ForcedPlays"/>, the plays XG stored more than one candidate for — where the candidate count would have been the wrong proxy: reported, never asserted.</summary>
+        public int ForcedWithSeveralCandidates { get; private set; }
+        public int IllegalPlays { get; private set; }
         public int CorruptCandidate { get; private set; }
-        public List<string> CorruptSkips { get; } = [];
+        public int OmittedGames { get; private set; }
+        /// <summary>Every omission the walk reported that names a problem the classification found, as text.</summary>
+        public List<string> Omissions { get; } = [];
         public List<string> Unclassified { get; } = [];
         public List<string> UnexpectedRecords { get; } = [];
-        public List<string> CorruptWarningsNamingNoDecision { get; } = [];
+        public List<string> OmissionsNamingNoProblem { get; } = [];
+        public List<string> ProblemsNotReported { get; } = [];
+        public List<string> ForcedCountDisagreements { get; } = [];
         public List<string> Failures { get; } = [];
 
         /// <summary>The candidates XG stored in every analysed decision position — XG's count, a skipped decision's included.</summary>
@@ -317,81 +338,114 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
             bool isXgp = name.EndsWith(".xgp", StringComparison.OrdinalIgnoreCase);
             string walkName = isXgp ? Path.GetFileNameWithoutExtension(name) + ".xg" : name;
 
-            // The mirror: which records are analysed decisions, and which of
-            // those are not decisions, asked of the iterator's own predicates.
+            // The mirror: every analysed record and its kind, asked of the
+            // iterator's own classification — the one rule for a checker play
+            // (ClassifyCheckerPlay), and for a cube the analysed-pane and
+            // decision-position predicates.
             var sources = new Dictionary<DecisionId, SaveRecord>();
-            var notDecisions = new HashSet<DecisionId>();
+            var kinds = new Dictionary<DecisionId, XgDecisionIterator.CheckerPlayKind>();
+            var omittedGames = new HashSet<int>();
             var context = new MatchContext(file.Records, file.Comments);
             foreach (var record in file.Records)
             {
                 context.Update(record);
-                PositionEngine position;
+                if (record is GameHeaderRecord && context.GameRefusal is not null)
+                    omittedGames.Add(context.GameNumber);
+                if (omittedGames.Contains(context.GameNumber))
+                    continue;   // the walk reads nothing of an omitted game; its header is the omission
                 DecisionId id;
+                XgDecisionIterator.CheckerPlayKind kind;
                 switch (record)
                 {
-                    case MoveRecord move when XgDecisionIterator.IsAnalysed(move)
-                                          && !XgDecisionIterator.IsSentinelOnlyAnalysis(move.Analysis)
-                                          && XgDecisionIterator.StatesRoll(move):
-                        position = move.InitialPosition;
+                    case MoveRecord move when XgDecisionIterator.IsAnalysed(move):
                         id = XgDecisionIterator.BuildDecisionId(walkName, context.GameNumber, context.MoveNumber, isCube: false);
+                        kind = XgDecisionIterator.ClassifyCheckerPlay(move);
                         break;
                     case CubeRecord cube when XgDecisionIterator.IsAnalysedCubePane(cube, context):
-                        position = cube.Position;
                         id = XgDecisionIterator.BuildDecisionId(walkName, context.GameNumber, context.MoveNumber + 1, isCube: true);
+                        kind = PositionData.IsDecisionPosition(cube.Position.ToBoardPosition())
+                            ? XgDecisionIterator.CheckerPlayKind.Decision
+                            : XgDecisionIterator.CheckerPlayKind.NotADecisionPosition;
                         break;
                     default:
                         continue;
                 }
                 sources[id] = record;
-                if (!PositionData.IsDecisionPosition(position.ToBoardPosition()))
-                    notDecisions.Add(id);
+                kinds[id] = kind;
             }
             AnalysedDecisions += sources.Count;
-            NotADecision += notDecisions.Count;
-
-            // The iterator, and the decisions its warnings name.
-            var logger = new CapturingLogger();
-            var records = XgDecisionIterator.IterateDiagramRequests(file, walkName, logger: logger).ToList();
-            var corrupt = new HashSet<DecisionId>();
-            for (int i = 0; i < logger.Entries.Count; i++)
+            OmittedGames += omittedGames.Count;
+            NotADecision += kinds.Values.Count(k => k is XgDecisionIterator.CheckerPlayKind.NotADecisionPosition or XgDecisionIterator.CheckerPlayKind.NoRoll);
+            int forced = kinds.Values.Count(k => k == XgDecisionIterator.CheckerPlayKind.Forced);
+            ForcedPlays += forced;
+            foreach (var (id, kind) in kinds)
             {
-                if (!logger.Entries[i].Message.StartsWith("Corrupt candidate", StringComparison.Ordinal))
+                if (kind != XgDecisionIterator.CheckerPlayKind.Forced)
                     continue;
-                var values = logger.Values[i];
-                var id = XgDecisionIterator.BuildDecisionId(walkName,
-                    Convert.ToInt32(values["Game"], CultureInfo.InvariantCulture),
-                    Convert.ToInt32(values["MoveNumber"], CultureInfo.InvariantCulture), isCube: false);
-                if (!sources.ContainsKey(id) || notDecisions.Contains(id) || !corrupt.Add(id))
-                    CorruptWarningsNamingNoDecision.Add($"{name}: {logger.Entries[i].Message}");
-                else
-                    CorruptSkips.Add($"{name}: {logger.Entries[i].Message}");
+                var analysis = ((MoveRecord)sources[id]).Analysis;
+                if (XgDecisionIterator.ClassifySentinelAnalysis(analysis) == SentinelKind.Dance)
+                    ForcedDances++;
+                else if (XgDecisionIterator.CandidateCount(analysis) > 1)
+                    ForcedWithSeveralCandidates++;
             }
-            CorruptCandidate += corrupt.Count;
+            var problems = kinds.Where(k => k.Value is XgDecisionIterator.CheckerPlayKind.IllegalPlay or XgDecisionIterator.CheckerPlayKind.CorruptCandidate)
+                .ToDictionary(k => k.Key, k => k.Value);
+            IllegalPlays += problems.Values.Count(k => k == XgDecisionIterator.CheckerPlayKind.IllegalPlay);
+            CorruptCandidate += problems.Values.Count(k => k == XgDecisionIterator.CheckerPlayKind.CorruptCandidate);
 
-            // A skipped decision's candidates are XG's too, and none has an
-            // after-board: the skip is a disagreement with XG, named here.
-            foreach (var id in corrupt)
+            // The iterator, with the omissions and the forced count it reports.
+            var state = new XgIteratorState();
+            var records = XgDecisionIterator.IterateDiagramRequests(file, walkName, state).ToList();
+            if (state.ForcedPlayCount != forced)
+                ForcedCountDisagreements.Add($"{name}: the walk counted {state.ForcedPlayCount} forced plays, the classification {forced}");
+            var reported = new HashSet<DecisionId>();
+            foreach (var omission in state.Omissions)
+            {
+                if (omission.IsWholeGame)
+                {
+                    if (!omittedGames.Remove(omission.Game))
+                        OmissionsNamingNoProblem.Add($"{name}: {omission}");
+                    continue;
+                }
+                var id = XgDecisionIterator.BuildDecisionId(walkName, omission.Game, omission.MoveNumber!.Value, isCube: false);
+                var expected = omission.Kind == XgOmissionKind.IllegalPlay
+                    ? XgDecisionIterator.CheckerPlayKind.IllegalPlay
+                    : XgDecisionIterator.CheckerPlayKind.CorruptCandidate;
+                if (!problems.TryGetValue(id, out var kind) || kind != expected || !reported.Add(id))
+                    OmissionsNamingNoProblem.Add($"{name}: {omission}");
+                else
+                    Omissions.Add($"{name}: {omission}");
+            }
+            foreach (int game in omittedGames)
+                ProblemsNotReported.Add($"{name}: game {game}'s refused standing is not among the omissions");
+            foreach (var id in problems.Keys.Where(id => !reported.Contains(id)))
+                ProblemsNotReported.Add($"{name}: {id} ({problems[id]}) is not among the omissions");
+
+            // A corrupt decision's candidates are XG's too, and none has an
+            // after-board: the omission is a disagreement with XG, named here.
+            // A forced play's candidates are not compared: the walk builds no
+            // record for it by rule, not for a failure to read them.
+            foreach (var id in problems.Keys.Where(id => problems[id] == XgDecisionIterator.CheckerPlayKind.CorruptCandidate))
             {
                 int stored = XgDecisionIterator.CandidateCount(((MoveRecord)sources[id]).Analysis);
                 CandidateAfterBoards += stored;
                 CandidateAfterBoardsDisagreeing += stored;
                 CandidateAfterBoardMismatches.Add(
-                    $"{name} {id}: skipped for a corrupt candidate, so none of the {stored} candidates XG stored has an after-board");
+                    $"{name} {id}: omitted for a corrupt candidate, so none of the {stored} candidates XG stored has an after-board");
             }
 
             var built = new Dictionary<DecisionId, BgDecisionData>();
             foreach (var record in records)
             {
-                if (!sources.ContainsKey(record.Id) || notDecisions.Contains(record.Id) || corrupt.Contains(record.Id))
+                if (!kinds.TryGetValue(record.Id, out var kind) || kind != XgDecisionIterator.CheckerPlayKind.Decision)
                     UnexpectedRecords.Add($"{name}: {record.Id}");
                 built[record.Id] = record;
             }
             Built += records.Count;
-            foreach (var id in sources.Keys)
+            foreach (var (id, kind) in kinds)
             {
-                int outcomes = (built.ContainsKey(id) ? 1 : 0) + (notDecisions.Contains(id) ? 1 : 0) + (corrupt.Contains(id) ? 1 : 0);
-                if (outcomes != 1)
-                    Unclassified.Add($"{name}: {id} ({outcomes} outcomes)");
+                if ((kind == XgDecisionIterator.CheckerPlayKind.Decision) != built.ContainsKey(id))
+                    Unclassified.Add($"{name}: {id} is {kind} and {(built.ContainsKey(id) ? "was built" : "was not built")}");
             }
 
             foreach (var record in records)
@@ -526,9 +580,9 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
             text.AppendLine(CultureInfo.InvariantCulture,
                 $"Corpus: {Files} files ({XgpFiles} .xgp), {ParseFailures} unparseable, {Failures.Count} failed.");
             text.AppendLine(CultureInfo.InvariantCulture,
-                $"Analysed decisions: {AnalysedDecisions}: {Built} built ({BuiltPlays} plays, {BuiltCubes} cubes), {NotADecision} passed by as not decisions, {CorruptCandidate} skipped for a corrupt candidate.");
-            foreach (var skip in CorruptSkips)
-                text.AppendLine(CultureInfo.InvariantCulture, $"  skipped: {skip}");
+                $"Analysed records: {AnalysedDecisions}: {Built} built ({BuiltPlays} plays, {BuiltCubes} cubes), {NotADecision} passed by as not decisions, {ForcedPlays} forced plays ({ForcedDances} dances; {ForcedWithSeveralCandidates} with several stored candidates), {IllegalPlays} illegal plays, {CorruptCandidate} corrupt candidates; {OmittedGames} games omitted for their standing.");
+            foreach (var omission in Omissions)
+                text.AppendLine(CultureInfo.InvariantCulture, $"  omitted: {omission}");
             text.AppendLine(CultureInfo.InvariantCulture,
                 $"After-boards: candidates {CandidateAfterBoards - CandidateAfterBoardsDisagreeing}/{CandidateAfterBoards} XG stored agree; players {PlayerAfterBoards - PlayerAfterBoardMismatches.Count}/{PlayerAfterBoards} agree.");
             text.AppendLine(CultureInfo.InvariantCulture,

@@ -98,11 +98,17 @@ public sealed class XgGameInfo : IGameInfo
     /// reader, the decision iterator and the match context.
     /// </summary>
     /// <remarks>
-    /// A money game's standing is the header's two scores. A match game's is
+    /// A money game's standing is the header's two scores, whatever their
+    /// sign: a money score is a running tally that does not bear on a
+    /// decision, so a negative one is accepted and never reported (Hal's
+    /// ruling of 2026-11-01, halheinrich/backgammon#514). A match game's is
     /// each player's away score — the terms' length less the header's score —
-    /// and the header's Crawford flag. The standing's own rules (a score never
-    /// negative; an away score at least 1; in the Crawford game exactly one
-    /// player 1-away) are the standing's to refuse.
+    /// and the header's Crawford flag. The standing's own rules (an away
+    /// score at least 1; in the Crawford game exactly one player 1-away) are
+    /// the standing's to refuse, and the away scores' bound, the match's
+    /// length, is <see cref="GameSession.Create"/>'s: the decision walk pairs
+    /// each header through both and omits the game when either refuses
+    /// (<see cref="XgOmissionKind.InvalidStanding"/>).
     /// </remarks>
     internal static XgGameInfo From(GameHeaderRecord gh, SessionTerms terms) => new()
     {

@@ -347,7 +347,7 @@ public static class XgFileReader
     /// </exception>
     public static IEnumerable<XgGameInfo> ReadGameHeaders(string path, XgIteratorState state)
     {
-        state.MatchInfo = null;
+        state.Reset();
 
         byte[] data = ReadGameRecords(path);
         if (data.Length < SaveRecordParser.RecordSize)

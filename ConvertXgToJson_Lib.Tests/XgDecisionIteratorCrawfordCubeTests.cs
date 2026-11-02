@@ -105,7 +105,8 @@ public class XgDecisionIteratorCrawfordCubeTests
     /// The fixture the issue measured (2026-09-11): game 3 of the match is
     /// the Crawford game, and its one analysed cube pane — move 41, the
     /// decision the quiz served — is the only cube among the file's 38
-    /// Crawford decisions. The other 37 are plays and still emit; the pane
+    /// Crawford decisions. The other 37 are plays; one of them is forced, so
+    /// 36 emit (halheinrich/backgammon#514, measured 2026-11-01); the pane
     /// does not, on either surface.
     ///
     /// <para>
@@ -131,13 +132,13 @@ public class XgDecisionIteratorCrawfordCubeTests
         var requests = XgDecisionIterator.IterateDiagramRequests(file, source).ToList();
 
         var crawfordRows = rows.Where(r => r.IsCrawford == true).ToList();
-        crawfordRows.Should().HaveCount(37,
-            "the issue measured 38 Crawford decisions, exactly one of them the cube pane");
+        crawfordRows.Should().HaveCount(36,
+            "the issue measured 38 Crawford decisions, exactly one of them the cube pane, and one play is forced");
         crawfordRows.Should().OnlyContain(r => r.Kind == DecisionKind.CheckerPlay && r.Game == 3);
         rows.Should().NotContain(r => r.Game == 3 && r.MoveNumber == 41 && r.Kind == DecisionKind.Cube,
             "g3:m41:cube is the decision the quiz served");
 
-        requests.Where(r => r.Session is MatchSession { IsCrawford: true }).Should().HaveCount(37);
+        requests.Where(r => r.Session is MatchSession { IsCrawford: true }).Should().HaveCount(36);
         requests.Where(r => r.Session is MatchSession { IsCrawford: true } && r.Kind == DecisionKind.Cube).Should().BeEmpty();
         requests.Count.Should().Be(rows.Count, "both surfaces drop the same pane");
     }

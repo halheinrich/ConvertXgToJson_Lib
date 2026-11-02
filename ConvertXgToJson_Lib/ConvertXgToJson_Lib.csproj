@@ -26,5 +26,10 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib\BgDataTypes_Lib.csproj" />
+    <!-- The forced-play rule: a checker play is no decision when the move
+         generator finds exactly one legal play (halheinrich/backgammon#514,
+         Hal's ruling of 2026-11-01). BgMoveGen references BgDataTypes_Lib
+         alone, so this adds an edge and no cycle. -->
+    <ProjectReference Include="..\..\BgMoveGen\BgMoveGen\BgMoveGen.csproj" />
   </ItemGroup>
 </Project>
