@@ -65,7 +65,9 @@ public sealed class XgIteratorState
     /// <summary>
     /// What the walk has left out of the current file so far, in the order
     /// found — each omitted game and each omitted checker play, with its
-    /// kind and reason (<see cref="XgOmission"/>). Complete once the
+    /// kind and the refusing rule's complete message as the reason
+    /// (<see cref="XgOmission"/>; an omitted play names its roll where the
+    /// record states one). Complete once the
     /// enumeration has ended; empty when the walk found nothing to omit.
     /// Each omission is also logged, at <c>Warning</c>, through the logger
     /// the iterator was given.

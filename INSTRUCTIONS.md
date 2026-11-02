@@ -509,7 +509,11 @@ see "The iterator's parameters") — and the walk goes on in every case:
   1-away. `MatchContext.Update` pairs each header at the header, through the
   standing's constructors (`XgGameInfo.From`) and `GameSession.Create`
   (halheinrich/backgammon#310, site 1), and a refusal leaves `GameInfo`
-  null and the refusal's sentence in `GameRefusal`. The whole game is
+  null and the refusal's complete message in `GameRefusal` — the rule, the
+  parameter and the offending value, which may run to a second line
+  (Hal's ruling of 2026-11-01: keep the full message; it is text for a
+  reader, not a stable format, and nothing parses or shortens it). The
+  whole game is
   omitted and reported (`XgOmissionKind.InvalidStanding`); `SkipGameAt` is
   not asked; the game number still advances, so the games around it keep
   their numbers; and the walk resumes at the next header. A money game is
@@ -535,20 +539,28 @@ see "The iterator's parameters") — and the walk goes on in every case:
   classification, asked in this order, problems before the forced test so
   that recognized bad data at a forced position is reported and not
   counted:
-  * **A move record that states no roll** (`StatesRoll`): passed by.
   * **XG's illegal-play marker** among the candidates
     (`ClassifySentinelAnalysis`): the play made in the source was illegal.
     Omitted and reported (`XgOmissionKind.IllegalPlay`), by Hal's ruling of
-    2026-11-01; see Pitfalls for the sentinels.
+    2026-11-01, whatever the record's dice say — read before the roll, as
+    the old walk read it — and where the dice are no roll (both 0, one 0, a
+    face above 6) the omission names its move and no roll, inventing no
+    dice (`RollOf`, through `DiceRoll.TryParse`); see Pitfalls for the
+    sentinels.
+  * **A move record that states no roll** (`StatesRoll`): passed by, its
+    candidates unjudged.
   * **A corrupt candidate** — a candidate invalid from its own position,
     which the record would refuse (Hal's ruling of 2026-09-25 on invalid
-    plays, applied to stored candidates). Every candidate is tested with
-    `BoardState.TryApplyPlay` on a **fresh board per candidate**, since the
-    method applies a valid play and turns the board, so a shared one would
-    test later candidates from the wrong position. XG's dance sentinel is
-    read as the empty play, never translated, and is corrupt where a legal
-    play exists. Omitted and reported (`XgOmissionKind.CorruptCandidate`),
-    with the reason naming each invalid candidate.
+    plays, applied to stored candidates). Every candidate within the move
+    count is tested with `BoardState.TryApplyPlay` on a **fresh board per
+    candidate**, since the method applies a valid play and turns the board,
+    so a shared one would test later candidates from the wrong position.
+    XG's dance sentinel is read as the empty play, never translated, and
+    excuses no other candidate: a corrupt one beside it is reported before
+    the record can be called forced, and the sentinel itself is corrupt
+    where a legal play exists. Omitted and reported
+    (`XgOmissionKind.CorruptCandidate`), with the reason naming each
+    invalid candidate.
   * **A forced play** — exactly one legal play from the position, by
     BgMoveGen's `MoveGenerator.GeneratePlays`, which returns the distinct
     legal plays and a dance as one empty play; so a dance is a forced play
@@ -848,8 +860,9 @@ defaults, and each type's doc states its members.
   the file boundary and `GameInfo` at each game header (null while the walk
   is in a game it omitted), and the walk records what it leaves out as it
   goes — each `XgOmission` on `Omissions` (an omitted game, or an omitted
-  checker play with its move and roll, each with its kind and the rule
-  owner's reason) and the forced plays on `ForcedPlayCount`, information
+  checker play with its move and, where the record states one, its roll,
+  each with its kind and the refusing rule's complete message as its
+  reason) and the forced plays on `ForcedPlayCount`, information
   and not a problem. It carries no caller-mutable surface and takes no part
   in iteration control. **It resets, and does not refuse reuse**: every
   member is cleared at the first `MoveNext` of each enumeration (and by

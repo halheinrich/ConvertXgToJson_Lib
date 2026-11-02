@@ -27,12 +27,26 @@ public class XgOmissionTests
         omission.ToString().Should().Be("Illegal play in match.xg, game 3, move 12, roll 52: the marker");
     }
 
-    [Theory]
-    [InlineData(1, null)]
-    [InlineData(null, 1)]
-    public void AMoveWithoutARoll_OrARollWithoutAMove_IsRefused(int? move, int? die)
+    /// <summary>
+    /// A checker-play omission names its move and, where the record states
+    /// one, its roll: an illegal-play marker on a record whose dice are no
+    /// roll names the move alone (halheinrich/backgammon#514). A roll
+    /// without a move stays refused.
+    /// </summary>
+    [Fact]
+    public void AMoveWithoutARoll_IsAccepted_AndReadsWithoutOne()
     {
-        var act = () => new XgOmission("match.xg", 1, move, die is int d ? new DiceRoll(d, d) : null, XgOmissionKind.CorruptCandidate, "reason");
+        var omission = new XgOmission("match.xg", 1, 4, null, XgOmissionKind.IllegalPlay, "the marker");
+
+        omission.IsWholeGame.Should().BeFalse();
+        omission.Roll.Should().BeNull();
+        omission.ToString().Should().Be("Illegal play in match.xg, game 1, move 4: the marker");
+    }
+
+    [Fact]
+    public void ARollWithoutAMove_IsRefused()
+    {
+        var act = () => new XgOmission("match.xg", 1, null, new DiceRoll(3, 1), XgOmissionKind.CorruptCandidate, "reason");
 
         act.Should().Throw<ArgumentException>();
     }

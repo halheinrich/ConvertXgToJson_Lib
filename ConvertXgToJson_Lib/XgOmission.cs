@@ -23,17 +23,24 @@ namespace ConvertXgToJson_Lib;
 /// game's included, so the games around an omission keep their numbers. An
 /// omitted checker play names its <see cref="MoveNumber"/>, the 1-based
 /// number of its move record within the game — again the number a decision
-/// there would carry — and its <see cref="Roll"/>; an omitted game names
-/// neither (<see cref="IsWholeGame"/>). A standalone position (an
-/// <c>.xgp</c>) is one game of one record, so its omission reads game 1,
-/// move 1.
+/// there would carry — and its <see cref="Roll"/> where the record states
+/// one: an illegal-play marker is reported whatever the record's dice say,
+/// and where they are no roll (both 0, one 0, a face above 6) the omission
+/// names the move alone, inventing no dice. An omitted game names neither
+/// (<see cref="IsWholeGame"/>). A standalone position (an <c>.xgp</c>) is
+/// one game of one record, so its omission reads game 1, move 1.
 /// </para>
 /// <para>
-/// <b>The reason is the rule owner's sentence.</b> For a refused standing it
-/// is BgDataTypes_Lib's refusal, verbatim, naming the rule and the value
-/// that broke it; for a corrupt candidate it names each candidate found
-/// invalid; for an illegal play it states XG's marker. It is text for a
-/// reader, not a code: the kind is <see cref="Kind"/>.
+/// <b>The reason is the complete message of the rule that refused</b>
+/// (Hal's ruling of 2026-11-01, halheinrich/backgammon#514). For a refused
+/// standing it is the exception message BgDataTypes_Lib's constructors or
+/// <see cref="GameSession.Create"/> threw, whole: the rule's sentence, the
+/// parameter .NET appends and, for an out-of-range value, the offending
+/// value on a second line, so the text can hold a line break. For a corrupt
+/// candidate it names each candidate found invalid; for an illegal play it
+/// states XG's marker. It is text for a reader — a log line, a skip list —
+/// and not a stable format: nothing parses it, nothing shortens it, and a
+/// consumer that needs the kind reads <see cref="Kind"/>.
 /// </para>
 /// <para>
 /// <b>Built by the walk, read by everyone else.</b> The constructor is
@@ -45,7 +52,7 @@ namespace ConvertXgToJson_Lib;
 public sealed record XgOmission
 {
     /// <summary>Records an omission the walk found; see the class remarks for each member's meaning.</summary>
-    /// <exception cref="ArgumentException"><paramref name="sourceFile"/> or <paramref name="reason"/> is empty, or exactly one of <paramref name="moveNumber"/> and <paramref name="roll"/> is given.</exception>
+    /// <exception cref="ArgumentException"><paramref name="sourceFile"/> or <paramref name="reason"/> is empty, or <paramref name="roll"/> is given without <paramref name="moveNumber"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="game"/> or <paramref name="moveNumber"/> is below 1, or <paramref name="kind"/> is not a defined kind.</exception>
     internal XgOmission(string sourceFile, int game, int? moveNumber, DiceRoll? roll, XgOmissionKind kind, string reason)
     {
@@ -54,8 +61,8 @@ public sealed record XgOmission
         ArgumentOutOfRangeException.ThrowIfLessThan(game, 1);
         if (moveNumber is int move)
             ArgumentOutOfRangeException.ThrowIfLessThan(move, 1, nameof(moveNumber));
-        if (moveNumber.HasValue != roll.HasValue)
-            throw new ArgumentException("An omitted checker play names its move number and its roll; an omitted game names neither.", nameof(roll));
+        if (roll.HasValue && moveNumber is null)
+            throw new ArgumentException("A roll belongs to an omitted checker play, which names its move; an omitted game names neither.", nameof(roll));
         if (!Enum.IsDefined(kind))
             throw new ArgumentOutOfRangeException(nameof(kind), kind, "The kind is one of XgOmissionKind's.");
 
@@ -80,13 +87,22 @@ public sealed record XgOmission
     /// </summary>
     public int? MoveNumber { get; }
 
-    /// <summary>For an omitted checker play, the roll it was made on; <see langword="null"/> for an omitted game.</summary>
+    /// <summary>
+    /// For an omitted checker play, the roll it was made on, where the record
+    /// states one; <see langword="null"/> for an omitted game, and for an
+    /// illegal-play marker on a record whose dice are no roll (see the class
+    /// remarks).
+    /// </summary>
     public DiceRoll? Roll { get; }
 
     /// <summary>Why it was omitted: the kind of problem.</summary>
     public XgOmissionKind Kind { get; }
 
-    /// <summary>The reason for a reader: the rule owner's sentence (see the class remarks).</summary>
+    /// <summary>
+    /// The reason for a reader: the complete message of the rule that
+    /// refused, which may hold a line break. Not a stable format; the kind
+    /// is <see cref="Kind"/> (see the class remarks).
+    /// </summary>
     public string Reason { get; }
 
     /// <summary>Whether the whole game was omitted (<see cref="XgOmissionKind.InvalidStanding"/>), rather than one checker play of it.</summary>
@@ -94,14 +110,18 @@ public sealed record XgOmission
 
     /// <summary>
     /// The omission for a reader — <c>"Illegal play in match.xg, game 3,
-    /// move 12, roll 52: …"</c>, or <c>"Invalid standing in match.xg, game 1:
-    /// …"</c> — for a log line, a skip list or a test failure; not a wire
-    /// form.
+    /// move 12, roll 52: …"</c>, the same without <c>", roll 52"</c> where
+    /// the record states no roll, or <c>"Invalid standing in match.xg, game
+    /// 1: …"</c> — for a log line, a skip list or a test failure; not a wire
+    /// form. The reason may carry a line break, so the text may run to two
+    /// lines.
     /// </summary>
     public override string ToString() =>
         IsWholeGame
             ? string.Create(CultureInfo.InvariantCulture, $"{Describe(Kind)} in {SourceFile}, game {Game}: {Reason}")
-            : string.Create(CultureInfo.InvariantCulture, $"{Describe(Kind)} in {SourceFile}, game {Game}, move {MoveNumber}, roll {Roll}: {Reason}");
+            : Roll is { } roll
+                ? string.Create(CultureInfo.InvariantCulture, $"{Describe(Kind)} in {SourceFile}, game {Game}, move {MoveNumber}, roll {roll}: {Reason}")
+                : string.Create(CultureInfo.InvariantCulture, $"{Describe(Kind)} in {SourceFile}, game {Game}, move {MoveNumber}: {Reason}");
 
     /// <summary>A kind as the reader's phrase: the words <see cref="ToString"/> and the walk's log line open with.</summary>
     internal static string Describe(XgOmissionKind kind) => kind switch

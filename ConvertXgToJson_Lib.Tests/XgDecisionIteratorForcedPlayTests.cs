@@ -76,6 +76,23 @@ public class XgDecisionIteratorForcedPlayTests
     }
 
     [Fact]
+    public void Dance_BesideACorruptCandidate_AtAClosedOutPosition_IsReported_NotCounted()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame(initialPosition: OnTheBarAgainstAClosedBoard())
+            .DanceBesideACorruptCandidate(XgPlayer.Player1, SixSix, Play.Create(new Move(13, 7)));
+        var state = new XgIteratorState();
+
+        var rows = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
+
+        rows.Should().BeEmpty();
+        state.ForcedPlayCount.Should().Be(0, "a dance sentinel excuses no other candidate");
+        var omission = state.Omissions.Should().ContainSingle().Subject;
+        omission.Kind.Should().Be(XgOmissionKind.CorruptCandidate);
+        omission.Reason.Should().Contain("candidate 2 (13/7)");
+    }
+
+    [Fact]
     public void IllegalPlay_AtAForcedPosition_IsReported_NotCounted()
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");

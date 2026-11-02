@@ -48,7 +48,34 @@ public class XgDecisionIteratorOmissionTests
         omission.MoveNumber.Should().BeNull();
         omission.Roll.Should().BeNull();
         omission.SourceFile.Should().Be("match.xg");
-        omission.Reason.Should().Contain("at least one point", "the reason is the rule owner's sentence");
+        omission.Reason.Should().Contain("at least one point", "the reason is the refusing rule's complete message");
+    }
+
+    /// <summary>
+    /// Hal's ruling of 2026-11-01 ("C: keep full message"): the reason is
+    /// the exception's whole message, the offending value included, with
+    /// the line break .NET puts before it. Nothing parses or shortens it.
+    /// </summary>
+    [Fact]
+    public void ARefusedStandingsReason_HoldsTheOffendingValue_AsTheRuleStatedIt()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGameAsRecorded(-2, -2).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
+        var state = new XgIteratorState();
+
+        _ = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
+
+        string reason = state.Omissions.Should().ContainSingle().Subject.Reason;
+        reason.Should().Contain("The match length is 7").And.Contain("9-away/9-away", "the offending standing is in the message");
+        reason.Should().Be(Refusal(() => GameSession.Create(new MatchTerms { Length = 7 }, new MatchStanding { Away1 = 9, Away2 = 9, IsCrawford = false })),
+            "the reason is the message as the rule threw it, line break included");
+    }
+
+    private static string Refusal(Action act)
+    {
+        try { act(); }
+        catch (ArgumentException e) { return e.Message; }
+        throw new Xunit.Sdk.XunitException("the rule did not refuse");
     }
 
     [Fact]
@@ -295,6 +322,85 @@ public class XgDecisionIteratorOmissionTests
         var act = () => XgDecisionIterator.Iterate(builder.Build(), "match.xg", callbacks: callbacks).ToList();
 
         act.Should().Throw<InvalidOperationException>().WithMessage("the caller's bug");
+    }
+
+    /// <summary>
+    /// The one catch is for <see cref="ArgumentException"/> at the header's
+    /// pairing; a callback's <see cref="ArgumentException"/> is the width a
+    /// catch around the walk would wrongly swallow, so it is pinned apart
+    /// from the <see cref="InvalidOperationException"/> case.
+    /// </summary>
+    [Fact]
+    public void AnArgumentExceptionFromACallback_StillPropagates()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
+        var callbacks = new XgIteratorCallbacks(SkipGameAt: _ => throw new ArgumentException("the caller's bug", "game"));
+
+        var act = () => XgDecisionIterator.Iterate(builder.Build(), "match.xg", callbacks: callbacks).ToList();
+
+        act.Should().Throw<ArgumentException>().WithMessage("the caller's bug*");
+    }
+
+    // -----------------------------------------------------------------------
+    //  The illegal-play marker is reported whatever the dice say
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void AMarkerOnARecordWithNoRoll_IsReported_NamingItsMoveAndNoRoll_AndTheGameGoesOn()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint)
+            .IllegalPlayAsRecorded(XgPlayer.Player2, 0, 0)
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint);
+        var state = new XgIteratorState();
+        var logger = new CapturingLogger();
+
+        var rows = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state, logger: logger).ToList();
+
+        rows.Select(r => r.MoveNumber).Should().Equal(new int?[] { 1, 3 });
+        var omission = state.Omissions.Should().ContainSingle().Subject;
+        omission.Should().Be(new XgOmission("match.xg", 1, 2, null, XgOmissionKind.IllegalPlay, omission.Reason));
+        omission.ToString().Should().StartWith("Illegal play in match.xg, game 1, move 2: ");
+        logger.Warnings.Should().ContainSingle().Which.Should().StartWith("Illegal play in match.xg, game 1, move 2: ");
+    }
+
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(5, 0)]
+    [InlineData(7, 3)]
+    public void AMarkerOnARecordWhoseDiceAreNoRoll_IsReported_WithNoRollInvented(int die1, int die2)
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame().IllegalPlayAsRecorded(XgPlayer.Player1, die1, die2).Play(XgPlayer.Player2, ThreeOne, MakeFivePoint);
+        var state = new XgIteratorState();
+
+        var act = () => XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
+
+        act.Should().NotThrow().Subject.Should().ContainSingle().Which.MoveNumber.Should().Be(2);
+        var omission = state.Omissions.Should().ContainSingle().Subject;
+        omission.Kind.Should().Be(XgOmissionKind.IllegalPlay);
+        omission.MoveNumber.Should().Be(1);
+        omission.Roll.Should().BeNull("the dice are not a roll, and none is invented");
+    }
+
+    [Fact]
+    public void ANoRollRecordWithNoMarker_IsStillPassedBySilently()
+    {
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGame()
+            .PlayAsRecorded(XgPlayer.Player1, 0, 0, MakeFivePoint)
+            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint);
+        var state = new XgIteratorState();
+        var logger = new CapturingLogger();
+
+        var rows = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state, logger: logger).ToList();
+
+        rows.Should().ContainSingle().Which.MoveNumber.Should().Be(2);
+        state.Omissions.Should().BeEmpty();
+        state.ForcedPlayCount.Should().Be(0);
+        logger.Entries.Should().BeEmpty();
     }
 
     [Fact]

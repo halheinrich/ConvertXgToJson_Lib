@@ -28,8 +28,8 @@ namespace ConvertXgToJson_Lib;
 /// binds a match's away scores to its length, before any decision of the
 /// game is read. A standing those refuse — a player needing 0 points or
 /// more than the length, a Crawford flag at the wrong standing — leaves
-/// <see cref="GameInfo"/> <see langword="null"/> and the refusal's sentence
-/// in <see cref="GameRefusal"/>, so no decision of that game can borrow the
+/// <see cref="GameInfo"/> <see langword="null"/> and the refusal's complete
+/// message in <see cref="GameRefusal"/>, so no decision of that game can borrow the
 /// game before it; the game number still advances, since the games around
 /// it carry theirs. That recognized refusal is the one thing caught here,
 /// and only at that call: a null argument is a programming failure and
@@ -68,9 +68,12 @@ internal sealed class MatchContext
     public XgGameInfo? GameInfo { get; private set; }
 
     /// <summary>
-    /// Why the current game's header was refused — the refusal's own
-    /// sentence, from the standing's constructors or
-    /// <see cref="GameSession.Create"/> — or <see langword="null"/> when the
+    /// Why the current game's header was refused — the complete message of
+    /// the exception the standing's constructors or
+    /// <see cref="GameSession.Create"/> threw, the rule, the parameter and
+    /// the offending value, which may run to a second line (Hal's ruling of
+    /// 2026-11-01: keep the full message); text for a reader, not a stable
+    /// format — or <see langword="null"/> when the
     /// current game's standing holds (and before the first game header).
     /// Exactly one of this and <see cref="GameInfo"/> is set once a game
     /// header has been read.
@@ -129,7 +132,7 @@ internal sealed class MatchContext
 
     /// <summary>
     /// The game's metadata with its standing paired to the match's terms, or
-    /// the refusal's sentence when the standing does not hold. The one
+    /// the refusal's complete message when the standing does not hold. The one
     /// recovery in the walk, and the narrowest: the <see cref="ArgumentException"/>
     /// the standing's constructors (<see cref="XgGameInfo.From"/>) and
     /// <see cref="GameSession.Create"/> refuse a header's values with, at

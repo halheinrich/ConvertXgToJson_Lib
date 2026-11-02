@@ -1,3 +1,4 @@
+using System.Globalization;
 using BgDataTypes_Lib;
 using BgMoveGen;
 using ConvertXgToJson_Lib.Models;
@@ -517,7 +518,7 @@ public static class XgDecisionIterator
                 return null;
             case CheckerPlayKind.IllegalPlay:
             case CheckerPlayKind.CorruptCandidate:
-                Omit(new XgOmission(sourceFile, ctx.GameNumber, ctx.MoveNumber, new DiceRoll(move.Dice[0], move.Dice[1]),
+                Omit(new XgOmission(sourceFile, ctx.GameNumber, ctx.MoveNumber, RollOf(move),
                     reading.Kind == CheckerPlayKind.IllegalPlay ? XgOmissionKind.IllegalPlay : XgOmissionKind.CorruptCandidate,
                     reading.Reason), state, logger);
                 return null;
@@ -540,10 +541,14 @@ public static class XgDecisionIterator
             logger.LogWarning(
                 "{Kind} in {SourceFile}, game {Game}: {Reason}",
                 XgOmission.Describe(omission.Kind), omission.SourceFile, omission.Game, omission.Reason);
-        else
+        else if (omission.Roll is { } roll)
             logger.LogWarning(
                 "{Kind} in {SourceFile}, game {Game}, move {MoveNumber}, roll {Roll}: {Reason}",
-                XgOmission.Describe(omission.Kind), omission.SourceFile, omission.Game, omission.MoveNumber, omission.Roll, omission.Reason);
+                XgOmission.Describe(omission.Kind), omission.SourceFile, omission.Game, omission.MoveNumber, roll, omission.Reason);
+        else
+            logger.LogWarning(
+                "{Kind} in {SourceFile}, game {Game}, move {MoveNumber}: {Reason}",
+                XgOmission.Describe(omission.Kind), omission.SourceFile, omission.Game, omission.MoveNumber, omission.Reason);
     }
 
     // -----------------------------------------------------------------------
@@ -570,20 +575,22 @@ public static class XgDecisionIterator
         NotADecisionPosition,
 
         /// <summary>
-        /// A move record whose dice are both 0 states no roll, so no play and
-        /// no checker-play decision: nothing in its analysis is judged; passed
-        /// by silently.
-        /// </summary>
-        NoRoll,
-
-        /// <summary>
         /// XG's illegal-play marker among the candidates
         /// (<see cref="SentinelKind.IllegalPlay"/>): the play made in the
         /// source was illegal. A problem, omitted and reported
         /// (<see cref="XgOmissionKind.IllegalPlay"/>); it outranks every kind
-        /// below, so a marker is never hidden by the position it sits at.
+        /// below, the roll included, so a marker is never hidden by the
+        /// position it sits at or by dice that are no roll — its omission
+        /// then names its move and no roll.
         /// </summary>
         IllegalPlay,
+
+        /// <summary>
+        /// A move record whose dice are both 0 states no roll, so no play and
+        /// no checker-play decision: its candidates are not judged; passed by
+        /// silently.
+        /// </summary>
+        NoRoll,
 
         /// <summary>
         /// A candidate invalid from the decision's own position — a play the
@@ -612,11 +619,13 @@ public static class XgDecisionIterator
     /// The one classification of an analysed move record
     /// (<see cref="CheckerPlayKind"/>), the rule the walk applies at
     /// <see cref="ReadCheckerPlay"/>, asked in this order: the position is a
-    /// decision position; the record states a roll; the analysis carries no
-    /// illegal-play marker; every candidate is a play from the position; the
+    /// decision position; the analysis carries no illegal-play marker; the
+    /// record states a roll; every candidate is a play from the position; the
     /// position offers more than one legal play. Problems come before the
     /// forced test, so recognized bad data at a forced position is reported
-    /// and not counted.
+    /// and not counted; and the marker comes before the roll, so a marker on
+    /// a record whose dice are no roll is reported too, as the walk before
+    /// the classification reported it (halheinrich/backgammon#514).
     ///
     /// <para>
     /// <b>The forced rule is the move generator's</b>:
@@ -627,9 +636,11 @@ public static class XgDecisionIterator
     /// stores one candidate, but a position with several legal plays and one
     /// stored candidate is a decision). XG's dance sentinel
     /// (<see cref="SentinelKind.Dance"/>) is read as the empty play, never
-    /// translated: where the one legal play is the empty play it is forced;
-    /// where a play is legal it is a candidate invalid from its position,
-    /// corrupt.
+    /// translated, and excuses no other candidate: every candidate within
+    /// the move count is tested before a record is called forced, so a
+    /// corrupt one beside a dance is reported. A dance alone where the one
+    /// legal play is the empty play is forced; a dance where a play is legal
+    /// is a candidate invalid from its position, corrupt.
     /// </para>
     ///
     /// <para>
@@ -653,26 +664,24 @@ public static class XgDecisionIterator
         if (!PositionData.IsDecisionPosition(board))
             return CheckerPlayReading.Of(CheckerPlayKind.NotADecisionPosition);
 
-        if (!StatesRoll(move))
-            return CheckerPlayReading.Of(CheckerPlayKind.NoRoll);
-
         // XG's non-play sentinels are read before any candidate reaches the
         // translator: the illegal-play marker historically crashed the
-        // leaves, and a dance translated as "1/1".
+        // leaves, and a dance translated as "1/1". The marker is read before
+        // the roll: a problem is reported whatever the record's dice say.
         var sentinel = ClassifySentinelAnalysis(move.Analysis);
         if (sentinel == SentinelKind.IllegalPlay)
             return CheckerPlayReading.Problem(CheckerPlayKind.IllegalPlay,
                 "the play made in the source was illegal; XG stores its marker in place of the play.");
 
+        if (!StatesRoll(move))
+            return CheckerPlayReading.Of(CheckerPlayKind.NoRoll);
+
         var legal = MoveGenerator.GeneratePlays(new BoardState(board), move.Dice[0], move.Dice[1]);
         bool forced = legal.Count == 1;
 
-        if (sentinel == SentinelKind.Dance)
-            return forced && legal[0].Count == 0
-                ? CheckerPlayReading.Of(CheckerPlayKind.Forced)
-                : CheckerPlayReading.Problem(CheckerPlayKind.CorruptCandidate,
-                    $"XG records a dance, no legal play, but the position has {legal.Count} legal {(legal.Count == 1 ? "play" : "plays")}.");
-
+        // Every candidate is tested, a dance sentinel's neighbours included:
+        // the sentinel is the empty play, and a corrupt candidate beside it
+        // is reported before the record can be called forced.
         var plays = CandidatePlays(move.Analysis, board);
         var invalid = InvalidCandidates(board, plays);
         if (invalid.Count > 0)
@@ -680,10 +689,39 @@ public static class XgDecisionIterator
                 "invalid from the decision's position: "
                 + string.Join("; ", invalid.Select(i => $"candidate {i + 1} ({plays[i].ToNotation()})")));
 
+        if (sentinel == SentinelKind.Dance)
+            return forced && legal[0].Count == 0
+                ? CheckerPlayReading.Of(CheckerPlayKind.Forced)
+                : CheckerPlayReading.Problem(CheckerPlayKind.CorruptCandidate,
+                    $"XG records a dance, no legal play, but the position has {legal.Count} legal {(legal.Count == 1 ? "play" : "plays")}.");
+
         return forced
             ? CheckerPlayReading.Of(CheckerPlayKind.Forced)
             : CheckerPlayReading.Decision(plays);
     }
+
+    /// <summary>
+    /// The roll an omitted checker play is reported with: the record's two
+    /// dice where they are a roll, <see langword="null"/> where they are not
+    /// — both 0, one 0, a face above 6 — since an omission invents no dice.
+    /// Decided by <see cref="DiceRoll.TryParse(string?, IFormatProvider?, out DiceRoll)"/>,
+    /// the type's one non-throwing read, on the two dice spelt as the digits
+    /// they are: a die outside 1–6 spells no digit 1–6, and a die of two
+    /// digits or a sign makes the token longer than two characters, so no
+    /// pair that is not a roll can read as one. The rule stays
+    /// <see cref="DiceRoll"/>'s; nothing here restates it. The only caller
+    /// with dice that may not be a roll is the illegal-play marker, read
+    /// before the roll; every other omitted play has passed
+    /// <see cref="MoveGenerator.GeneratePlays"/>, which refused any other
+    /// pair, so for it the roll is always present.
+    /// </summary>
+    private static DiceRoll? RollOf(MoveRecord move) =>
+        move.Dice.Length >= 2
+        && DiceRoll.TryParse(
+            string.Create(CultureInfo.InvariantCulture, $"{move.Dice[0]}{move.Dice[1]}"),
+            CultureInfo.InvariantCulture, out var roll)
+            ? roll
+            : null;
 
     /// <summary>
     /// <see cref="Classify"/>'s result: the kind, the translated candidates
@@ -701,14 +739,19 @@ public static class XgDecisionIterator
     /// Every candidate's play, in XG's order, translated from XG's encoding
     /// against the decision's <paramref name="board"/> (the mover's frame).
     /// A candidate is a slot the analysis carries a move encoding and an
-    /// evaluation for, within its move count.
+    /// evaluation for, within its move count, so the zero padding beyond it
+    /// is never a candidate. XG's dance sentinel is the empty play and is
+    /// never handed to the translator; the illegal-play marker never
+    /// reaches here, since <see cref="Classify"/> reports it first.
     /// </summary>
     private static List<Play> CandidatePlays(BestMoveAnalysis analysis, BoardPosition board)
     {
         int count = CandidateCount(analysis);
         var plays = new List<Play>(count);
         for (int i = 0; i < count; i++)
-            plays.Add(XgMoveTranslator.Translate(analysis.Moves[i], board));
+            plays.Add(XgMoveEncoding.ClassifyCandidate(analysis.Moves[i]) == SentinelKind.Dance
+                ? Play.Create()
+                : XgMoveTranslator.Translate(analysis.Moves[i], board));
         return plays;
     }
 
@@ -1250,7 +1293,10 @@ public static class XgDecisionIterator
     /// An illegal-play marker outranks a dance: the marker is the problem
     /// and, in real files, sits at the user-play slot alongside other legal
     /// candidates, so it can co-occur with neither — but should it, the
-    /// reported kind wins. Recognition of each pair is delegated to the
+    /// reported kind wins. A dance found here excuses no other candidate:
+    /// <see cref="CandidatePlays"/> reads the sentinel slot as the empty play
+    /// and translates the rest, which are tested like any candidate's.
+    /// Recognition of each pair is delegated to the
     /// single-sourced <see cref="XgMoveEncoding.ClassifyCandidate"/> (illegal
     /// play keys on <c>from == </c><see cref="XgMoveEncoding.IllegalPlayMarker"/>,
     /// covering both <c>(-100, -100)</c> and <c>(-100, X)</c>; dance is
@@ -1339,7 +1385,11 @@ public static class XgDecisionIterator
     /// Whether a move record states a roll: a move record whose dice are both
     /// 0 poses no checker-play decision (<see cref="CheckerPlayKind.NoRoll"/>).
     /// One of the rules <see cref="ClassifyCheckerPlay"/> applies, stated
-    /// once here.
+    /// once here, after the illegal-play marker: a marker is reported whether
+    /// or not the record states a roll. This asks only whether the record
+    /// states one, not whether the dice are faces; a die of 0 beside one that
+    /// is not, or a die above 6, states a roll here and is refused where the
+    /// dice are used, as it always was.
     /// </summary>
     internal static bool StatesRoll(MoveRecord move) =>
         move.Dice.Length >= 2 && (move.Dice[0] != 0 || move.Dice[1] != 0);

@@ -157,7 +157,30 @@ public sealed class XgGameBuilder
     /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
     public XgGameBuilder Play(
         XgPlayer player, DiceRoll dice, BgDataTypes_Lib.Play played, IReadOnlyList<XgPlayCandidate> candidates,
-        string? comment = null)
+        string? comment = null) =>
+        AnalysedPlay(player, dice.High, dice.Low, played, candidates, comment);
+
+    /// <summary>
+    /// Records an analysed checker play with the dice as XG recorded them,
+    /// whatever they are: both 0 (a record that states no roll), one 0, a
+    /// face above 6. <see cref="Play(XgPlayer, DiceRoll, BgDataTypes_Lib.Play, string)"/>
+    /// takes a <see cref="DiceRoll"/>, which refuses those; XG's files can
+    /// hold them, and this is the one way a test synthesizes such a record
+    /// (halheinrich/backgammon#514). The played move is validated and the
+    /// position advances as for any analysed play.
+    /// </summary>
+    /// <param name="player">Who rolled.</param>
+    /// <param name="die1">The first die as recorded.</param>
+    /// <param name="die2">The second die as recorded.</param>
+    /// <param name="played">The play made, in the mover's numbering; the analysis's only candidate.</param>
+    /// <exception cref="ArgumentException">The play cannot be made from the current position.</exception>
+    /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
+    internal XgGameBuilder PlayAsRecorded(XgPlayer player, int die1, int die2, BgDataTypes_Lib.Play played) =>
+        AnalysedPlay(player, die1, die2, played, [new XgPlayCandidate(played, equity: 0.0)], comment: null);
+
+    private XgGameBuilder AnalysedPlay(
+        XgPlayer player, int die1, int die2, BgDataTypes_Lib.Play played, IReadOnlyList<XgPlayCandidate> candidates,
+        string? comment)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -204,14 +227,14 @@ public sealed class XgGameBuilder
             FinalPosition = new PositionEngine { Points = applied.Stored },
             ActivePlayer = sign,
             MoveList = ToMoveList(applied.Encoded),
-            Dice = [dice.High, dice.Low],
+            Dice = [die1, die2],
             CubeValue = CubeValueRaw,
             ErrorMove = moveError,
             CandidateCount = n,
             Analysis = new BestMoveAnalysis
             {
                 Position = before,
-                Dice = [dice.High, dice.Low],
+                Dice = [die1, die2],
                 Level = paneLevel,
                 Score = [Score1, Score2],
                 Cube = _cubeSize,
@@ -276,7 +299,44 @@ public sealed class XgGameBuilder
     /// <param name="dice">The roll.</param>
     /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
     public XgGameBuilder Dance(XgPlayer player, DiceRoll dice) =>
-        SentinelPlay(player, dice, [0, 0]);
+        SentinelPlay(player, dice.High, dice.Low, DanceSentinel);
+
+    /// <summary>
+    /// Records a dance whose analysis holds, beside the no-legal-move
+    /// sentinel, a candidate that cannot be played from the position — the
+    /// shape in which a dance sentinel must not excuse the other candidate
+    /// (halheinrich/backgammon#514): the iterator reports it as a corrupt
+    /// candidate and counts no forced play. No XG file in hand holds one, so
+    /// this is the one way a test synthesizes it. The corrupt candidate is
+    /// encoded as stated, never applied, and its stored resulting position
+    /// is the position unchanged, as the sentinel's is.
+    /// </summary>
+    /// <param name="player">Who rolled.</param>
+    /// <param name="dice">The roll.</param>
+    /// <param name="corrupt">The corrupt candidate, in the mover's numbering; stored as the second candidate.</param>
+    /// <exception cref="ArgumentException"><paramref name="corrupt"/> holds more moves than a candidate can.</exception>
+    /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
+    internal XgGameBuilder DanceBesideACorruptCandidate(XgPlayer player, DiceRoll dice, BgDataTypes_Lib.Play corrupt) =>
+        SentinelPlay(player, dice.High, dice.Low, DanceSentinel, Encode(corrupt, nameof(corrupt)));
+
+    /// <summary>
+    /// Records XG's illegal-play marker with the dice as XG recorded them,
+    /// whatever they are — both 0, one 0, a face above 6 — the shape in
+    /// which the marker must still be reported, with no roll invented
+    /// (halheinrich/backgammon#514). <see cref="IllegalPlay"/> takes a
+    /// <see cref="DiceRoll"/>, which refuses those; this is the one way a
+    /// test synthesizes the record.
+    /// </summary>
+    /// <param name="player">Who rolled.</param>
+    /// <param name="die1">The first die as recorded.</param>
+    /// <param name="die2">The second die as recorded.</param>
+    /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
+    internal XgGameBuilder IllegalPlayAsRecorded(XgPlayer player, int die1, int die2) =>
+        SentinelPlay(player, die1, die2, IllegalPlaySentinel);
+
+    private static ReadOnlySpan<sbyte> DanceSentinel => [0, 0];
+
+    private static ReadOnlySpan<sbyte> IllegalPlaySentinel => [XgMoveEncoding.IllegalPlayMarker, XgMoveEncoding.IllegalPlayMarker];
 
     /// <summary>
     /// Records XG's illegal-play marker: the play recorded in the source
@@ -289,7 +349,7 @@ public sealed class XgGameBuilder
     /// <param name="dice">The roll.</param>
     /// <exception cref="InvalidOperationException">The game already ended on a pass.</exception>
     public XgGameBuilder IllegalPlay(XgPlayer player, DiceRoll dice) =>
-        SentinelPlay(player, dice, [XgMoveEncoding.IllegalPlayMarker, XgMoveEncoding.IllegalPlayMarker]);
+        SentinelPlay(player, dice.High, dice.Low, IllegalPlaySentinel);
 
     /// <summary>
     /// Records an analysed checker play whose candidate list holds, beside
@@ -364,7 +424,13 @@ public sealed class XgGameBuilder
         return this;
     }
 
-    private XgGameBuilder SentinelPlay(XgPlayer player, DiceRoll dice, ReadOnlySpan<sbyte> sentinelPair)
+    /// <summary>
+    /// A move record whose analysis is a non-play sentinel — the dance or the
+    /// illegal-play marker — with the dice as given, and, when
+    /// <paramref name="besideIt"/> is given, a second candidate encoded as
+    /// stated; every stored resulting position is the position unchanged.
+    /// </summary>
+    private XgGameBuilder SentinelPlay(XgPlayer player, int die1, int die2, ReadOnlySpan<sbyte> sentinelPair, sbyte[]? besideIt = null)
     {
         ThrowIfEnded();
         int sign = player.ToSign();
@@ -374,6 +440,8 @@ public sealed class XgGameBuilder
         var unchanged = new PositionEngine { Points = MoversFrame(_position, sign) };
         var candidate = TerminatorFilled();
         sentinelPair.CopyTo(candidate);
+        sbyte[][] moves = besideIt is null ? [candidate] : [candidate, besideIt];
+        int n = moves.Length;
 
         _records.Add(new MoveRecord
         {
@@ -382,25 +450,25 @@ public sealed class XgGameBuilder
             FinalPosition = unchanged,
             ActivePlayer = sign,
             MoveList = ToMoveList(TerminatorFilled()),
-            Dice = [dice.High, dice.Low],
+            Dice = [die1, die2],
             CubeValue = CubeValueRaw,
             ErrorMove = XgRecordFactory.UnanalysedError,
-            CandidateCount = 1,
+            CandidateCount = n,
             Analysis = new BestMoveAnalysis
             {
                 Position = position,
-                Dice = [dice.High, dice.Low],
+                Dice = [die1, die2],
                 Level = ToLevelCode(1),
                 Score = [Score1, Score2],
                 Cube = _cubeSize,
                 CubePosition = _cubeOwnerSign,
                 Crawford = IsCrawford ? 1 : 0,
                 Jacoby = _match.IsMoneySession && _match.IsJacoby ? 1 : 0,
-                MoveCount = 1,
-                PositionsPlayed = [unchanged],
-                Moves = [candidate],
-                EvalLevels = [new EvalLevel { Level = ToLevelCode(1) }],
-                Evals = [new EvalResult()],
+                MoveCount = n,
+                PositionsPlayed = [.. Enumerable.Repeat(unchanged, n)],
+                Moves = moves,
+                EvalLevels = [.. Enumerable.Range(0, n).Select(_ => new EvalLevel { Level = ToLevelCode(1) })],
+                Evals = [.. Enumerable.Range(0, n).Select(_ => new EvalResult())],
             },
             Played = true,
             MoveError = XgRecordFactory.UnanalysedError,
