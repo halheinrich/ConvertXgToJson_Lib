@@ -54,8 +54,9 @@ namespace ConvertXgToJson_Lib.Tests;
 ///     (halheinrich/backgammon#514): the walk builds a record for exactly
 ///     the records <see cref="XgDecisionIterator.ClassifyCheckerPlay"/> calls
 ///     a decision, counts exactly the forced plays, and reports as an
-///     omission exactly each illegal play, each corrupt candidate and each
-///     game whose standing the context refuses. Nothing else fails.
+///     omission exactly each corrupt candidate and each game whose standing
+///     the context refuses, so an illegal play is neither built, counted nor
+///     reported. Nothing else fails.
 ///   </description></item>
 ///   <item><description>
 ///     <b>The after-boards are XG's.</b> XG stored a resulting position for
@@ -388,10 +389,11 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
                 else if (XgDecisionIterator.CandidateCount(analysis) > 1)
                     ForcedWithSeveralCandidates++;
             }
-            var problems = kinds.Where(k => k.Value is XgDecisionIterator.CheckerPlayKind.IllegalPlay or XgDecisionIterator.CheckerPlayKind.CorruptCandidate)
-                .ToDictionary(k => k.Key, k => k.Value);
-            IllegalPlays += problems.Values.Count(k => k == XgDecisionIterator.CheckerPlayKind.IllegalPlay);
-            CorruptCandidate += problems.Values.Count(k => k == XgDecisionIterator.CheckerPlayKind.CorruptCandidate);
+            IllegalPlays += kinds.Values.Count(k => k == XgDecisionIterator.CheckerPlayKind.IllegalPlay);
+            var corrupt = kinds.Where(k => k.Value == XgDecisionIterator.CheckerPlayKind.CorruptCandidate)
+                .Select(k => k.Key)
+                .ToHashSet();
+            CorruptCandidate += corrupt.Count;
 
             // The iterator, with the omissions and the forced count it reports.
             var state = new XgIteratorState();
@@ -408,24 +410,21 @@ public class XgCorpusAgreementTests(XgCorpusAgreementTests.Measurement corpus, I
                     continue;
                 }
                 var id = XgDecisionIterator.BuildDecisionId(walkName, omission.Game, omission.MoveNumber!.Value, isCube: false);
-                var expected = omission.Kind == XgOmissionKind.IllegalPlay
-                    ? XgDecisionIterator.CheckerPlayKind.IllegalPlay
-                    : XgDecisionIterator.CheckerPlayKind.CorruptCandidate;
-                if (!problems.TryGetValue(id, out var kind) || kind != expected || !reported.Add(id))
+                if (omission.Kind != XgOmissionKind.CorruptCandidate || !corrupt.Contains(id) || !reported.Add(id))
                     OmissionsNamingNoProblem.Add($"{name}: {omission}");
                 else
                     Omissions.Add($"{name}: {omission}");
             }
             foreach (int game in omittedGames)
                 ProblemsNotReported.Add($"{name}: game {game}'s refused standing is not among the omissions");
-            foreach (var id in problems.Keys.Where(id => !reported.Contains(id)))
-                ProblemsNotReported.Add($"{name}: {id} ({problems[id]}) is not among the omissions");
+            foreach (var id in corrupt.Where(id => !reported.Contains(id)))
+                ProblemsNotReported.Add($"{name}: {id}'s corrupt candidate is not among the omissions");
 
             // A corrupt decision's candidates are XG's too, and none has an
             // after-board: the omission is a disagreement with XG, named here.
             // A forced play's candidates are not compared: the walk builds no
             // record for it by rule, not for a failure to read them.
-            foreach (var id in problems.Keys.Where(id => problems[id] == XgDecisionIterator.CheckerPlayKind.CorruptCandidate))
+            foreach (var id in corrupt)
             {
                 int stored = XgDecisionIterator.CandidateCount(((MoveRecord)sources[id]).Analysis);
                 CandidateAfterBoards += stored;

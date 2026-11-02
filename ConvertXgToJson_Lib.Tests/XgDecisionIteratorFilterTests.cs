@@ -19,7 +19,7 @@ namespace ConvertXgToJson_Lib.Tests;
 ///     which the record would refuse. Found with
 ///     <see cref="BoardState.TryApplyPlay"/> on a fresh board per candidate;
 ///     the decision is skipped with a warning naming the file, game, move,
-///     roll and the invalid candidate, as XG's illegal-play marker is.
+///     roll and the invalid candidate.
 ///   </description></item>
 /// </list>
 /// In both, the rest of the file still emits, and in an <c>.xgp</c> a skipped

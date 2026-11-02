@@ -8,9 +8,10 @@ namespace ConvertXgToJson_Lib.Tests;
 /// ruling of 2026-11-01, halheinrich/backgammon#514): a checker play at a
 /// position with exactly one legal play, by BgMoveGen's
 /// <c>MoveGenerator.GeneratePlays</c>, a dance included. It is counted on
-/// <see cref="XgIteratorState.ForcedPlayCount"/>, never reported. Problems
-/// outrank it: an illegal play or a corrupt candidate at a forced position is
-/// an omission, not a count. The rule is the position's: several legal plays
+/// <see cref="XgIteratorState.ForcedPlayCount"/>, never reported. A corrupt
+/// candidate outranks it: at a forced position it is an omission, not a
+/// count. XG's illegal-play marker is read first too, so a forced position
+/// holding one is neither. The rule is the position's: several legal plays
 /// with one stored candidate stay a decision. Dropped upstream of the
 /// <c>.xgp</c> selection, a forced play lets the analysed cube through.
 /// </summary>
@@ -92,17 +93,30 @@ public class XgDecisionIteratorForcedPlayTests
         omission.Reason.Should().Contain("candidate 2 (13/7)");
     }
 
+    /// <summary>
+    /// The position in the middle is the one <see cref="ForcedOnlySource_YieldsNothing_CountsEachForcedPlay_AndReportsNoOmission"/>
+    /// counts as forced, which is the control: the marker there is read
+    /// first, so it is not counted, and it is no omission either.
+    /// </summary>
     [Fact]
-    public void IllegalPlay_AtAForcedPosition_IsReported_NotCounted()
+    public void IllegalPlay_AtAForcedPosition_PassesBySilently_NotCounted()
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
-        builder.AddGame(initialPosition: OneCheckerOn24()).IllegalPlay(XgPlayer.Player1, ThreeOne);
+        builder.AddGame(initialPosition: CheckersOn24And13())
+            .Play(XgPlayer.Player1, ThreeOne, TwentyFourTwenty)
+            .AtPosition(OneCheckerOn24())
+            .IllegalPlay(XgPlayer.Player1, ThreeOne)
+            .AtPosition(CheckersOn24And13())
+            .Play(XgPlayer.Player1, ThreeOne, TwentyFourTwenty);
         var state = new XgIteratorState();
+        var logger = new CapturingLogger();
 
-        _ = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
+        var rows = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state, logger: logger).ToList();
 
-        state.ForcedPlayCount.Should().Be(0, "a problem outranks a forced position");
-        state.Omissions.Should().ContainSingle().Which.Kind.Should().Be(XgOmissionKind.IllegalPlay);
+        rows.Select(r => r.MoveNumber).Should().Equal(new int?[] { 1, 3 });
+        state.ForcedPlayCount.Should().Be(0, "the marker is read before the forced test");
+        state.Omissions.Should().BeEmpty("an illegal play is not a problem");
+        logger.Entries.Should().BeEmpty();
     }
 
     [Fact]

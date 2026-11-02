@@ -10,8 +10,9 @@ namespace ConvertXgToJson_Lib.Tests;
 /// reports each omission, and goes on (halheinrich/backgammon#514, Hal's
 /// rulings of 2026-11-01): a game whose header states a standing the session
 /// refuses is omitted whole, at its header, and the walk resumes at the next
-/// game; an illegal play or a corrupt candidate is omitted alone, and the
-/// game goes on from the next record. Every identifier the surviving
+/// game; a corrupt candidate is omitted alone, and the game goes on from the
+/// next record. An illegal play is no omission
+/// (<see cref="XgDecisionIteratorIllegalPlayTests"/>). Every identifier the surviving
 /// decisions carry is the one it always had. Omissions reach the caller
 /// through <see cref="XgIteratorState.Omissions"/> and the logger, each
 /// reset per enumeration; recovery is narrow, so a programming failure still
@@ -217,7 +218,7 @@ public class XgDecisionIteratorOmissionTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void IllegalPlayAndCorruptCandidate_AreOmittedAlone_WithDecisionsBeforeAndAfter()
+    public void AnIllegalPlayAndACorruptCandidateInOneGame_IsOneOmission_WithDecisionsBeforeAndAfter()
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGame()
@@ -229,12 +230,10 @@ public class XgDecisionIteratorOmissionTests
 
         var rows = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
 
-        rows.Select(r => r.MoveNumber).Should().Equal(new int?[] { 1, 4 }, "the omitted plays keep their move numbers for the rest");
-        state.Omissions.Should().Equal(
-            new XgOmission("match.xg", 1, 2, new DiceRoll(5, 2), XgOmissionKind.IllegalPlay, state.Omissions[0].Reason),
-            new XgOmission("match.xg", 1, 3, new DiceRoll(4, 2), XgOmissionKind.CorruptCandidate, state.Omissions[1].Reason));
-        state.Omissions[0].Reason.Should().Contain("illegal");
-        state.Omissions[1].Reason.Should().Contain("candidate 2 (14/10)", "the reason names each invalid candidate");
+        rows.Select(r => r.MoveNumber).Should().Equal(new int?[] { 1, 4 }, "the plays left out keep their move numbers for the rest");
+        var omission = state.Omissions.Should().ContainSingle("the illegal play is no omission").Subject;
+        omission.Should().Be(new XgOmission("match.xg", 1, 3, new DiceRoll(4, 2), XgOmissionKind.CorruptCandidate, omission.Reason));
+        omission.Reason.Should().Contain("candidate 2 (14/10)", "the reason names each invalid candidate");
         state.ForcedPlayCount.Should().Be(0);
     }
 
@@ -243,7 +242,7 @@ public class XgDecisionIteratorOmissionTests
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGameAsRecorded(7, 0).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
-        builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint).IllegalPlay(XgPlayer.Player2, new DiceRoll(5, 2));
+        builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint).PlayWithCorruptCandidate(XgPlayer.Player2, new DiceRoll(4, 2), Play.Create(new Move(13, 9), new Move(13, 11)), Play.Create(new Move(14, 10)));
         var logger = new CapturingLogger();
 
         _ = XgDecisionIterator.Iterate(builder.Build(), "match.xg", logger: logger).ToList();
@@ -251,7 +250,7 @@ public class XgDecisionIteratorOmissionTests
         logger.Entries.Should().OnlyContain(e => e.Level == LogLevel.Warning);
         logger.Warnings.Should().HaveCount(2);
         logger.Warnings[0].Should().StartWith("Invalid standing in match.xg, game 1: ").And.Contain("at least one point");
-        logger.Warnings[1].Should().StartWith("Illegal play in match.xg, game 2, move 2, roll 52: ");
+        logger.Warnings[1].Should().StartWith("Corrupt candidate in match.xg, game 2, move 2, roll 42: ").And.Contain("candidate 2 (14/10)");
     }
 
     [Fact]
@@ -259,7 +258,7 @@ public class XgDecisionIteratorOmissionTests
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
         builder.AddGameAsRecorded(7, 0).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
-        builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint).IllegalPlay(XgPlayer.Player2, new DiceRoll(5, 2));
+        builder.AddGame().Play(XgPlayer.Player1, ThreeOne, MakeFivePoint).PlayWithCorruptCandidate(XgPlayer.Player2, new DiceRoll(4, 2), Play.Create(new Move(13, 9), new Move(13, 11)), Play.Create(new Move(14, 10)));
 
         var act = () => XgDecisionIterator.IterateDiagramRequests(builder.Build(), "match.xg").ToList();
 
@@ -343,47 +342,8 @@ public class XgDecisionIteratorOmissionTests
     }
 
     // -----------------------------------------------------------------------
-    //  The illegal-play marker is reported whatever the dice say
+    //  A record that states no roll is passed by
     // -----------------------------------------------------------------------
-
-    [Fact]
-    public void AMarkerOnARecordWithNoRoll_IsReported_NamingItsMoveAndNoRoll_AndTheGameGoesOn()
-    {
-        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
-        builder.AddGame()
-            .Play(XgPlayer.Player1, ThreeOne, MakeFivePoint)
-            .IllegalPlayAsRecorded(XgPlayer.Player2, 0, 0)
-            .Play(XgPlayer.Player2, ThreeOne, MakeFivePoint);
-        var state = new XgIteratorState();
-        var logger = new CapturingLogger();
-
-        var rows = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state, logger: logger).ToList();
-
-        rows.Select(r => r.MoveNumber).Should().Equal(new int?[] { 1, 3 });
-        var omission = state.Omissions.Should().ContainSingle().Subject;
-        omission.Should().Be(new XgOmission("match.xg", 1, 2, null, XgOmissionKind.IllegalPlay, omission.Reason));
-        omission.ToString().Should().StartWith("Illegal play in match.xg, game 1, move 2: ");
-        logger.Warnings.Should().ContainSingle().Which.Should().StartWith("Illegal play in match.xg, game 1, move 2: ");
-    }
-
-    [Theory]
-    [InlineData(0, 5)]
-    [InlineData(5, 0)]
-    [InlineData(7, 3)]
-    public void AMarkerOnARecordWhoseDiceAreNoRoll_IsReported_WithNoRollInvented(int die1, int die2)
-    {
-        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
-        builder.AddGame().IllegalPlayAsRecorded(XgPlayer.Player1, die1, die2).Play(XgPlayer.Player2, ThreeOne, MakeFivePoint);
-        var state = new XgIteratorState();
-
-        var act = () => XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
-
-        act.Should().NotThrow().Subject.Should().ContainSingle().Which.MoveNumber.Should().Be(2);
-        var omission = state.Omissions.Should().ContainSingle().Subject;
-        omission.Kind.Should().Be(XgOmissionKind.IllegalPlay);
-        omission.MoveNumber.Should().Be(1);
-        omission.Roll.Should().BeNull("the dice are not a roll, and none is invented");
-    }
 
     [Fact]
     public void ANoRollRecordWithNoMarker_IsStillPassedBySilently()

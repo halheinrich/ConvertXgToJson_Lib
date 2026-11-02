@@ -20,8 +20,8 @@ namespace ConvertXgToJson_Lib;
 /// and its explicit-candidates overload), an unanalysed play
 /// (<see cref="UnanalysedPlay"/>; the iterator skips it), a dance
 /// (<see cref="Dance"/>; a forced play to the iterator) and XG's
-/// illegal-play marker (<see cref="IllegalPlay"/>; an omission the iterator
-/// reports) — and cube decisions in two (<see cref="CubeDecision"/>,
+/// illegal-play marker (<see cref="IllegalPlay"/>; the iterator passes it by
+/// in silence) — and cube decisions in two (<see cref="CubeDecision"/>,
 /// <see cref="UnanalysedCube"/>). See <see cref="XgFileBuilder"/> for the
 /// position frame and the validation contract.
 /// </para>
@@ -322,7 +322,7 @@ public sealed class XgGameBuilder
     /// <summary>
     /// Records XG's illegal-play marker with the dice as XG recorded them,
     /// whatever they are — both 0, one 0, a face above 6 — the shape in
-    /// which the marker must still be reported, with no roll invented
+    /// which the marker must still pass by in silence, its dice unused
     /// (halheinrich/backgammon#514). <see cref="IllegalPlay"/> takes a
     /// <see cref="DiceRoll"/>, which refuses those; this is the one way a
     /// test synthesizes the record.
@@ -341,9 +341,9 @@ public sealed class XgGameBuilder
     /// <summary>
     /// Records XG's illegal-play marker: the play recorded in the source
     /// was illegal, and XG stamped the marker in place of a candidate when
-    /// it forced the next position. The iterator omits the decision and
-    /// reports it (<see cref="XgOmissionKind.IllegalPlay"/>); the tracked
-    /// position is left unchanged, as the real result is unknowable.
+    /// it forced the next position. The iterator yields no decision and says
+    /// nothing of it; the tracked position is left unchanged, as the real
+    /// result is unknowable.
     /// </summary>
     /// <param name="player">Who rolled.</param>
     /// <param name="dice">The roll.</param>

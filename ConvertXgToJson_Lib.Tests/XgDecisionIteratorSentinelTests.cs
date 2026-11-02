@@ -31,11 +31,11 @@ namespace ConvertXgToJson_Lib.Tests;
 ///
 /// <para>
 /// Both are read at the iterator boundary, before any candidate reaches the
-/// translator (halheinrich/backgammon#514): the marker is an omission,
-/// reported; the dance is a forced play where no play is legal, counted and
-/// not reported. Neither yields a decision on either surface, which is what
-/// this class pins; the omission and the count are
-/// <see cref="XgDecisionIteratorOmissionTests"/>' and
+/// translator (halheinrich/backgammon#514): the marker passes by in silence;
+/// the dance is a forced play where no play is legal, counted and not
+/// reported. Neither yields a decision on either surface, which is what
+/// this class pins; the silence and the count are
+/// <see cref="XgDecisionIteratorIllegalPlayTests"/>' and
 /// <see cref="XgDecisionIteratorForcedPlayTests"/>'.
 /// </para>
 /// </summary>

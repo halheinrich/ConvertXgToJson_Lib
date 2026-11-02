@@ -6,9 +6,9 @@ namespace ConvertXgToJson_Lib;
 /// Read-only observer of producer-internal iteration state. Populated by
 /// <see cref="XgDecisionIterator"/> as iteration progresses; the caller may
 /// inspect <see cref="MatchInfo"/> and <see cref="GameInfo"/> for per-row
-/// context, and <see cref="Omissions"/> and <see cref="ForcedPlayCount"/>
-/// for what the walk left out of the file and why
-/// (halheinrich/backgammon#514).
+/// context, <see cref="Omissions"/> for the problems the walk left out of the
+/// file and why, and <see cref="ForcedPlayCount"/> for the forced plays it
+/// passed by (halheinrich/backgammon#514).
 ///
 /// <para>
 /// Iteration control — skipping matches, games, or stopping early — is
@@ -63,12 +63,12 @@ public sealed class XgIteratorState
     public XgGameInfo? GameInfo { get; internal set; }
 
     /// <summary>
-    /// What the walk has left out of the current file so far, in the order
-    /// found — each omitted game and each omitted checker play, with its
-    /// kind and the refusing rule's complete message as the reason
-    /// (<see cref="XgOmission"/>; an omitted play names its roll where the
-    /// record states one). Complete once the
-    /// enumeration has ended; empty when the walk found nothing to omit.
+    /// The problems the walk has left out of the current file so far, in the
+    /// order found — each omitted game and each omitted checker play, with
+    /// its kind and the refusing rule's complete message as the reason
+    /// (<see cref="XgOmission"/>; an omitted play names its move and roll).
+    /// Complete once the enumeration has ended; empty when the walk found
+    /// nothing to omit. An illegal play is not a problem and is not here.
     /// Each omission is also logged, at <c>Warning</c>, through the logger
     /// the iterator was given.
     /// </summary>
@@ -79,8 +79,9 @@ public sealed class XgIteratorState
     /// passed by as forced — positions with exactly one legal play, a dance
     /// included — so far. Information, not a problem: a forced play is no
     /// decision (Hal's ruling of 2026-11-01, halheinrich/backgammon#514), so
-    /// the walk yields none and reports none as an omission. A caller that
-    /// shows "N forced plays were set aside" reads it here.
+    /// the walk yields none and reports none as an omission. An illegal play
+    /// at such a position is not counted. A caller that shows "N forced
+    /// plays were set aside" reads it here.
     /// </summary>
     public int ForcedPlayCount { get; private set; }
 

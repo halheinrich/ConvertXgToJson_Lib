@@ -2,13 +2,14 @@ namespace ConvertXgToJson_Lib;
 
 /// <summary>
 /// Why the decision walk left something out of a decoded file: the kinds of
-/// <see cref="XgOmission"/>. Each is a problem in XG's data the walk
-/// recognizes, reported to the user (Hal's ruling of 2026-11-01,
-/// halheinrich/backgammon#514: "any problems are to be brought to the
-/// attention of the user"). A forced play is not among them: it is left out
-/// of the walk too, but it is ordinary data, counted
+/// <see cref="XgOmission"/>, a refused game or a corrupt candidate. Each is a
+/// problem in XG's data the walk recognizes, reported to the user (Hal's
+/// ruling of 2026-11-01, halheinrich/backgammon#514: "any problems are to be
+/// brought to the attention of the user"). A forced play is not among them:
+/// it is left out of the walk too, but it is ordinary data, counted
 /// (<see cref="XgIteratorState.ForcedPlayCount"/>) and never reported as a
-/// problem.
+/// problem. Nor is an illegal play, which the walk passes by in silence
+/// (<see cref="XgDecisionIterator.CheckerPlayKind.IllegalPlay"/>).
 /// </summary>
 public enum XgOmissionKind
 {
@@ -20,15 +21,6 @@ public enum XgOmissionKind
     /// 1-away. The whole game is omitted; the omission names no move.
     /// </summary>
     InvalidStanding,
-
-    /// <summary>
-    /// A checker play whose stored analysis carries XG's illegal-play marker:
-    /// the play made in the source was illegal, and XG forced the next
-    /// position rather than refuse the file. The decision is omitted (Hal's
-    /// ruling of 2026-11-01, halheinrich/backgammon#514), and the game goes
-    /// on from the next record, whose position XG states.
-    /// </summary>
-    IllegalPlay,
 
     /// <summary>
     /// A checker play holding a candidate invalid from its own position —
