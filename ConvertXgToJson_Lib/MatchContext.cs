@@ -13,27 +13,28 @@ namespace ConvertXgToJson_Lib;
 /// <para>
 /// <b>The session is built, never oriented here.</b> The match's terms come
 /// from <see cref="XgMatchInfo.From"/> and each game's standing from
-/// <see cref="XgGameInfo.From"/>, the two header projections the file reader
-/// shares; a decision's session is those two turned to the seat on roll by
-/// <see cref="Session.Create"/>, BgDataTypes_Lib's one orientation rule
+/// <see cref="XgGameInfo.TryFrom"/> — the header projections the file reader
+/// shares, the game's asked here without throwing (the reader's
+/// <see cref="XgGameInfo.From"/> throws); a decision's session is those two
+/// turned to the seat on roll by <see cref="Session.Create"/>, BgDataTypes_Lib's one orientation rule
 /// (<see cref="SessionFor"/>). So no score, away score, Crawford flag or
 /// Jacoby rule is restated here, and money has no stand-in: a money session
 /// states its rules, a match its length (halheinrich/backgammon#273).
 /// </para>
 /// <para>
 /// <b>A game's header is paired at the header</b> (halheinrich/backgammon#310,
-/// site 1; halheinrich/backgammon#514): <see cref="Update"/> builds the
-/// standing through its constructors and pairs it with the terms through
-/// <see cref="GameSession.Create"/>, the one statement of the rule that
-/// binds a match's away scores to its length, before any decision of the
-/// game is read. A standing those refuse — a player needing 0 points or
-/// more than the length, a Crawford flag at the wrong standing — leaves
-/// <see cref="GameInfo"/> <see langword="null"/> and the refusal's complete
-/// message in <see cref="GameRefusal"/>, so no decision of that game can borrow the
-/// game before it; the game number still advances, since the games around
-/// it carry theirs. That recognized refusal is the one thing caught here,
-/// and only at that call: a null argument is a programming failure and
-/// propagates, as does every other exception in the walk.
+/// site 1; halheinrich/backgammon#514): <see cref="Update"/> asks the
+/// standing's rules through <see cref="XgGameInfo.TryFrom"/>
+/// (<see cref="MatchStanding.TryCreate"/>) and pairs the standing with the
+/// terms through <see cref="GameSession.TryCreate"/>, the one statement of
+/// the rule that binds a match's away scores to its length, before any
+/// decision of the game is read. A standing those refuse — a player needing
+/// 0 points or more than the length, a Crawford flag at the wrong standing
+/// — leaves <see cref="GameInfo"/> <see langword="null"/> and the owner's
+/// refusal in <see cref="GameRefusal"/>, so no decision of that game can
+/// borrow the game before it; the game number still advances, since the
+/// games around it carry theirs. Both doors refuse without throwing, so
+/// nothing is caught here: every exception in the walk propagates.
 /// </para>
 /// <para>
 /// <b>None recorded is <see langword="null"/>.</b> A name or comment XG
@@ -61,19 +62,20 @@ internal sealed class MatchContext
 
     /// <summary>
     /// The current game's metadata — its standing and whether it starts from
-    /// the standard position (<see cref="XgGameInfo.From"/>);
+    /// the standard position (<see cref="XgGameInfo.TryFrom"/>);
     /// <see langword="null"/> before the first game header, and while the
     /// walk is in a game whose header was refused (<see cref="GameRefusal"/>).
     /// </summary>
     public XgGameInfo? GameInfo { get; private set; }
 
     /// <summary>
-    /// Why the current game's header was refused — the complete message of
-    /// the exception the standing's constructors or
-    /// <see cref="GameSession.Create"/> threw, the rule, the parameter and
-    /// the offending value, which may run to a second line (Hal's ruling of
-    /// 2026-11-01: keep the full message); text for a reader, not a stable
-    /// format — or <see langword="null"/> when the
+    /// Why the current game's header was refused — the refusal
+    /// <see cref="MatchStanding.TryCreate"/> or
+    /// <see cref="GameSession.TryCreate"/> gave, exactly: the rule's sentence
+    /// and the values it refuses, on one line, the same on every runtime
+    /// (Hal's ruling B of 2026-11-03, halheinrich/backgammon#514, which
+    /// reverses ruling C of 2026-11-01, "keep full message"); text for a
+    /// reader, not a stable format — or <see langword="null"/> when the
     /// current game's standing holds (and before the first game header).
     /// Exactly one of this and <see cref="GameInfo"/> is set once a game
     /// header has been read.
@@ -132,25 +134,19 @@ internal sealed class MatchContext
 
     /// <summary>
     /// The game's metadata with its standing paired to the match's terms, or
-    /// the refusal's complete message when the standing does not hold. The one
-    /// recovery in the walk, and the narrowest: the <see cref="ArgumentException"/>
-    /// the standing's constructors (<see cref="XgGameInfo.From"/>) and
-    /// <see cref="GameSession.Create"/> refuse a header's values with, at
-    /// these two calls alone. An <see cref="ArgumentNullException"/> is not
-    /// a value's refusal but a programming failure, and propagates.
+    /// the owner's refusal when the standing does not hold: the standing's
+    /// rules first (<see cref="XgGameInfo.TryFrom"/>, through
+    /// <see cref="MatchStanding.TryCreate"/>), then the pairing
+    /// (<see cref="GameSession.TryCreate"/>). Both are asked without throwing,
+    /// so nothing is caught here.
     /// </summary>
     private (XgGameInfo? Info, string? Refusal) PairHeader(GameHeaderRecord gh)
     {
-        try
-        {
-            var info = XgGameInfo.From(gh, MatchInfo.Terms);
-            GameSession.Create(MatchInfo.Terms, info.Standing);
-            return (info, null);
-        }
-        catch (ArgumentException refusal) when (refusal is not ArgumentNullException)
-        {
-            return (null, refusal.Message);
-        }
+        if (!XgGameInfo.TryFrom(gh, MatchInfo.Terms, out var info, out var refusal))
+            return (null, refusal);
+        return GameSession.TryCreate(MatchInfo.Terms, info.Standing, out _, out refusal)
+            ? (info, null)
+            : (null, refusal);
     }
 
     /// <summary>

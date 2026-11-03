@@ -30,16 +30,18 @@ namespace ConvertXgToJson_Lib;
 /// move 1.
 /// </para>
 /// <para>
-/// <b>The reason is the complete message of the rule that refused</b>
-/// (Hal's ruling of 2026-11-01, halheinrich/backgammon#514). For a refused
-/// standing it is the exception message BgDataTypes_Lib's constructors or
-/// <see cref="GameSession.Create"/> threw, whole: the rule's sentence, the
-/// parameter .NET appends and, for an out-of-range value, the offending
-/// value on a second line, so the text can hold a line break. For a corrupt
-/// candidate it names each candidate found invalid. It is text for a reader
-/// — a log line, a skip list — and not a stable format: nothing parses it,
-/// nothing shortens it, and a consumer that needs the kind reads
-/// <see cref="Kind"/>.
+/// <b>The reason is the refusing rule's own sentence, on one line</b>
+/// (Hal's ruling B of 2026-11-03, halheinrich/backgammon#514, which
+/// reverses ruling C of 2026-11-01, "keep full message"). For a refused
+/// standing it is the refusal BgDataTypes_Lib's
+/// <see cref="MatchStanding.TryCreate"/> or <see cref="GameSession.TryCreate"/>
+/// gave, exactly: the rule's sentence and the values it refuses — the
+/// player and their away score, both away scores, or the standing and the
+/// match's length — the same on every runtime, with no exception text. For
+/// a corrupt candidate it names each candidate found invalid. Neither holds
+/// a line break. It is text for a reader — a log line, a skip list — and
+/// not a stable format: nothing parses it, nothing shortens it, and a
+/// consumer that needs the kind reads <see cref="Kind"/>.
 /// </para>
 /// <para>
 /// <b>Built by the walk, read by everyone else.</b> The constructor is
@@ -96,9 +98,10 @@ public sealed record XgOmission
     public XgOmissionKind Kind { get; }
 
     /// <summary>
-    /// The reason for a reader: the complete message of the rule that
-    /// refused, which may hold a line break. Not a stable format; the kind
-    /// is <see cref="Kind"/> (see the class remarks).
+    /// The reason for a reader, on one line: for a refused standing, the
+    /// refusal the rule's owner gave, exactly, naming the values it refuses;
+    /// for a corrupt candidate, each candidate found invalid. Not a stable
+    /// format; the kind is <see cref="Kind"/> (see the class remarks).
     /// </summary>
     public string Reason { get; }
 
@@ -109,8 +112,7 @@ public sealed record XgOmission
     /// The omission for a reader — <c>"Corrupt candidate in match.xg, game 3,
     /// move 12, roll 52: …"</c> or <c>"Invalid standing in match.xg, game
     /// 1: …"</c> — for a log line, a skip list or a test failure; not a wire
-    /// form. The reason may carry a line break, so the text may run to two
-    /// lines.
+    /// form, on one line.
     /// </summary>
     public override string ToString() =>
         IsWholeGame

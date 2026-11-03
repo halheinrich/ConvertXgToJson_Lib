@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using BgDataTypes_Lib;
@@ -93,9 +95,10 @@ public sealed class XgGameInfo : IGameInfo
 
     /// <summary>
     /// Projects a parsed <see cref="GameHeaderRecord"/> to game-level metadata,
-    /// against the match's <paramref name="terms"/>. The single
-    /// header-to-<see cref="XgGameInfo"/> projection, shared by the file
-    /// reader, the decision iterator and the match context.
+    /// against the match's <paramref name="terms"/>, throwing when the
+    /// standing's rules refuse the header's values — the file reader's door.
+    /// The decision walk asks the same projection without throwing
+    /// (<see cref="TryFrom"/>).
     /// </summary>
     /// <remarks>
     /// A money game's standing is the header's two scores, whatever their
@@ -103,25 +106,65 @@ public sealed class XgGameInfo : IGameInfo
     /// decision, so a negative one is accepted and never reported (Hal's
     /// ruling of 2026-11-01, halheinrich/backgammon#514). A match game's is
     /// each player's away score — the terms' length less the header's score —
-    /// and the header's Crawford flag. The standing's own rules (an away
-    /// score at least 1; in the Crawford game exactly one player 1-away) are
-    /// the standing's to refuse, and the away scores' bound, the match's
-    /// length, is <see cref="GameSession.Create"/>'s: the decision walk pairs
-    /// each header through both and omits the game when either refuses
-    /// (<see cref="XgOmissionKind.InvalidStanding"/>).
+    /// and the header's Crawford flag, stated once, in <see cref="Project"/>.
+    /// The standing's own rules (an away score at least 1; in the Crawford
+    /// game exactly one player 1-away) are the standing's to refuse, here
+    /// through its initializer, which throws; the away scores' bound, the
+    /// match's length, is <see cref="GameSession"/>'s, and this does not ask
+    /// it (halheinrich/backgammon#308).
     /// </remarks>
-    internal static XgGameInfo From(GameHeaderRecord gh, SessionTerms terms) => new()
+    /// <exception cref="ArgumentException">The header's match standing breaks the standing's rules: the exception <see cref="MatchStanding"/>'s initializer throws.</exception>
+    internal static XgGameInfo From(GameHeaderRecord gh, SessionTerms terms) =>
+        Project(gh, terms, (away1, away2, isCrawford) => new MatchStanding { Away1 = away1, Away2 = away2, IsCrawford = isCrawford })
+            ?? throw new UnreachableException("The initializer builds the standing or throws.");
+
+    /// <summary>
+    /// <see cref="From"/>'s projection asked without throwing: the metadata
+    /// when the header's standing holds the standing's rules, or the
+    /// refusal <see cref="MatchStanding.TryCreate"/> gives for its values —
+    /// the rules asked in its order, player 1's away score, player 2's, the
+    /// Crawford standing. A money standing refuses nothing. The pairing with
+    /// the terms' length is not asked here; the decision walk asks it next
+    /// (<see cref="MatchContext"/>).
+    /// </summary>
+    /// <param name="gh">The game's header.</param>
+    /// <param name="terms">The match's terms.</param>
+    /// <param name="info">The metadata when the standing holds; otherwise <see langword="null"/>.</param>
+    /// <param name="refusal">The standing's refusal, as <see cref="MatchStanding.TryCreate"/> gave it; <see langword="null"/> when it holds.</param>
+    /// <returns><see langword="true"/> when the header's standing holds the standing's rules.</returns>
+    internal static bool TryFrom(
+        GameHeaderRecord gh,
+        SessionTerms terms,
+        [NotNullWhen(true)] out XgGameInfo? info,
+        [NotNullWhen(false)] out string? refusal)
     {
-        IsStandardStart = StartsFromStandard(gh.InitialPosition),
-        Standing = terms.Match<GameStanding>(
+        string? standingRefusal = null;
+        info = Project(gh, terms, (away1, away2, isCrawford) =>
+            MatchStanding.TryCreate(away1, away2, isCrawford, out var standing, out standingRefusal) ? standing : null);
+        refusal = info is null
+            ? standingRefusal ?? throw new UnreachableException("Only a refused match standing leaves no metadata.")
+            : null;
+        return info is not null;
+    }
+
+    /// <summary>
+    /// The one header-to-<see cref="XgGameInfo"/> projection: the start, a
+    /// money game's scores, and a match game's away scores and Crawford flag,
+    /// with the match standing built by <paramref name="matchStanding"/> from
+    /// player 1's away score, player 2's and the flag — the initializer for
+    /// <see cref="From"/>, <see cref="MatchStanding.TryCreate"/> for
+    /// <see cref="TryFrom"/>. <see langword="null"/> when that builder
+    /// refuses.
+    /// </summary>
+    private static XgGameInfo? Project(GameHeaderRecord gh, SessionTerms terms, Func<int, int, bool, MatchStanding?> matchStanding)
+    {
+        GameStanding? standing = terms.Match<GameStanding?>(
             money => new MoneyStanding { Score1 = gh.Score1, Score2 = gh.Score2 },
-            match => new MatchStanding
-            {
-                Away1 = match.Length - gh.Score1,
-                Away2 = match.Length - gh.Score2,
-                IsCrawford = gh.CrawfordApplies,
-            }),
-    };
+            match => matchStanding(match.Length - gh.Score1, match.Length - gh.Score2, gh.CrawfordApplies));
+        return standing is null
+            ? null
+            : new XgGameInfo { IsStandardStart = StartsFromStandard(gh.InitialPosition), Standing = standing };
+    }
 
     /// <summary>
     /// Whether <paramref name="initial"/> is the standard starting position —

@@ -65,7 +65,7 @@ public sealed class XgIteratorState
     /// <summary>
     /// The problems the walk has left out of the current file so far, in the
     /// order found — each omitted game and each omitted checker play, with
-    /// its kind and the refusing rule's complete message as the reason
+    /// its kind and the refusing rule's own sentence as the reason
     /// (<see cref="XgOmission"/>; an omitted play names its move and roll).
     /// Complete once the enumeration has ended; empty when the walk found
     /// nothing to omit. An illegal play is not a problem and is not here.

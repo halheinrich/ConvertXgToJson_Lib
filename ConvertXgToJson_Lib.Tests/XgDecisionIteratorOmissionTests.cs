@@ -49,34 +49,68 @@ public class XgDecisionIteratorOmissionTests
         omission.MoveNumber.Should().BeNull();
         omission.Roll.Should().BeNull();
         omission.SourceFile.Should().Be("match.xg");
-        omission.Reason.Should().Contain("at least one point", "the reason is the refusing rule's complete message");
+        omission.Reason.Should().Be(StandingRefusal(0, 7, isCrawford: false), "the reason is the owner's refusal, exactly");
     }
 
     /// <summary>
-    /// Hal's ruling of 2026-11-01 ("C: keep full message"): the reason is
-    /// the exception's whole message, the offending value included, with
-    /// the line break .NET puts before it. Nothing parses or shortens it.
+    /// Hal's ruling B of 2026-11-03 (halheinrich/backgammon#514, reversing
+    /// ruling C, "keep full message"): the reason is the rule owner's own
+    /// refusal, exactly as <see cref="MatchStanding.TryCreate"/> or
+    /// <see cref="GameSession.TryCreate"/> gives it for the same values,
+    /// naming them — no exception text, no runtime tail. The cases are the
+    /// floor (a game recorded past the length), the bound and the Crawford
+    /// standing.
     /// </summary>
-    [Fact]
-    public void ARefusedStandingsReason_HoldsTheOffendingValue_AsTheRuleStatedIt()
+    [Theory]
+    [InlineData(7, 0, false, "Player 1's away score is 0.")]
+    [InlineData(-2, -2, false, "The standing is 9-away/9-away. The match length is 7.")]
+    [InlineData(3, 3, true, "The standing is 4-away/4-away.")]
+    public void ARefusedStandingsReason_IsTheOwnersRefusal_NamingTheRefusedValues(int score1, int score2, bool isCrawford, string values)
     {
         var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
-        builder.AddGameAsRecorded(-2, -2).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
+        builder.AddGameAsRecorded(score1, score2, isCrawford).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);
         var state = new XgIteratorState();
 
         _ = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
 
         string reason = state.Omissions.Should().ContainSingle().Subject.Reason;
-        reason.Should().Contain("The match length is 7").And.Contain("9-away/9-away", "the offending standing is in the message");
-        reason.Should().Be(Refusal(() => GameSession.Create(new MatchTerms { Length = 7 }, new MatchStanding { Away1 = 9, Away2 = 9, IsCrawford = false })),
-            "the reason is the message as the rule threw it, line break included");
+        int away1 = 7 - score1, away2 = 7 - score2;
+        string expected = MatchStanding.TryCreate(away1, away2, isCrawford, out var standing, out var refusal)
+            ? PairingRefusal(7, standing)
+            : refusal;
+        reason.Should().Be(expected, "the reason is the owner's refusal for the same values, exactly");
+        reason.Should().EndWith(values, "the refusal names the values it refuses, and nothing follows them");
     }
 
-    private static string Refusal(Action act)
+    [Fact]
+    public void NoOmissionsReason_HoldsALineBreak_ForEitherKind()
     {
-        try { act(); }
-        catch (ArgumentException e) { return e.Message; }
-        throw new Xunit.Sdk.XunitException("the rule did not refuse");
+        var builder = XgFileBuilder.ForMatch(7, "Alice", "Bob");
+        builder.AddGameAsRecorded(7, 0).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);                 // the floor
+        builder.AddGameAsRecorded(-2, -2).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint);               // the bound
+        builder.AddGameAsRecorded(3, 3, isCrawford: true).Play(XgPlayer.Player1, ThreeOne, MakeFivePoint); // Crawford
+        builder.AddGame().PlayWithCorruptCandidate(XgPlayer.Player1, new DiceRoll(4, 2), Play.Create(new Move(13, 9), new Move(13, 11)), Play.Create(new Move(14, 10)));
+        var state = new XgIteratorState();
+
+        _ = XgDecisionIterator.Iterate(builder.Build(), "match.xg", state).ToList();
+
+        state.Omissions.Select(o => o.Kind).Should().Equal(
+            XgOmissionKind.InvalidStanding, XgOmissionKind.InvalidStanding, XgOmissionKind.InvalidStanding, XgOmissionKind.CorruptCandidate);
+        state.Omissions.Should().OnlyContain(o => !o.Reason.Contains('\n') && !o.Reason.Contains('\r'), "a reason is one line");
+    }
+
+    /// <summary>The refusal <see cref="MatchStanding.TryCreate"/> gives for these values; the test fails if it gives none.</summary>
+    private static string StandingRefusal(int away1, int away2, bool isCrawford)
+    {
+        MatchStanding.TryCreate(away1, away2, isCrawford, out _, out var refusal).Should().BeFalse("the standing's rules refuse these values");
+        return refusal!;
+    }
+
+    /// <summary>The refusal <see cref="GameSession.TryCreate"/> gives for a match of <paramref name="length"/> at <paramref name="standing"/>; the test fails if it gives none.</summary>
+    private static string PairingRefusal(int length, MatchStanding standing)
+    {
+        GameSession.TryCreate(new MatchTerms { Length = length }, standing, out _, out var refusal).Should().BeFalse("the pairing refuses this standing");
+        return refusal!;
     }
 
     [Fact]
@@ -411,7 +445,9 @@ public class XgDecisionIteratorOmissionTests
     /// <summary>
     /// MTCH2987.xg is a 17-point match whose first three games start past the
     /// length (-2/-2 and on): games 1 to 3 are omitted and 4 to 12 kept, by
-    /// Hal's ruling on the needs rule (halheinrich/backgammon#514).
+    /// Hal's ruling on the needs rule (halheinrich/backgammon#514). Each
+    /// reason is the pairing's refusal, naming the game's standing and the
+    /// length (Hal's ruling B, 2026-11-03).
     /// </summary>
     [Fact]
     [Trait("Category", "RequiresFixtureFiles")]
@@ -426,6 +462,14 @@ public class XgDecisionIteratorOmissionTests
 
         state.Omissions.Select(o => o.Game).Should().Equal(1, 2, 3);
         state.Omissions.Should().OnlyContain(o => o.Kind == XgOmissionKind.InvalidStanding && o.Reason.Contains("The match length is 17"));
+        state.Omissions.Select(o => o.Reason).Should().Equal(
+            PairingRefusal(17, new MatchStanding { Away1 = 19, Away2 = 19, IsCrawford = false }),
+            PairingRefusal(17, new MatchStanding { Away1 = 19, Away2 = 17, IsCrawford = false }),
+            PairingRefusal(17, new MatchStanding { Away1 = 19, Away2 = 15, IsCrawford = false }));
+        state.Omissions.Select(o => o.Reason).Should().SatisfyRespectively(
+            r => r.Should().Contain("19-away/19-away"),
+            r => r.Should().Contain("19-away/17-away"),
+            r => r.Should().Contain("19-away/15-away"));
         rows.Select(r => r.Game).Distinct().Should().BeEquivalentTo(Enumerable.Range(4, 9));
     }
 

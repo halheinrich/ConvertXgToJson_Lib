@@ -309,7 +309,8 @@ shape:
 
 The public metadata a match header and a game header state, projected at
 the parse boundary (`XgMatchInfo.From`, `XgGameInfo.From`, the one
-projection each) and handed to the state, the callbacks and the fast paths.
+projection each; the walk asks the game's through `XgGameInfo.TryFrom`,
+the same projection without throwing) and handed to the state, the callbacks and the fast paths.
 `Terms` is a `MoneyTerms` when the header's length is XG's money sentinel
 99999, Galaxy's money games included (see Pitfalls), else a `MatchTerms`; the
 sentinel is never surfaced as a length. `Standing` is the matching
@@ -519,15 +520,18 @@ see "The iterator's parameters") — and the walk goes on in every case:
 * **A game whose header states a standing its session refuses** — a match
   game in which a player needs 0 points or less, or more than the match's
   length, or a Crawford flag at a standing where not exactly one player is
-  1-away. `MatchContext.Update` pairs each header at the header, through the
-  standing's constructors (`XgGameInfo.From`) and `GameSession.Create`
-  (halheinrich/backgammon#310, site 1), and a refusal leaves `GameInfo`
-  null and the refusal's complete message in `GameRefusal` — the rule, the
-  parameter and the offending value, which may run to a second line
-  (Hal's ruling of 2026-11-01: keep the full message; it is text for a
-  reader, not a stable format, and nothing parses or shortens it). The
-  whole game is
-  omitted and reported (`XgOmissionKind.InvalidStanding`); `SkipGameAt` is
+  1-away. `MatchContext.Update` pairs each header at the header, asking
+  the standing's rules (`XgGameInfo.TryFrom`, through
+  `MatchStanding.TryCreate`: player 1's away score, player 2's, then the
+  Crawford standing) and then the pairing (`GameSession.TryCreate`)
+  without throwing (halheinrich/backgammon#310, site 1), and a refusal
+  leaves `GameInfo` null and the owner's refusal, exactly as `TryCreate`
+  gave it, in `GameRefusal`: the rule's sentence and the values it
+  refuses, on one line, the same on every runtime. That is Hal's ruling B
+  (2026-11-03, halheinrich/backgammon#514), which reverses ruling C
+  (2026-11-01, "keep full message"): the reason is no exception's text.
+  It is text for a reader, not a stable format, and nothing parses or
+  shortens it. The whole game is omitted and reported (`XgOmissionKind.InvalidStanding`); `SkipGameAt` is
   not asked; the game number still advances, so the games around it keep
   their numbers; and the walk resumes at the next header. A money game is
   outside the rule, and a negative money score is accepted and not
@@ -590,13 +594,13 @@ see "The iterator's parameters") — and the walk goes on in every case:
   its own record, and XG's next record states the next position, so the
   rest of the game goes on (Hal's ruling, per decision).
 
-Recovery is as narrow as the rule: the one thing caught is the
-`ArgumentException` the standing's constructors and `GameSession.Create`
-refuse a header's values with, at that pairing call in `MatchContext` alone
-(a null argument there is a programming failure and propagates). Nothing
-is caught to find any other kind, and nothing else is caught or skipped:
-any other refusal from BgDataTypes_Lib, a callback's exception, a file
-without a match header, all fail loud as before. For an `.xgp` every rule
+Recovery is as narrow as the rule, and nothing is caught: the pairing in
+`MatchContext` asks the standing's rules and the pairing through doors
+that refuse without throwing (`MatchStanding.TryCreate`,
+`GameSession.TryCreate`), so no exception is caught there or anywhere
+else in the walk. Any refusal from BgDataTypes_Lib outside those doors, a
+callback's exception, a file without a match header, all fail loud as
+before. For an `.xgp` every rule
 acts upstream of the single-decision policy, so a play left out for any
 reason never suppresses the file's analysed cube: an `.xgp` holding a
 forced play and an analysed cube yields the cube. The raw records stay as
@@ -877,7 +881,7 @@ defaults, and each type's doc states its members.
   is in a game it omitted), and the walk records what it leaves out as it
   goes — each `XgOmission` on `Omissions` (an omitted game, or an omitted
   checker play with its move and its roll, each with its kind and the
-  refusing rule's complete message as its reason) and the forced plays on
+  refusing rule's own sentence, on one line, as its reason) and the forced plays on
   `ForcedPlayCount`, information and not a problem. An illegal play is on
   neither. It carries no caller-mutable surface and takes no part
   in iteration control. **It resets, and does not refuse reuse**: every
