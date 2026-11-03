@@ -26,6 +26,19 @@
          (BgDataTypes_Lib INSTRUCTIONS.md, "The test-support project"). -->
     <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib.TestSupport\BgDataTypes_Lib.TestSupport.csproj" />
     <ProjectReference Include="..\ConvertXgToJson_Lib\ConvertXgToJson_Lib.csproj" />
+    <!-- This repository's own test support: XgFileEditsTests pins its edits
+         through the walk, and TestSupportPostureTests its posture. -->
+    <ProjectReference Include="..\ConvertXgToJson_Lib.TestSupport\ConvertXgToJson_Lib.TestSupport.csproj" />
+  </ItemGroup>
+  <!-- The two project files the posture pins read, linked (not copied into
+       source control) and staged beside the test assembly, so the pins read
+       the files the projects are actually built from. Moving or renaming
+       either breaks this build rather than a test at runtime. -->
+  <ItemGroup>
+    <None Include="..\ConvertXgToJson_Lib\ConvertXgToJson_Lib.csproj"
+          Link="Posture\ConvertXgToJson_Lib.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\ConvertXgToJson_Lib.TestSupport\ConvertXgToJson_Lib.TestSupport.csproj"
+          Link="Posture\ConvertXgToJson_Lib.TestSupport.csproj" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <None Include="TestData\**\*.*">

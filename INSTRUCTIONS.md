@@ -38,6 +38,7 @@ this table says where to start.
 | write an `XgFile` back to XG binary | `XgFileWriter` |
 | export one decision as an `.xgp` | `XgpExporter`, by what you hold (see "Writing") |
 | make a file in memory, for a test or a tool | `XgFileBuilder` / `XgGameBuilder` |
+| make a malformed file in a test (a refused game, a corrupt candidate) | `XgFileEdits`, in `ConvertXgToJson_Lib.TestSupport`; it is not in the library because the shipped library gets no door to malformed data (see Layout) |
 
 The usual walk over one file, exporting each decision of a match on the way:
 
@@ -119,7 +120,7 @@ https://github.com/halheinrich/ConvertXgToJson_Lib — branch `main`.
 
 ## Layout
 
-Three projects under `ConvertXgToJson_Lib.slnx`, governed by repo-root
+Four projects under `ConvertXgToJson_Lib.slnx`, governed by repo-root
 `Directory.Build.props` (TFM, `TreatWarningsAsErrors`, XML doc generation)
 and `Directory.Packages.props` (Central Package Management — no inline
 `Version=` anywhere). `docs/xg-format/` holds XG's own format sources; its
@@ -188,6 +189,18 @@ them). `XgCorpusAgreementTests` measures the converter against XG's own
 numbers over the local corpus, and `TooGoodPassFixtureTests` holds permanent
 fixtures reaching the fourth cube answer, read as Too good (see "Measured
 against XG" under XgDecisionIterator).
+
+**`ConvertXgToJson_Lib.TestSupport/`** — shipped for test projects to
+reference, this repository's and every consumer's: `XgFileEdits`, the one
+owner of the two malformed-file edits, a refused game and a corrupt candidate
+(halheinrich/backgammon#514, Hal's ruling of 2026-11-02). Each edits a copy of
+a built file's JSON document through public API and reads it back. It is not
+in the library because the builder's doors to such data
+(`AddGameAsRecorded`, `PlayWithCorruptCandidate`) are internal so that the
+shipped library has none; the library grants this assembly no internals, and
+this repository's tests keep those doors for themselves.
+`TestSupportPostureTests` pins the posture, on BgDataTypes_Lib.TestSupport's
+pattern.
 
 **`ConvertXgToJson_Lib.Benchmarks/`** — a console tool, run by hand and
 never by `dotnet test` (halheinrich/backgammon#438): the fast paths

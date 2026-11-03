@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Framework, nullable, implicit usings, warnings-as-errors, and doc-file
+       generation are repo-wide policy; see ..\Directory.Build.props. Only
+       per-project decisions live here.
+
+       What this is: what consumers' tests share, shipped for TEST projects to
+       reference, this repository's and every consumer's. XgFileEdits makes the
+       malformed files no builder door reaches from outside the library (a
+       refused game, a corrupt candidate), so no test project keeps its own
+       copy of the edit (halheinrich/backgammon#514, Hal's ruling of
+       2026-11-02). It is not a product assembly and not a test project: it
+       carries no test SDK, so `dotnet test` does not try to run it.
+       BgDataTypes_Lib.TestSupport is the pattern it follows. -->
+  <PropertyGroup>
+    <LangVersion>14.0</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Never part of a product. Every project that can reach a browser publish
+       declares the browser platform, and in such a project the
+       platform-compatibility analyzer reports any use of this assembly's API
+       as CA1416, an error under the house TreatWarningsAsErrors. A test
+       project declares no browser platform and is unaffected. Deliberately no
+       IsTrimmable: trimmability is a promise about a shipped surface, and this
+       assembly ships none. Pinned by TestSupportPostureTests. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.Versioning.UnsupportedOSPlatformAttribute">
+      <_Parameter1>browser</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <!-- The library and nothing else: no package, so no test framework reaches a
+       consumer's test project. The edits use the library's public surface
+       only. The library grants this assembly no internals, so the shipped
+       library gets no door to malformed data. -->
+  <ItemGroup>
+    <ProjectReference Include="..\ConvertXgToJson_Lib\ConvertXgToJson_Lib.csproj" />
+  </ItemGroup>
+
+</Project>
