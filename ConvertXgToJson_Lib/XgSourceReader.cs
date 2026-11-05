@@ -1,4 +1,5 @@
 using ConvertXgToJson_Lib.Models;
+using ConvertXgToJson_Lib.Parsing;
 
 namespace ConvertXgToJson_Lib;
 
@@ -250,6 +251,18 @@ public static class XgSourceReader
 
         try
         {
+            if (format == XgSourceFormat.Xg)
+            {
+                // halheinrich/backgammon#523 (experimental, not for main): the
+                // magic number is checked here, before the decoder runs.
+                uint magic;
+                using (var reader = new System.IO.BinaryReader(stream, System.Text.Encoding.Latin1, leaveOpen: true))
+                    magic = reader.ReadUInt32();
+                if (RichGameHeaderParser.RefusalOf(magic) is { } refusal)
+                    throw refusal;
+                stream.Position = 0;
+            }
+
             return new XgSourceDecoded(sourceName, decode(stream, sourceName), bytes: null);
         }
         catch (Exception exception) when (FailsTheSource(exception))

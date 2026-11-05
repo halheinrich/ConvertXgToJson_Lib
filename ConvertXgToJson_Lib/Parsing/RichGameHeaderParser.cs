@@ -27,16 +27,29 @@ internal static class RichGameHeaderParser
 {
     private const uint MagicNumber = 0x484D4752; // "RGMH"
 
+    /// <summary>
+    /// The refusal for a magic number already read from the file's first four
+    /// bytes: the <see cref="InvalidDataException"/> <see cref="Read"/> throws
+    /// for it, returned unthrown, or null when the magic number is XG's. No
+    /// stream I/O. Exists for halheinrich/backgammon#523 (experimental, not
+    /// for main): it lets <see cref="XgSourceReader.ReadStream"/> refuse an
+    /// unreadable file without the throw having to travel through the decoder.
+    /// </summary>
+    internal static InvalidDataException? RefusalOf(uint magic) =>
+        magic == MagicNumber
+            ? null
+            : new InvalidDataException(
+                $"Not a valid XG file: expected magic 0x{MagicNumber:X8} but got 0x{magic:X8}.");
+
     public static (RichGameHeader Header, long ContentOffset) Read(Stream stream)
     {
         using var br = new System.IO.BinaryReader(stream, System.Text.Encoding.Latin1, leaveOpen: true);
 
         uint magic = br.ReadUInt32();
-        if (magic != MagicNumber)
-            throw new InvalidDataException(
-                $"Not a valid XG file: expected magic 0x{MagicNumber:X8} but got 0x{magic:X8}.");
+        if (RefusalOf(magic) is { } refusal)
+            throw refusal;
 
-        uint version      = br.ReadUInt32();
+        uint version     = br.ReadUInt32();
         uint headerSize   = br.ReadUInt32();
         long thumbOffset  = br.ReadInt64();   // packed – no padding
         uint thumbSize    = br.ReadUInt32();
