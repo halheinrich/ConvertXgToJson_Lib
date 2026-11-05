@@ -259,7 +259,7 @@ public static class XgSourceReader
                 using (var reader = new System.IO.BinaryReader(stream, System.Text.Encoding.Latin1, leaveOpen: true))
                     magic = reader.ReadUInt32();
                 if (RichGameHeaderParser.RefusalOf(magic) is { } refusal)
-                    throw refusal;
+                    return new XgSourceFailed(sourceName, refusal);
                 stream.Position = 0;
             }
 
