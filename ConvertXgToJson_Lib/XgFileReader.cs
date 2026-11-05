@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using ConvertXgToJson_Lib.Json;
@@ -118,7 +119,7 @@ public static class XgFileReader
     /// </summary>
     /// <param name="path">Full path to the .XG file.</param>
     /// <exception cref="InvalidDataException">
-    /// As <see cref="ReadStream"/>: the file's payload is unreadable.
+    /// As <see cref="ReadStream"/>: the file is not XG's, or its payload is unreadable.
     /// </exception>
     public static XgFile ReadFile(string path)
     {
@@ -129,8 +130,9 @@ public static class XgFileReader
     /// <summary>
     /// Reads a .XG file from an open <see cref="Stream"/>.
     /// The stream must be positioned at the very beginning of the file.
-    /// The binary decoder: <see cref="ReadFile"/> and
-    /// <see cref="XgSourceReader"/> decode through it. The stream is
+    /// The binary decoder, throwing: <see cref="ReadFile"/> decodes through
+    /// it, and <see cref="XgSourceReader"/> through the same decode in its
+    /// refusal-returning form, <see cref="TryReadStream"/>. The stream is
     /// borrowed — sought to the payload, read, and left open.
     /// </summary>
     /// <remarks>
@@ -145,14 +147,44 @@ public static class XgFileReader
     /// directory is absent or fails a check is not read.
     /// </remarks>
     /// <exception cref="InvalidDataException">
-    /// The payload is not one zlib stream and its container directory cannot
-    /// be used, or an inner file contradicts its manifest entry; the message
-    /// names the check that failed.
+    /// The file's first four bytes are not XG's magic number; or the payload
+    /// is not one zlib stream and its container directory cannot be used, or
+    /// an inner file contradicts its manifest entry. The message names the
+    /// check that failed.
     /// </exception>
-    public static XgFile ReadStream(Stream stream)
+    /// <exception cref="EndOfStreamException">The stream ends inside the outer header.</exception>
+    public static XgFile ReadStream(Stream stream) =>
+        TryReadStream(stream, out var file, out var refusal) ? file : throw refusal;
+
+    /// <summary>
+    /// <see cref="ReadStream"/>'s decode, refusing a source whose magic number
+    /// is not XG's without throwing: the binary decoder
+    /// <see cref="XgSourceReader"/> uses, so that refusal reaches its caller
+    /// as a failed source that was never thrown (halheinrich/backgammon#523).
+    /// Only that refusal is a value; every other failure throws exactly as
+    /// <see cref="ReadStream"/> documents.
+    /// </summary>
+    /// <param name="stream">As <see cref="ReadStream"/>: borrowed, at the file's first byte.</param>
+    /// <param name="file">The decoded file; <see langword="null"/> when refused.</param>
+    /// <param name="refusal">
+    /// The <see cref="InvalidDataException"/> <see cref="ReadStream"/> throws
+    /// for a magic number that is not XG's, unthrown; <see langword="null"/>
+    /// when the file decoded.
+    /// </param>
+    /// <returns><see langword="true"/> when the file decoded.</returns>
+    /// <exception cref="InvalidDataException">The payload is refused, as by <see cref="ReadStream"/>.</exception>
+    /// <exception cref="EndOfStreamException">The stream ends inside the outer header.</exception>
+    internal static bool TryReadStream(
+        Stream stream,
+        [NotNullWhen(true)] out XgFile? file,
+        [NotNullWhen(false)] out InvalidDataException? refusal)
     {
         // Step 1: Strip the RichGameFormat outer header
-        var (header, contentOffset) = RichGameHeaderParser.Read(stream);
+        if (!RichGameHeaderParser.TryRead(stream, out var header, out long contentOffset, out refusal))
+        {
+            file = null;
+            return false;
+        }
 
         // Seek to the start of the compressed payload
         stream.Position = contentOffset;
@@ -164,13 +196,14 @@ public static class XgFileReader
         var rollouts = RolloutContextParser.ReadAll(decompressed.RolloutContexts);
         var comments = CommentParser.ReadAll(decompressed.Comments);
 
-        return new XgFile
+        file = new XgFile
         {
             Header   = header,
             Records  = records,
             Rollouts = rollouts,
             Comments = comments,
         };
+        return true;
     }
 
     /// <summary>

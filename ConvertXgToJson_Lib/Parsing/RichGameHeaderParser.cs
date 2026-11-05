@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Parsing;
@@ -22,19 +23,61 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// sub-types), so we read it sequentially.  The Int64 at offset 12 is technically
 /// misaligned in raw memory, but because it is a *packed* record in Pascal the
 /// compiler does NOT pad it.  We therefore skip alignment for this header.
+///
+/// A source whose first four bytes are not XG's magic number is refused as a
+/// value by <see cref="TryRead"/>, never thrown there; <see cref="Read"/>
+/// throws that same refusal (halheinrich/backgammon#523).
 /// </summary>
 internal static class RichGameHeaderParser
 {
     private const uint MagicNumber = 0x484D4752; // "RGMH"
 
-    public static (RichGameHeader Header, long ContentOffset) Read(Stream stream)
+    /// <summary>
+    /// Reads the header, throwing the refusal <see cref="TryRead"/> returns
+    /// for a magic number that is not XG's.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The first four bytes are not XG's magic number.</exception>
+    /// <exception cref="EndOfStreamException">The stream ends inside the header.</exception>
+    public static (RichGameHeader Header, long ContentOffset) Read(Stream stream) =>
+        TryRead(stream, out var header, out long contentOffset, out var refusal)
+            ? (header, contentOffset)
+            : throw refusal;
+
+    /// <summary>
+    /// Reads the header, or refuses a source whose magic number is not XG's
+    /// without throwing: such a file does not open in XG, so it holds no
+    /// decisions to keep (Hal's ruling of 2026-11-05,
+    /// halheinrich/backgammon#523). Only that refusal is a value; a stream
+    /// that ends inside the header, an I/O failure, and every other decoding
+    /// error throw as <see cref="Read"/> does.
+    /// </summary>
+    /// <param name="stream">The source, read from its current position: the file's first byte.</param>
+    /// <param name="header">The header when the magic number is XG's; otherwise <see langword="null"/>.</param>
+    /// <param name="contentOffset">Where the payload starts, from the file's first byte; 0 when refused.</param>
+    /// <param name="refusal">
+    /// When the magic number is not XG's, the <see cref="InvalidDataException"/>
+    /// naming the magic number expected and the one read, never thrown;
+    /// otherwise <see langword="null"/>.
+    /// </param>
+    /// <returns><see langword="true"/> when the magic number is XG's and the header was read.</returns>
+    /// <exception cref="EndOfStreamException">The stream ends inside the header, the magic number included.</exception>
+    public static bool TryRead(
+        Stream stream,
+        [NotNullWhen(true)] out RichGameHeader? header,
+        out long contentOffset,
+        [NotNullWhen(false)] out InvalidDataException? refusal)
     {
         using var br = new System.IO.BinaryReader(stream, System.Text.Encoding.Latin1, leaveOpen: true);
 
         uint magic = br.ReadUInt32();
         if (magic != MagicNumber)
-            throw new InvalidDataException(
+        {
+            header = null;
+            contentOffset = 0;
+            refusal = new InvalidDataException(
                 $"Not a valid XG file: expected magic 0x{MagicNumber:X8} but got 0x{magic:X8}.");
+            return false;
+        }
 
         uint version      = br.ReadUInt32();
         uint headerSize   = br.ReadUInt32();
@@ -48,9 +91,10 @@ internal static class RichGameHeaderParser
         string comments   = ReadWideCharArray(br, 1024);
 
         // Content starts right after the header + thumbnail blob
-        long contentOffset = (thumbSize > 0) ? headerSize + thumbSize : stream.Position;
+        contentOffset = (thumbSize > 0) ? headerSize + thumbSize : stream.Position;
 
-        return (new RichGameHeader
+        refusal = null;
+        header = new RichGameHeader
         {
             MagicNumber     = magic,
             HeaderVersion   = version,
@@ -62,7 +106,8 @@ internal static class RichGameHeaderParser
             SaveName        = saveName,
             LevelName       = levelName,
             Comments        = comments,
-        }, contentOffset);
+        };
+        return true;
     }
 
     // TGUID is always 16 bytes, packed (no alignment issues inside the packed header)

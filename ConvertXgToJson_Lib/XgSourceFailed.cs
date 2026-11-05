@@ -15,6 +15,12 @@ namespace ConvertXgToJson_Lib;
 /// parse, or whatever else the acquisition or the decoder raised), and its
 /// message names what failed. A caller can show it, log it or branch on it
 /// without parsing text.
+/// <para>
+/// One failure is not raised: an XG source whose magic number is not XG's
+/// fails with the <see cref="InvalidDataException"/> the decoder returns
+/// for it, never thrown, so its <see cref="Exception.StackTrace"/> is null
+/// (halheinrich/backgammon#523).
+/// </para>
 /// </remarks>
 public sealed class XgSourceFailed : XgSourceRead
 {

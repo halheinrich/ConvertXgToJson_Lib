@@ -233,7 +233,9 @@ rename (halheinrich/backgammon#19), not before.
 
 Discovery and the decode primitives. A primitive throws for a source it cannot
 read; the read that returns the failure instead is `XgSourceReader` (below),
-which decodes through them.
+which decodes through them — XG's binary file through `ReadStream`'s
+internal refusal-returning form, `TryReadStream`, so a file without XG's
+magic number fails there without a throw (halheinrich/backgammon#523).
 
 * **Discovery.** `XgFormatExtensions` is the one extension set, and a caller's
   walk lists through `EnumerateXgFormatFiles`, never a `*.xg*` glob. The two
@@ -244,7 +246,11 @@ which decodes through them.
 * **`ReadFile` / `ReadStream`** — the full parse. Format is detected from
   content, so a walk reads `.xg` and `.xgp` alike. A payload it cannot read is
   refused as `InvalidDataException` naming the failed check (see "Reading —
-  refuse, never guess" under Writing).
+  refuse, never guess" under Writing), and so is a file whose first four
+  bytes are not XG's magic number. `ReadStream` is `TryReadStream` plus a
+  throw of that one refusal, which `RichGameHeaderParser.TryRead` returns
+  unthrown; every other failure, a stream too short to hold the magic number
+  included, throws from inside the one decode.
 * **`ReadMatchInfo` / `ReadGameHeaders`** — the fast paths: temp.xg alone,
   selected through the same validated directory the full read uses. A result
   certifies temp.xg and nothing else: `ReadFile` can still refuse the file
@@ -300,6 +306,20 @@ shape:
   that boundary and are thrown, by the asynchronous entry points from the
   call itself, before a task exists (the two-method shape the iterator uses
   for `sourceFile`).
+* **A bad magic number is refused as a value, never thrown**
+  (halheinrich/backgammon#523, Hal's ruling of 2026-11-05). On BgQuiz's AOT
+  publish, that throw, for a file read before a long readable one, killed
+  the runtime (`[MONO] * Assertion: should not be reached` in sgen's object
+  scan); the same refusal returned unthrown did not. The ruling is scoped
+  to bad magic: a file without XG's magic number does not open in XG, so it
+  holds no decisions to keep. The refusal is the same `InvalidDataException`,
+  message unchanged, with no stack trace. Every other failure, a source of
+  0–3 bytes (`EndOfStreamException`) included, still throws inside the
+  failure policy. This avoids the runtime defect; it does not explain it.
+  Each format's decoder therefore has the library's Try shape
+  (`XgSourceReader.Decoder`: the file, or a refusal returned), one per
+  format: XG's over `XgFileReader.TryReadStream`, JSON's over `DecodeJson`,
+  which refuses nothing as a value.
 * **Retained bytes are opt-in** (`retainBytes: true`, on the entry points
   that acquire): a caller that copies an unchanged `.xgp` verbatim keeps
   them and never acquires the source again; a caller that does not ask
@@ -1016,6 +1036,13 @@ and `XgDecisionIteratorCubeActionTests` pins it corpus-wide.
   exception from a source's read, cancellation included. And keep the
   policy in `FailsTheSource`: a second filter in one entry point is a
   second policy.
+* **The bad-magic refusal must not be thrown on the way to the outcome.**
+  Decoding XG through `XgFileReader.ReadStream` again, or throwing the
+  refusal and catching it anywhere inside the read, gives the same failed
+  source with the same message, and brings back the AOT runtime crash
+  (halheinrich/backgammon#523). Only the refusal's null `StackTrace` tells
+  the two apart, and `ABadMagicNumber_IsAFailedSource_WhoseRefusalWasNeverThrown`
+  pins it on every entry point.
 * **An acquisition's own cancellation ends the whole operation.** A
   `ReadAsync` acquisition that times out by throwing
   `OperationCanceledException` stops the caller's walk, by the ruling that

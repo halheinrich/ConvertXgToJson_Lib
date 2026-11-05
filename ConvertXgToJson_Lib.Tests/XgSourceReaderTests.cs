@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using BgDataTypes_Lib;
 using ConvertXgToJson_Lib.Models;
@@ -79,6 +80,17 @@ public sealed class XgSourceReaderTests : IDisposable
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(20), uint.MaxValue); // thumbnail size
         return bytes;
     }
+
+    /// <summary>A valid XG file whose first four bytes are not XG's magic number.</summary>
+    private static byte[] BadMagic()
+    {
+        byte[] bytes = XgBytes.ToArray();
+        bytes[0] = 0xDE; bytes[1] = 0xAD; bytes[2] = 0xBE; bytes[3] = 0xEF;
+        return bytes;
+    }
+
+    /// <summary>The refusal's message for <see cref="BadMagic"/>, exactly as it was when the refusal was thrown.</summary>
+    private const string BadMagicMessage = "Not a valid XG file: expected magic 0x484D4752 but got 0xEFBEADDE.";
 
     private string WriteTemp(string name, byte[] bytes)
     {
@@ -176,6 +188,87 @@ public sealed class XgSourceReaderTests : IDisposable
         var failed = read.Should().BeOfType<XgSourceFailed>().Subject;
         failed.SourceName.Should().Be(name);
         failed.Exception.Should().BeAssignableTo(format == XgSourceFormat.Json ? typeof(JsonException) : typeof(EndOfStreamException));
+    }
+
+    // ------------------------------------------------------------------ //
+    //  A magic number that is not XG's: refused, never thrown (#523)
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// A source whose magic number is not XG's fails with the refusal the
+    /// decoder returned, the message unchanged, and never thrown — so it has
+    /// no stack trace. On BgQuiz's AOT publish, that throw, before a long
+    /// readable file, killed the runtime (halheinrich/backgammon#523).
+    /// </summary>
+    [Theory]
+    [InlineData(Entry.ReadFile)]
+    [InlineData(Entry.ReadFileRetaining)]
+    [InlineData(Entry.ReadFileAsync)]
+    [InlineData(Entry.ReadStream)]
+    [InlineData(Entry.ReadAsync)]
+    public async Task ABadMagicNumber_IsAFailedSource_WhoseRefusalWasNeverThrown(Entry entry)
+    {
+        var (read, name) = await ReadThrough(entry, BadMagic(), XgSourceFormat.Xg);
+
+        var failed = read.Should().BeOfType<XgSourceFailed>().Subject;
+        failed.SourceName.Should().Be(name);
+        var refusal = failed.Exception.Should().BeOfType<InvalidDataException>().Subject;
+        refusal.Message.Should().Be(BadMagicMessage);
+        refusal.StackTrace.Should().BeNull("the refusal is returned, never thrown");
+    }
+
+    public static TheoryData<Entry, int> EveryEntryAndShortLength()
+    {
+        var data = new TheoryData<Entry, int>();
+        foreach (var entry in Enum.GetValues<Entry>())
+            for (int length = 0; length < 4; length++)
+                data.Add(entry, length);
+        return data;
+    }
+
+    /// <summary>
+    /// Only the bad magic number is a value: a source too short to hold one
+    /// still throws while it is decoded, and the failure policy fails it.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EveryEntryAndShortLength))]
+    public async Task FewerThanFourBytes_IsAFailedSource_ThrownAsBefore(Entry entry, int length)
+    {
+        var (read, _) = await ReadThrough(entry, XgBytes[..length], XgSourceFormat.Xg);
+
+        read.Should().BeOfType<XgSourceFailed>()
+            .Which.Exception.Should().BeOfType<EndOfStreamException>()
+            .Which.StackTrace.Should().NotBeNull("a short read still throws, inside the failure policy");
+    }
+
+    [Fact]
+    public void ReadStream_LeavesTheBorrowedStreamOpen_ForABadMagicNumber()
+    {
+        var probe = new ProbeStream(BadMagic(), seekable: true);
+
+        XgSourceReader.ReadStream("a.xg", probe, XgSourceFormat.Xg).Should().BeOfType<XgSourceFailed>();
+        probe.Disposed.Should().BeFalse("the caller owns the stream");
+        probe.CanRead.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// <see cref="XgFileReader"/>'s public decode primitives keep throwing the
+    /// refusal; only the source read returns it.
+    /// </summary>
+    [Fact]
+    public void TheDecodePrimitives_StillThrowForABadMagicNumber()
+    {
+        string path = WriteTemp("bad.xg", BadMagic());
+
+        FluentActions.Invoking(() => XgFileReader.ReadStream(new MemoryStream(BadMagic())))
+            .Should().Throw<InvalidDataException>().WithMessage(BadMagicMessage);
+        FluentActions.Invoking(() => XgFileReader.ReadFile(path))
+            .Should().Throw<InvalidDataException>().WithMessage(BadMagicMessage);
+        FluentActions.Invoking(() => XgFileReader.ReadMatchInfo(path))
+            .Should().Throw<InvalidDataException>().WithMessage(BadMagicMessage);
+        FluentActions.Invoking(() => XgFileReader.ReadGameHeaders(path, new XgIteratorState()).ToList())
+            .Should().Throw<InvalidDataException>().WithMessage(BadMagicMessage);
+        AssertClosed(path);
     }
 
     [Theory]
@@ -654,6 +747,15 @@ public sealed class XgSourceReaderTests : IDisposable
         probe.Disposed.Should().BeFalse("a borrowed stream is never disposed by the read");
     }
 
+    /// <summary>A decoder that decodes through <paramref name="decode"/> or throws what it throws, refusing nothing as a value.</summary>
+    private static XgSourceReader.Decoder Throwing(Func<Stream, XgFile> decode) =>
+        (Stream input, string _, [NotNullWhen(true)] out XgFile? file, [NotNullWhen(false)] out Exception? refusal) =>
+        {
+            file = decode(input);
+            refusal = null;
+            return true;
+        };
+
     /// <summary>
     /// The token is observed after the awaited acquisition: when it was
     /// cancelled meanwhile, the acquired bytes never reach the decoder.
@@ -671,11 +773,11 @@ public sealed class XgSourceReaderTests : IDisposable
                 cts.Cancel();
                 return Task.FromResult(XgBytes);
             },
-            input =>
+            Throwing(input =>
             {
                 decodes++;
                 return XgFileReader.ReadStream(input);
-            },
+            }),
             retainBytes: false,
             cts.Token);
 
@@ -698,10 +800,36 @@ public sealed class XgSourceReaderTests : IDisposable
         var reading = XgSourceReader.ReadAcquiredAsync(
             "upload.xg",
             _ => Task.FromResult(XgBytes),
-            input =>
+            Throwing(input =>
             {
                 cts.Cancel();
                 return decodeSucceeds ? XgFileReader.ReadStream(input) : throw new InvalidDataException("refused");
+            }),
+            retainBytes: false,
+            cts.Token);
+
+        await FluentActions.Awaiting(() => reading).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    /// <summary>
+    /// The same holds for a refusal the decoder returns rather than throws
+    /// (halheinrich/backgammon#523): cancelled while it decoded, the read is
+    /// not a failed source.
+    /// </summary>
+    [Fact]
+    public async Task TheToken_IsObservedBeforeReturningARefusalTheDecoderReturned()
+    {
+        using var cts = new CancellationTokenSource();
+
+        var reading = XgSourceReader.ReadAcquiredAsync(
+            "upload.xg",
+            _ => Task.FromResult(BadMagic()),
+            (Stream input, string _, [NotNullWhen(true)] out XgFile? file, [NotNullWhen(false)] out Exception? refusal) =>
+            {
+                cts.Cancel();
+                bool decoded = XgFileReader.TryReadStream(input, out file, out var badMagic);
+                refusal = badMagic;
+                return decoded;
             },
             retainBytes: false,
             cts.Token);
@@ -715,7 +843,7 @@ public sealed class XgSourceReaderTests : IDisposable
         var reading = XgSourceReader.ReadAcquiredAsync(
             "upload.xg",
             _ => Task.FromResult(XgBytes),
-            _ => throw new OperationCanceledException(),
+            Throwing(_ => throw new OperationCanceledException()),
             retainBytes: false,
             CancellationToken.None);
 

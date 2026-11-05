@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib;
@@ -26,11 +27,11 @@ namespace ConvertXgToJson_Lib;
 /// that is no member at all (Hal's ruling of 2026-10-11), so an unset format
 /// never chooses a decoder; that refuses a format nobody stated, and cannot
 /// show that a stated one fits the bytes. XG's binary file decodes through
-/// <see cref="XgFileReader.ReadStream"/>, this library's JSON document
-/// through the decoder behind <see cref="XgFileReader.ReadJson"/>. There is
-/// no second decoder:
-/// <see cref="XgFileReader"/>'s entry points are the decode primitives this
-/// read calls, and they keep throwing.
+/// the decode behind <see cref="XgFileReader.ReadStream"/>, in its
+/// refusal-returning form, this library's JSON document through the decoder
+/// behind <see cref="XgFileReader.ReadJson"/>. There is no second decoder:
+/// <see cref="XgFileReader"/>'s public entry points are the same decodes,
+/// and they keep throwing, a bad magic number included.
 /// </para>
 /// <para>
 /// <b>One failure policy.</b> Every exception raised while acquiring the
@@ -42,6 +43,18 @@ namespace ConvertXgToJson_Lib;
 /// <see cref="ArgumentOutOfRangeException"/>), and that is the source's
 /// failure, not the caller's misuse: an exception's type alone never
 /// classifies it.
+/// </para>
+/// <para>
+/// <b>A bad magic number is refused without a throw.</b> An XG source whose
+/// first four bytes are not XG's magic number fails with the
+/// <see cref="InvalidDataException"/> the decoder throws for it elsewhere,
+/// message unchanged, returned rather than thrown, so it carries no stack
+/// trace. On BgQuiz's AOT publish, that throw, for a file read before a long
+/// readable one, killed the runtime; the refusal returned unthrown did not
+/// (halheinrich/backgammon#523). Such a file does not open in XG, so it holds
+/// no decisions to keep (Hal's ruling of 2026-11-05). Every other failure, a
+/// source too short to hold the magic number included, is thrown while
+/// decoding and fails the source under the policy above.
 /// </para>
 /// <para>
 /// <b>Usage errors are thrown, never an outcome.</b> Each entry point
@@ -137,7 +150,8 @@ public static class XgSourceReader
     /// </param>
     /// <returns>
     /// <see cref="XgSourceDecoded"/>, or <see cref="XgSourceFailed"/> with the
-    /// exception that opening, reading or decoding the file raised.
+    /// exception that opening, reading or decoding the file raised, or with
+    /// the refusal of a bad XG magic number, returned unthrown.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or white space.</exception>
@@ -155,11 +169,11 @@ public static class XgSourceReader
             {
                 byte[] bytes = File.ReadAllBytes(path);
                 using var buffered = new MemoryStream(bytes, writable: false);
-                return new XgSourceDecoded(path, decode(buffered, path), bytes);
+                return Decode(path, buffered, decode, bytes);
             }
 
             using var stream = File.OpenRead(path);
-            return new XgSourceDecoded(path, decode(stream, path), bytes: null);
+            return Decode(path, stream, decode, bytes: null);
         }
         catch (Exception exception) when (FailsTheSource(exception))
         {
@@ -180,7 +194,8 @@ public static class XgSourceReader
     /// <returns>
     /// A task for <see cref="XgSourceDecoded"/>, or for
     /// <see cref="XgSourceFailed"/> with the exception that reading or
-    /// decoding the file raised; a cancelled task when the read is cancelled.
+    /// decoding the file raised, or with the refusal of a bad XG magic number,
+    /// returned unthrown; a cancelled task when the read is cancelled.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null; thrown by the call itself.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty or white space; thrown by the call itself.</exception>
@@ -195,7 +210,7 @@ public static class XgSourceReader
         return ReadAcquiredAsync(
             path,
             token => File.ReadAllBytesAsync(path, token),
-            input => decode(input, path),
+            decode,
             retainBytes,
             cancellationToken);
     }
@@ -220,7 +235,8 @@ public static class XgSourceReader
     /// <returns>
     /// <see cref="XgSourceDecoded"/> (whose <see cref="XgSourceDecoded.Bytes"/>
     /// is null: the caller holds the source), or <see cref="XgSourceFailed"/>
-    /// with the exception that reading or decoding the stream raised.
+    /// with the exception that reading or decoding the stream raised, or with
+    /// the refusal of a bad XG magic number, returned unthrown.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="sourceName"/> or <paramref name="stream"/> is null.</exception>
     /// <exception cref="ArgumentException">
@@ -250,7 +266,7 @@ public static class XgSourceReader
 
         try
         {
-            return new XgSourceDecoded(sourceName, decode(stream, sourceName), bytes: null);
+            return Decode(sourceName, stream, decode, bytes: null);
         }
         catch (Exception exception) when (FailsTheSource(exception))
         {
@@ -286,8 +302,9 @@ public static class XgSourceReader
     /// <returns>
     /// A task for <see cref="XgSourceDecoded"/>, or for
     /// <see cref="XgSourceFailed"/> with the exception that acquiring,
-    /// copying or decoding the source raised; a cancelled task when the read
-    /// is cancelled.
+    /// copying or decoding the source raised, or with the refusal of a bad XG
+    /// magic number, returned unthrown; a cancelled task when the read is
+    /// cancelled.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="sourceName"/> or <paramref name="acquire"/> is null; thrown by the call itself.</exception>
     /// <exception cref="ArgumentException"><paramref name="sourceName"/> is empty or white space; thrown by the call itself.</exception>
@@ -304,7 +321,7 @@ public static class XgSourceReader
         return ReadAcquiredAsync(
             sourceName,
             token => BufferAsync(acquire, token),
-            input => decode(input, sourceName),
+            decode,
             retainBytes,
             cancellationToken);
     }
@@ -325,7 +342,7 @@ public static class XgSourceReader
     internal static async Task<XgSourceRead> ReadAcquiredAsync(
         string sourceName,
         Func<CancellationToken, Task<byte[]>> acquire,
-        Func<Stream, XgFile> decode,
+        Decoder decode,
         bool retainBytes,
         CancellationToken cancellationToken)
     {
@@ -414,7 +431,7 @@ public static class XgSourceReader
 
     /// <summary>Decodes acquired bytes under the failure policy, keeping them when asked.</summary>
     private static XgSourceRead DecodeAcquired(
-        string sourceName, byte[] bytes, Func<Stream, XgFile> decode, bool retainBytes)
+        string sourceName, byte[] bytes, Decoder decode, bool retainBytes)
     {
         try
         {
@@ -422,8 +439,8 @@ public static class XgSourceReader
             // The null is typed: an untyped null converts through
             // ReadOnlyMemory's implicit conversion from an array, to empty
             // memory, which would read as zero retained bytes.
-            return new XgSourceDecoded(
-                sourceName, decode(input),
+            return Decode(
+                sourceName, input, decode,
                 retainBytes ? new ReadOnlyMemory<byte>(bytes) : default(ReadOnlyMemory<byte>?));
         }
         catch (Exception exception) when (FailsTheSource(exception))
@@ -444,22 +461,79 @@ public static class XgSourceReader
     private static bool FailsTheSource(Exception exception) => exception is not OperationCanceledException;
 
     /// <summary>
-    /// The decoder <paramref name="format"/> states — one of
-    /// <see cref="XgFileReader"/>'s, the library's only ones, given the input
-    /// and the source's name — or null when it states none:
-    /// <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member
-    /// at all. The one statement of which formats the read decodes, and how.
+    /// A format's decoder, in the library's Try shape: given the input and
+    /// the source's name, the decoded file, or the source's refusal returned
+    /// unthrown. What a decoder throws is still the source's failure, under
+    /// the failure policy.
     /// </summary>
-    private static Func<Stream, string, XgFile>? DecoderFor(XgSourceFormat format) => format switch
+    /// <param name="input">The source's bytes, borrowed.</param>
+    /// <param name="sourceName">The source's name, for a refusal that names it.</param>
+    /// <param name="file">The decoded file; <see langword="null"/> when refused.</param>
+    /// <param name="refusal">The refusal, never thrown; <see langword="null"/> when decoded.</param>
+    /// <returns><see langword="true"/> when the source decoded.</returns>
+    internal delegate bool Decoder(
+        Stream input,
+        string sourceName,
+        [NotNullWhen(true)] out XgFile? file,
+        [NotNullWhen(false)] out Exception? refusal);
+
+    /// <summary>
+    /// Runs <paramref name="decode"/> over <paramref name="input"/> and states
+    /// its result as the outcome: decoded, keeping <paramref name="bytes"/>,
+    /// or failed by the refusal the decoder returned. What the decoder
+    /// throws is left to the caller's failure policy.
+    /// </summary>
+    private static XgSourceRead Decode(
+        string sourceName, Stream input, Decoder decode, ReadOnlyMemory<byte>? bytes) =>
+        decode(input, sourceName, out var file, out var refusal)
+            ? new XgSourceDecoded(sourceName, file, bytes)
+            : new XgSourceFailed(sourceName, refusal);
+
+    /// <summary>
+    /// XG's binary decoder, <see cref="XgFileReader.TryReadStream"/>: a source
+    /// whose magic number is not XG's is refused as a value, never thrown
+    /// (halheinrich/backgammon#523; the class doc says why). Every other
+    /// failure throws.
+    /// </summary>
+    private static bool DecodeXg(
+        Stream input, string sourceName,
+        [NotNullWhen(true)] out XgFile? file, [NotNullWhen(false)] out Exception? refusal)
     {
-        XgSourceFormat.Xg => static (input, _) => XgFileReader.ReadStream(input),
-        XgSourceFormat.Json => static (input, sourceName) => XgFileReader.DecodeJson(input, sourceName),
+        bool decoded = XgFileReader.TryReadStream(input, out file, out var badMagic);
+        refusal = badMagic;
+        return decoded;
+    }
+
+    /// <summary>
+    /// The JSON decoder, <see cref="XgFileReader.DecodeJson"/>: it refuses
+    /// nothing as a value; every failure throws.
+    /// </summary>
+    private static bool DecodeJson(
+        Stream input, string sourceName,
+        [NotNullWhen(true)] out XgFile? file, [NotNullWhen(false)] out Exception? refusal)
+    {
+        file = XgFileReader.DecodeJson(input, sourceName);
+        refusal = null;
+        return true;
+    }
+
+    /// <summary>
+    /// The decoder <paramref name="format"/> states — one per format, each
+    /// over <see cref="XgFileReader"/>'s, the library's only decoders — or
+    /// null when it states none: <see cref="XgSourceFormat.Unspecified"/>, the
+    /// unset value, or no member at all. The one statement of which formats
+    /// the read decodes, and how.
+    /// </summary>
+    private static Decoder? DecoderFor(XgSourceFormat format) => format switch
+    {
+        XgSourceFormat.Xg => DecodeXg,
+        XgSourceFormat.Json => DecodeJson,
         _ => null,
     };
 
     /// <summary>The decoder <paramref name="format"/> states, validated as the entry point's argument.</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is <see cref="XgSourceFormat.Unspecified"/>, the unset value, or no member of <see cref="XgSourceFormat"/>.</exception>
-    private static Func<Stream, string, XgFile> RequireDecoder(XgSourceFormat format) =>
+    private static Decoder RequireDecoder(XgSourceFormat format) =>
         DecoderFor(format) ?? throw new ArgumentOutOfRangeException(nameof(format), format,
             format == XgSourceFormat.Unspecified
                 ? "The format is unset: state XgSourceFormat.Xg or XgSourceFormat.Json."
