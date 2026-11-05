@@ -15,14 +15,13 @@ namespace ConvertXgToJson_Lib.Writing;
 /// </summary>
 internal static class RichGameHeaderWriter
 {
-    private const uint MagicNumber = 0x484D4752; // "RGMH"
     internal const uint HeaderSize = 8232;
 
     public static void Write(Stream stream, RichGameHeader header)
     {
         using var w = new PascalBinaryWriter(stream);
 
-        w.WriteDword(MagicNumber);
+        w.WriteDword(RichGameHeader.XgMagicNumber);
         w.WriteDword(header.HeaderVersion != 0 ? header.HeaderVersion : 1);
         w.WriteDword(HeaderSize);
         // ThumbnailOffset (Int64) sits at offset 12 — misaligned, but the

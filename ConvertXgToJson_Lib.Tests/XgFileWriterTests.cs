@@ -43,7 +43,7 @@ public class XgFileWriterTests
     {
         Header = new RichGameHeader
         {
-            MagicNumber = 0x484D4752,
+            MagicNumber = RichGameHeader.XgMagicNumber,
             HeaderVersion = file.Header.HeaderVersion != 0 ? file.Header.HeaderVersion : 1,
             HeaderSize = 8232,
             ThumbnailOffset = 0,

@@ -1,4 +1,5 @@
 using System.Text;
+using ConvertXgToJson_Lib.Models;
 
 namespace ConvertXgToJson_Lib.Tests.Helpers;
 
@@ -166,7 +167,6 @@ internal sealed class BinaryBuilder
 /// </summary>
 internal static class XgBytesBuilder
 {
-    private const uint RmMagicNumber = 0x484D4752u;   // "RGMH"
     private const uint HeaderSize = 8232u;
 
     /// <summary>
@@ -225,7 +225,7 @@ internal static class XgBytesBuilder
     public static byte[] BuildRichGameHeader()
     {
         var header = new BinaryBuilder()
-            .UInt32(RmMagicNumber)
+            .UInt32(RichGameHeader.XgMagicNumber)
             .UInt32(1)
             .UInt32(HeaderSize)
             .Int64Packed(0)   // ThumbnailOffset (packed, no align)

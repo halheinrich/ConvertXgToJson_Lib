@@ -132,7 +132,14 @@ internal enum CurrencyId
 /// </summary>
 internal sealed class RichGameHeader
 {
-    /// <summary>File signature; must be 0x484D4752 ("RGMH" little-endian).</summary>
+    /// <summary>
+    /// XG's file signature (<c>RM_MAGICNUMBER</c>), the one statement of it:
+    /// the parser checks a file's first four bytes against it and names it in
+    /// the refusal, and the writer writes it.
+    /// </summary>
+    internal const uint XgMagicNumber = 0x484D4752; // "RGMH"
+
+    /// <summary>File signature; must be <see cref="XgMagicNumber"/> ("RGMH" little-endian).</summary>
     public uint     MagicNumber      { get; init; }
     /// <summary>Header format version; real XG and <see cref="XgpExporter"/> write 1.</summary>
     public uint     HeaderVersion    { get; init; }

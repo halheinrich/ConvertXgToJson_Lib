@@ -75,7 +75,7 @@ public sealed class XgSourceReaderTests : IDisposable
     private static byte[] HugeOffsetHeader()
     {
         var bytes = new byte[8232];
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes, 0x484D4752);              // "RGMH"
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes, RichGameHeader.XgMagicNumber);
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8), uint.MaxValue);  // header size
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(20), uint.MaxValue); // thumbnail size
         return bytes;

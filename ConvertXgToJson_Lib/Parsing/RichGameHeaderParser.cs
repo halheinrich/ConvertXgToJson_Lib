@@ -30,8 +30,6 @@ namespace ConvertXgToJson_Lib.Parsing;
 /// </summary>
 internal static class RichGameHeaderParser
 {
-    private const uint MagicNumber = 0x484D4752; // "RGMH"
-
     /// <summary>
     /// Reads the header, throwing the refusal <see cref="TryRead"/> returns
     /// for a magic number that is not XG's.
@@ -70,12 +68,12 @@ internal static class RichGameHeaderParser
         using var br = new System.IO.BinaryReader(stream, System.Text.Encoding.Latin1, leaveOpen: true);
 
         uint magic = br.ReadUInt32();
-        if (magic != MagicNumber)
+        if (magic != RichGameHeader.XgMagicNumber)
         {
             header = null;
             contentOffset = 0;
             refusal = new InvalidDataException(
-                $"Not a valid XG file: expected magic 0x{MagicNumber:X8} but got 0x{magic:X8}.");
+                $"Not a valid XG file: expected magic 0x{RichGameHeader.XgMagicNumber:X8} but got 0x{magic:X8}.");
             return false;
         }
 
